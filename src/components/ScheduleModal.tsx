@@ -1,7 +1,6 @@
 import { useState, useRef, type ChangeEvent } from 'react';
 import { X, Upload, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import type { ScheduleEntry, Category, ScheduleStatus, AIMetrics } from '../types';
-import { USERS } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 
 const CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
@@ -33,7 +32,7 @@ interface Props {
 }
 
 export default function ScheduleModal({ entry, defaultDate, defaultClientId, onSave, onClose }: Props) {
-  const { clients } = useApp();
+  const { clients, members } = useApp();
   const activeClients = clients.filter(c => c.status !== 'inactive');
   const defaultClient = activeClients.find(c => c.id === defaultClientId) ?? activeClients[0];
 
@@ -44,8 +43,8 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
       category: 'SNS',
       clientId: defaultClient?.id ?? '',
       clientName: defaultClient?.name ?? '',
-      managerId: USERS.find(u => u.role !== 'client')?.id ?? '',
-      managerName: USERS.find(u => u.role !== 'client')?.name ?? '',
+      managerId: members[0]?.id ?? '',
+      managerName: members[0]?.name ?? '',
     }
   );
   const [metrics, setMetrics] = useState<AIMetrics>(entry?.metrics ?? {});
@@ -67,7 +66,7 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
   };
 
   const handleManager = (id: string) => {
-    const u = USERS.find(u => u.id === id);
+    const u = members.find(u => u.id === id);
     if (u) setForm(prev => ({ ...prev, managerId: u.id, managerName: u.name }));
   };
 
@@ -113,7 +112,7 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
     });
   };
 
-  const managers = USERS.filter(u => u.role !== 'client');
+  const managers = members;
   const isOpinion = IS_OPINION(form.category as Category);
   const metricFields = METRIC_FIELDS[form.category ?? 'SNS'] ?? [];
 

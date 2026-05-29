@@ -25,7 +25,7 @@ const ROLE_STYLE: Record<UserRole, string> = {
 };
 
 export default function ApprovalsPage() {
-  const { clients } = useApp();
+  const { clients, reloadMembers } = useApp();
   const { user } = useAuth();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +55,11 @@ export default function ApprovalsPage() {
     };
     const { error } = await supabase.from('profiles').update(patch).eq('id', id);
     if (error) setError(`수정 실패: ${error.message}`);
-    else setProfiles(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
+    else {
+      setProfiles(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
+      // 담당자 드롭다운(스케줄 등록)에 즉시 반영
+      await reloadMembers();
+    }
     setBusyId(null);
   };
 

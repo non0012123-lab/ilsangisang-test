@@ -31,6 +31,13 @@ export interface User {
   password: string;
 }
 
+// 스케줄 담당자 드롭다운에 쓰는 팀원 (승인된 manager/admin)
+export interface TeamMember {
+  id: string;
+  name: string;
+  department?: string;
+}
+
 // Supabase 인증 + profiles 테이블에서 만들어지는 로그인 사용자
 export interface AuthUser {
   id: string;          // auth.users.id (uuid)
