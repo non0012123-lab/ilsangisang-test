@@ -2,7 +2,8 @@
 // Cloudflare Pages Function:  POST /api/ai-plan
 //  • "AI 기획 어시스턴트" 화면이 호출한다.
 //  • OpenAI Responses API (/v1/responses) 로 광고 기획 리포트를 생성한다.
-//    - 추론(reasoning) + 웹 검색(web_search) 사용 → 업체명을 직접 검색해 반영.
+//    - 추론(reasoning) 사용. 웹 검색은 속도 때문에 기본 비활성화
+//      (필요 시 아래 tools 줄 주석 해제).
 //    - 출력은 자유형 텍스트(마크다운) 리포트.
 //
 // 환경변수 (Cloudflare Pages → Settings → Environment variables):
@@ -109,7 +110,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
         ],
         text: { format: { type: 'text' }, verbosity: 'medium' },
         reasoning: { effort: 'medium', summary: 'auto' },
-        tools: [{ type: 'web_search' }], // 업체명 검색용
+        // 웹 검색 비활성화(속도 우선). 필요 시 아래 줄 주석 해제:
+        // tools: [{ type: 'web_search' }],
         store: true,
       }),
     });
