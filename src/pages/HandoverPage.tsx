@@ -5,9 +5,10 @@ import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import CategoryBadge from '../components/CategoryBadge';
+import { openAiPlanPrint } from '../utils/aiPlanPdf';
 import type { HandoverDoc, KeyContact, ImportantLink } from '../types';
 
-type DocTab = 'overview' | 'history' | 'contacts' | 'guidelines' | 'memo' | 'prompt';
+type DocTab = 'overview' | 'history' | 'contacts' | 'guidelines' | 'memo' | 'prompt' | 'ai';
 
 const TAB_CONFIG = [
   { key: 'overview',   icon: <BookOpen size={14} />,     label: '개요' },
@@ -15,6 +16,7 @@ const TAB_CONFIG = [
   { key: 'contacts',   icon: <Users size={14} />,        label: '연락처' },
   { key: 'guidelines', icon: <AlertTriangle size={14} />, label: '가이드라인' },
   { key: 'memo',       icon: <MessageSquare size={14} />, label: '인수인계 메모' },
+  { key: 'ai',         icon: <Sparkles size={14} />,     label: 'AI 기획' },
   { key: 'prompt',     icon: <Sparkles size={14} />,     label: 'AI 프롬프트' },
 ] as const;
 
@@ -91,7 +93,7 @@ function CollapsibleSection({
 }
 
 export default function HandoverPage() {
-  const { entries, clients, handoverDocs, saveHandover } = useApp();
+  const { entries, clients, handoverDocs, saveHandover, aiHistory } = useApp();
   const { user } = useAuth();
   const [selectedId, setSelectedId] = useState<string | null>(handoverDocs[0]?.id ?? null);
   const [tab, setTab] = useState<DocTab>('overview');
@@ -478,6 +480,40 @@ export default function HandoverPage() {
                       )}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* AI 기획 결과 (해당 업체로 자동 연계) */}
+              {tab === 'ai' && doc && (
+                <div className="max-w-2xl space-y-3">
+                  <div className="bg-purple-50 border border-purple-100 rounded-2xl p-4">
+                    <p className="text-xs font-bold text-purple-700 mb-1">🔗 연계된 AI 기획 결과</p>
+                    <p className="text-xs text-purple-600 leading-relaxed">
+                      이 업체로 생성된 AI 기획 리포트가 자동으로 모입니다. 인수인계 시 함께 참고하세요.
+                    </p>
+                  </div>
+                  {(() => {
+                    const linked = aiHistory.filter(p => p.clientId === doc.clientId);
+                    return linked.length === 0 ? (
+                      <p className="text-gray-400 text-sm text-center py-8 bg-white border border-gray-100 rounded-2xl">
+                        연계된 AI 기획 결과가 없습니다. (AI 기획 메뉴에서 이 업체로 생성하면 자동 표시됩니다)
+                      </p>
+                    ) : linked.map(p => (
+                      <div key={p.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center text-white shrink-0">
+                          <FileText size={16} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-900 text-sm truncate">{p.campaignType} · {p.period.start} ~ {p.period.end}</p>
+                          <p className="text-xs text-gray-400">{new Date(p.createdAt).toLocaleString('ko-KR')}{p.authorName ? ` · ${p.authorName}` : ''}</p>
+                        </div>
+                        <button onClick={() => openAiPlanPrint(p)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white transition-colors whitespace-nowrap">
+                          <FileText size={12} /> PDF 보기
+                        </button>
+                      </div>
+                    ));
+                  })()}
                 </div>
               )}
 

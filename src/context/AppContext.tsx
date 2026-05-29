@@ -11,7 +11,8 @@ interface AppContextType {
   members: TeamMember[];
   reloadMembers: () => Promise<void>;
   aiHistory: AiPlanResult[];
-  setAiHistory: React.Dispatch<React.SetStateAction<AiPlanResult[]>>;
+  saveAiPlan: (plan: AiPlanResult) => void;
+  removeAiPlan: (id: string) => void;
   // 업무 데이터 영구 저장(레코드 단위) — 로컬 상태 갱신 + Supabase 반영
   saveEntry: (entry: ScheduleEntry) => void;
   saveEntries: (entries: ScheduleEntry[]) => void;
@@ -97,6 +98,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     persistOne('handover_docs', doc);
   }, []);
 
+  // ── AI 기획 결과 (이미지는 용량 때문에 DB 저장 제외; 로컬 세션에만 유지) ──
+  const saveAiPlan = useCallback((plan: AiPlanResult) => {
+    setAiHistory(prev => prev.some(p => p.id === plan.id) ? prev.map(p => p.id === plan.id ? plan : p) : [plan, ...prev]);
+    const persisted: AiPlanResult = { ...plan, images: [] }; // 이미지는 DB에 저장 안 함(용량)
+    persistOne('ai_plans', persisted);
+  }, []);
+  const removeAiPlan = useCallback((id: string) => {
+    setAiHistory(prev => prev.filter(p => p.id !== id));
+    persistDelete('ai_plans', id);
+  }, []);
+
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
     if (!supabase) return;
@@ -134,6 +146,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       let c = await load<Client>('clients');
       let e = await load<ScheduleEntry>('schedule_entries');
       let h = await load<HandoverDoc>('handover_docs');
+      const plans = await load<AiPlanResult>('ai_plans');
       if (!active) return;
       if (c && c.length === 0) { await seed('clients', CLIENTS); c = CLIENTS; }
       if (e && e.length === 0) { await seed('schedule_entries', SCHEDULE_ENTRIES); e = SCHEDULE_ENTRIES; }
@@ -142,13 +155,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (c) setClients(c);
       if (e) setEntries(e);
       if (h) setHandoverDocs(h);
+      if (plans) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
     })();
     return () => { active = false; };
   }, [uid]);
 
   return (
     <AppContext.Provider value={{
-      entries, clients, handoverDocs, members, reloadMembers, aiHistory, setAiHistory,
+      entries, clients, handoverDocs, members, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, saveHandover,
     }}>
       {children}

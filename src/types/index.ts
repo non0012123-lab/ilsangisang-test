@@ -43,12 +43,14 @@ export interface AiPlanImage { channel: string; url: string }
 export interface AiPlanResult {
   id: string;
   createdAt: number;
+  clientId: string;    // 인수인계 연계용
   clientName: string;
   campaignType: string;
   period: { start: string; end: string };
   guideline: string;   // 이미지 재생성 시 재사용
   report: string;
-  images: AiPlanImage[];
+  authorName?: string; // 작성자
+  images: AiPlanImage[]; // 세션 한정(공유 저장 안 됨)
 }
 
 export type AccountStatus = 'active' | 'suspended';

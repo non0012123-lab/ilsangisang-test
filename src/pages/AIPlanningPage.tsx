@@ -1,65 +1,23 @@
-import { useState, useRef, type ReactNode } from 'react';
-import { Upload, Sparkles, FileSpreadsheet, X, CheckCircle2, AlertTriangle, Copy, Check, ImageIcon, Download, History, Clock } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Upload, Sparkles, FileSpreadsheet, X, CheckCircle2, AlertTriangle, Copy, Check, ImageIcon, Download, History, Clock, FileText } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
+import ReportDocument from '../components/ReportDocument';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { openAiPlanPrint } from '../utils/aiPlanPdf';
 import type { AiPlanResult } from '../types';
 
 type Step = 1 | 2;
 
 const CAMPAIGN_TYPES = ['브랜드 인지도', '신제품 출시', '시즌 프로모션', '이벤트/캠페인', '커뮤니티 활성화', '위기 관리', '기타'];
 
-// ── 아주 가벼운 마크다운 렌더러 (제목/목록/굵게) ──
-function renderInline(text: string): ReactNode[] {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
-    /^\*\*[^*]+\*\*$/.test(p)
-      ? <strong key={i} className="font-semibold text-gray-900">{p.slice(2, -2)}</strong>
-      : <span key={i}>{p}</span>
-  );
-}
-
-function ReportMarkdown({ text }: { text: string }) {
-  const blocks: ReactNode[] = [];
-  let bullets: string[] = [];
-  const flush = () => {
-    if (bullets.length) {
-      blocks.push(
-        <ul key={`u${blocks.length}`} className="list-disc pl-5 space-y-1 my-2">
-          {bullets.map((li, i) => <li key={i} className="text-sm text-gray-700 leading-relaxed">{renderInline(li)}</li>)}
-        </ul>
-      );
-      bullets = [];
-    }
-  };
-
-  text.split('\n').forEach(raw => {
-    const line = raw.trimEnd();
-    if (/^#{1,6}\s/.test(line)) {
-      flush();
-      const level = line.match(/^#+/)![0].length;
-      const content = line.replace(/^#{1,6}\s/, '');
-      const cls = level <= 1 ? 'text-lg font-bold mt-5 mb-2 text-gray-900'
-        : level === 2 ? 'text-base font-bold mt-4 mb-1.5 text-gray-900'
-        : 'text-sm font-semibold mt-3 mb-1 text-gray-800';
-      blocks.push(<p key={`h${blocks.length}`} className={cls}>{renderInline(content)}</p>);
-    } else if (/^\s*[-*]\s+/.test(line)) {
-      bullets.push(line.replace(/^\s*[-*]\s+/, ''));
-    } else if (line.trim() === '') {
-      flush();
-      blocks.push(<div key={`s${blocks.length}`} className="h-2" />);
-    } else {
-      flush();
-      blocks.push(<p key={`p${blocks.length}`} className="text-sm text-gray-700 leading-relaxed my-1">{renderInline(line)}</p>);
-    }
-  });
-  flush();
-  return <div>{blocks}</div>;
-}
-
 const fmtTime = (ts: number) => new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+const nowMs = () => Date.now();
 
 export default function AIPlanningPage() {
-  const { clients, aiHistory, setAiHistory } = useApp();
+  const { clients, aiHistory, saveAiPlan } = useApp();
+  const { user } = useAuth();
   const [step, setStep] = useState<Step>(1);
   const [file, setFile] = useState<File | null>(null);
   const [clientId, setClientId] = useState('');
@@ -114,17 +72,20 @@ export default function AIPlanningPage() {
       if (!res.ok || data.error) throw new Error(data.detail ? `${data.error} — ${data.detail}` : (data.error ?? `요청 실패 (${res.status})`));
       if (!data.report) throw new Error('리포트가 비어 있습니다.');
 
+      const ts = nowMs();
       const result: AiPlanResult = {
-        id: Date.now().toString(),
-        createdAt: Date.now(),
+        id: ts.toString(),
+        createdAt: ts,
+        clientId: selectedClient?.id ?? '',
         clientName: selectedClient?.name ?? '클라이언트',
         campaignType,
         period: { ...period },
         guideline,
         report: data.report as string,
+        authorName: user?.name,
         images: [],
       };
-      setAiHistory(prev => [result, ...prev].slice(0, 30));   // 최근 30건 보관
+      saveAiPlan(result);
       setViewingId(result.id);
       setStep(2);
     } catch (e) {
@@ -160,7 +121,7 @@ export default function AIPlanningPage() {
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
       const imgs = Array.isArray(data.images) ? data.images : [];
-      setAiHistory(prev => prev.map(h => h.id === viewing.id ? { ...h, images: imgs } : h));
+      saveAiPlan({ ...viewing, images: imgs });
     } catch (e) {
       setImgError(e instanceof Error ? e.message : '이미지 생성 중 오류가 발생했습니다.');
     } finally {
@@ -363,20 +324,18 @@ export default function AIPlanningPage() {
                   className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white text-sm font-semibold rounded-xl transition-colors">
                   새 기획
                 </button>
+                <button onClick={() => openAiPlanPrint(viewing)}
+                  className="px-4 py-2 bg-white text-purple-700 text-sm font-semibold rounded-xl hover:bg-purple-50 transition-colors flex items-center gap-2">
+                  <FileText size={14} /> PDF로 저장
+                </button>
                 <button onClick={copyReport}
                   className="px-4 py-2 bg-white text-purple-700 text-sm font-semibold rounded-xl hover:bg-purple-50 transition-colors flex items-center gap-2">
-                  {copied ? <><Check size={14} /> 복사됨</> : <><Copy size={14} /> 리포트 복사</>}
+                  {copied ? <><Check size={14} /> 복사됨</> : <><Copy size={14} /> 복사</>}
                 </button>
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-gray-900">AI 기획 리포트</h3>
-                <span className="text-xs bg-purple-50 text-purple-600 font-semibold px-2.5 py-1 rounded-full">AI 생성</span>
-              </div>
-              <ReportMarkdown text={viewing.report} />
-            </div>
+            <ReportDocument text={viewing.report} />
 
             {/* 이미지 시안 */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
