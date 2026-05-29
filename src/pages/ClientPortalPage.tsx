@@ -5,6 +5,7 @@ import { REPORTS } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import CategoryBadge from '../components/CategoryBadge';
 import { downloadReportPdf } from '../utils/reportPdf';
+import { enumerateDays, isMultiDay, overlapsRange } from '../utils/dateRange';
 import type { ScheduleEntry } from '../types';
 
 type Tab = 'dashboard' | 'timetable' | 'reports';
@@ -33,12 +34,16 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
   const month = curDate.getMonth();
   const calDays = getCalDays(year, month);
   const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
-  const monthEntries = entries.filter(e => e.date.startsWith(prefix));
+  const mStart = `${prefix}-01`;
+  const mEnd = `${prefix}-${String(new Date(year, month + 1, 0).getDate()).padStart(2, '0')}`;
+  const monthEntries = entries.filter(e => overlapsRange(e, mStart, mEnd));
 
   const byDay: Record<number, ScheduleEntry[]> = {};
   monthEntries.forEach(e => {
-    const d = parseInt(e.date.split('-')[2]);
-    (byDay[d] ??= []).push(e);
+    enumerateDays(e, prefix).forEach(ds => {
+      const d = parseInt(ds.split('-')[2]);
+      (byDay[d] ??= []).push(e);
+    });
   });
 
   const today = new Date('2026-05-29');
@@ -85,10 +90,11 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
                       }`}>{day}</span>
                       <div className="space-y-0.5">
                         {de.slice(0, 2).map(e => (
-                          <div key={e.id} className="text-xs px-1 py-0.5 rounded truncate text-white font-medium"
+                          <div key={e.id} className={`text-xs px-1 py-0.5 rounded truncate text-white font-medium flex items-center gap-0.5 ${isMultiDay(e) ? 'border-l-2 border-white/60' : ''}`}
                             style={{ backgroundColor: CAT_COLOR[e.category] ?? '#6b7280' }}
-                            title={e.opinionTitle ?? e.keyword ?? ''}>
-                            {e.opinionTitle ?? e.keyword ?? e.category}
+                            title={`${e.opinionTitle ?? e.keyword ?? e.category}${isMultiDay(e) ? ` (${e.date}~${e.endDate})` : ''}`}>
+                            {isMultiDay(e) && <CalendarRange size={8} className="shrink-0" />}
+                            <span className="truncate">{e.opinionTitle ?? e.keyword ?? e.category}</span>
                           </div>
                         ))}
                         {de.length > 2 && <div className="text-xs text-gray-400 px-1">+{de.length - 2}</div>}
@@ -113,6 +119,13 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
                   <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full text-white" style={{ backgroundColor: CAT_COLOR[e.category] ?? '#6b7280' }}>{e.category}</span>
                   <p className="text-xs font-semibold text-gray-900 mt-1.5 truncate">{e.opinionTitle ?? e.keyword ?? '-'}</p>
                   <p className="text-xs text-gray-400">{e.managerName}</p>
+                  {isMultiDay(e) && <p className="text-xs text-blue-600 flex items-center gap-1 mt-0.5"><CalendarRange size={10} />{e.date}~{e.endDate}</p>}
+                  {e.link && (
+                    <a href={e.link} target="_blank" rel="noopener noreferrer"
+                      className="text-xs text-blue-500 hover:underline mt-1 flex items-center gap-1">
+                      <ExternalLink size={10} className="shrink-0" /><span className="truncate">바로가기</span>
+                    </a>
+                  )}
                 </div>
               ))
             )}
@@ -273,12 +286,14 @@ export default function ClientPortalPage() {
                             <span className="truncate block text-xs" title={entry.keyword}>{entry.keyword}</span>
                           </td>
                           <td className="px-4 py-3 max-w-[160px]">
-                            <div className="flex items-center gap-1">
-                              <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
-                                className="table-link link-cell text-xs" title={entry.link ?? ''}>{entry.link ?? '-'}</a>
-                              <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
-                                className="shrink-0 p-0.5 text-gray-300 hover:text-blue-500"><ExternalLink size={11} /></a>
-                            </div>
+                            {entry.link ? (
+                              <div className="flex items-center gap-1">
+                                <a href={entry.link} target="_blank" rel="noopener noreferrer"
+                                  className="table-link link-cell text-xs" title={entry.link}>{entry.link}</a>
+                                <a href={entry.link} target="_blank" rel="noopener noreferrer"
+                                  className="shrink-0 p-0.5 text-gray-300 hover:text-blue-500"><ExternalLink size={11} /></a>
+                              </div>
+                            ) : <span className="text-gray-300 text-xs">-</span>}
                           </td>
                           <td className="px-4 py-3 text-center">
                             {entry.rank ? <span className="text-blue-700 font-bold text-xs">{entry.rank}위</span> : <span className="text-gray-300 text-xs">-</span>}
@@ -329,12 +344,16 @@ export default function ClientPortalPage() {
                           <p className="text-xs text-gray-600 italic">"{entry.opinionComments}"</p>
                         </div>
                       )}
-                      {(entry.metrics?.views || entry.metrics?.comments) && (
-                        <div className="flex gap-3 mt-2">
-                          {entry.metrics.views && <span className="text-xs text-gray-500">👁 {entry.metrics.views.toLocaleString()} 조회</span>}
-                          {entry.metrics.comments && <span className="text-xs text-gray-500">💬 {entry.metrics.comments.toLocaleString()} 댓글</span>}
-                        </div>
-                      )}
+                      <div className="flex items-center gap-3 mt-2 flex-wrap">
+                        {entry.metrics?.views && <span className="text-xs text-gray-500">👁 {entry.metrics.views.toLocaleString()} 조회</span>}
+                        {entry.metrics?.comments && <span className="text-xs text-gray-500">💬 {entry.metrics.comments.toLocaleString()} 댓글</span>}
+                        {entry.link && (
+                          <a href={entry.link} target="_blank" rel="noopener noreferrer"
+                            className="text-xs text-blue-600 hover:underline flex items-center gap-1 font-medium">
+                            <ExternalLink size={11} /> 링크 바로가기
+                          </a>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { useParams, NavLink } from 'react-router-dom';
-import { Plus, Pencil, Trash2, ExternalLink, Copy, Hash, PlayCircle, Globe, Video, Paintbrush, MessageSquare } from 'lucide-react';
+import { Plus, Pencil, Trash2, Hash, PlayCircle, Globe, Video, Paintbrush, MessageSquare, CalendarRange } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
+import InlineLink from '../components/InlineLink';
 import ScheduleModal from '../components/ScheduleModal';
 import type { ScheduleEntry, Category } from '../types';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
+import { isMultiDay } from '../utils/dateRange';
 
 const CATEGORY_CONFIG: Record<string, { label: Category; color: string; icon: React.ReactNode; gradient: string }> = {
   sns:            { label: 'SNS',           color: 'text-pink-600',   icon: <Hash size={20} />,          gradient: 'from-pink-500 to-rose-500' },
@@ -32,7 +34,7 @@ export default function CategoryPage() {
   const { category = 'sns' } = useParams<{ category: string }>();
   const config = CATEGORY_CONFIG[category] ?? CATEGORY_CONFIG.sns;
   const { entries, setEntries } = useApp();
-  const { copy, show: showToast } = useCopyToast();
+  const { notify, show: showToast } = useCopyToast();
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const filtered = entries
@@ -104,8 +106,9 @@ export default function CategoryPage() {
                       <span className="text-xs text-gray-400 font-mono mt-0.5">{String(i + 1).padStart(2, '0')}</span>
                       <div>
                         <h3 className="font-bold text-gray-900 text-sm mb-0.5">{entry.opinionTitle}</h3>
-                        <div className="flex items-center gap-2 text-xs text-gray-400">
-                          <span>{entry.date}</span>
+                        <div className="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
+                          <span>{isMultiDay(entry) ? `${entry.date} ~ ${entry.endDate}` : entry.date}</span>
+                          {isMultiDay(entry) && <CalendarRange size={11} className="text-blue-500" />}
                           <span>·</span>
                           <span>{entry.managerName}</span>
                           <span>·</span>
@@ -135,6 +138,12 @@ export default function CategoryPage() {
                       <p className="text-sm text-gray-600 italic">"{entry.opinionComments}"</p>
                     </div>
                   )}
+
+                  {/* 링크 */}
+                  <div className="mb-3">
+                    <span className="text-xs font-semibold text-gray-500 block mb-1">링크</span>
+                    <InlineLink link={entry.link} onChange={v => updateEntry(entry.id, { link: v })} onCopied={notify} />
+                  </div>
 
                   <div className="flex items-center gap-4">
                     {entry.metrics?.views && <span className="text-xs text-gray-500">👁 {entry.metrics.views.toLocaleString()} 조회</span>}
@@ -174,23 +183,20 @@ export default function CategoryPage() {
                     {filtered.map((entry, i) => (
                       <tr key={entry.id} className="hover:bg-gray-50/50 transition-colors">
                         <td className="px-4 py-3 text-gray-400 font-mono text-xs">{String(i + 1).padStart(2, '0')}</td>
-                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap font-medium">{entry.date}</td>
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap font-medium">
+                          {isMultiDay(entry) ? (
+                            <span className="inline-flex items-center gap-1 text-blue-600" title={`${entry.date} ~ ${entry.endDate}`}>
+                              <CalendarRange size={12} /> {entry.date}<span className="text-gray-300">~</span>{entry.endDate?.slice(5)}
+                            </span>
+                          ) : entry.date}
+                        </td>
                         <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{entry.managerName}</td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{entry.clientName}</td>
                         <td className="px-4 py-3 text-gray-800 max-w-[160px]">
                           <span className="truncate block" title={entry.keyword}>{entry.keyword}</span>
                         </td>
                         <td className="px-4 py-3 max-w-[220px]">
-                          <div className="flex items-center gap-1">
-                            <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
-                              className="table-link link-cell" title={entry.link ?? ''}>{entry.link}</a>
-                            <div className="flex gap-0.5 shrink-0">
-                              <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
-                                className="p-1 text-gray-300 hover:text-blue-500 transition-colors"><ExternalLink size={12} /></a>
-                              <button onClick={() => copy(entry.link ?? '')}
-                                className="p-1 text-gray-300 hover:text-gray-700 transition-colors" title="링크 복사"><Copy size={12} /></button>
-                            </div>
-                          </div>
+                          <InlineLink link={entry.link} onChange={v => updateEntry(entry.id, { link: v })} onCopied={notify} />
                         </td>
                         <td className="px-4 py-3">
                           {entry.rank ? <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-50 text-blue-700 font-bold text-xs">{entry.rank}</span> : <span className="text-gray-300">-</span>}

@@ -3,6 +3,11 @@ import { useState } from 'react';
 export function useCopyToast() {
   const [show, setShow] = useState(false);
 
+  const notify = () => {
+    setShow(true);
+    setTimeout(() => setShow(false), 2000);
+  };
+
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -16,9 +21,8 @@ export function useCopyToast() {
       document.execCommand('copy');
       document.body.removeChild(ta);
     }
-    setShow(true);
-    setTimeout(() => setShow(false), 2000);
+    notify();
   };
 
-  return { copy, show };
+  return { copy, notify, show };
 }

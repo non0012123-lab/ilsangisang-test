@@ -1,23 +1,25 @@
 import { useState } from 'react';
-import { Plus, Pencil, Trash2, ExternalLink, Copy, ChevronLeft, ChevronRight, Search, Filter } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, Search, Filter, CalendarRange } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
+import InlineLink from '../components/InlineLink';
 import ScheduleModal from '../components/ScheduleModal';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
+import { coversDate, isMultiDay, fmtLocal } from '../utils/dateRange';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
 import { USERS } from '../data/mockData';
 
 const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
-function toDateStr(d: Date) { return d.toISOString().split('T')[0]; }
+function toDateStr(d: Date) { return fmtLocal(d); }
 
 export default function DailySchedulePage() {
   const { entries, setEntries, clients } = useApp();
-  const { copy, show: showToast } = useCopyToast();
+  const { notify, show: showToast } = useCopyToast();
 
   const [date, setDate] = useState(toDateStr(new Date('2026-05-29')));
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
@@ -31,12 +33,12 @@ export default function DailySchedulePage() {
 
   const managers = USERS.filter(u => u.role !== 'client');
 
-  const prevDay = () => { const d = new Date(date); d.setDate(d.getDate() - 1); setDate(toDateStr(d)); };
-  const nextDay = () => { const d = new Date(date); d.setDate(d.getDate() + 1); setDate(toDateStr(d)); };
+  const prevDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() - 1); setDate(toDateStr(d)); };
+  const nextDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() + 1); setDate(toDateStr(d)); };
 
-  // All entries for this day (before search/filter) - newest first
+  // All entries covering this day (기간 작업 포함) - newest first
   const allDayEntries = entries
-    .filter(e => e.date === date)
+    .filter(e => coversDate(e, date))
     .sort((a, b) => {
       const aTs = Number(a.id), bTs = Number(b.id);
       if (!isNaN(aTs) && !isNaN(bTs)) return bTs - aTs; // both new: desc
@@ -187,27 +189,21 @@ export default function DailySchedulePage() {
                         <span className="truncate block" title={entry.opinionTitle ?? entry.keyword}>
                           {entry.opinionTitle ?? entry.keyword ?? '-'}
                         </span>
-                      </td>
-                      <td className="px-4 py-3 max-w-[200px]">
-                        {entry.category === '네이버 여론작업' ? (
-                          <span className="text-xs text-gray-500 line-clamp-2">{(entry.opinionContent ?? '-').slice(0, 60)}…</span>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
-                              className="table-link link-cell" title={entry.link ?? ''}>{entry.link}</a>
-                            <div className="flex gap-0.5 shrink-0">
-                              <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
-                                className="p-1 text-gray-300 hover:text-blue-500 transition-colors" title="새 탭으로 열기">
-                                <ExternalLink size={12} />
-                              </a>
-                              <button
-                                onClick={() => copy(entry.link ?? '')}
-                                className="p-1 text-gray-300 hover:text-gray-700 transition-colors" title="링크 복사">
-                                <Copy size={12} />
-                              </button>
-                            </div>
-                          </div>
+                        {isMultiDay(entry) && (
+                          <span className="inline-flex items-center gap-1 mt-1 text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">
+                            <CalendarRange size={10} /> {entry.date}~{entry.endDate}
+                          </span>
                         )}
+                      </td>
+                      <td className="px-4 py-3 max-w-[220px]">
+                        {entry.category === '네이버 여론작업' && entry.opinionContent && (
+                          <span className="text-xs text-gray-500 line-clamp-1 mb-1 block">{entry.opinionContent.slice(0, 50)}…</span>
+                        )}
+                        <InlineLink
+                          link={entry.link}
+                          onChange={v => updateEntry(entry.id, { link: v })}
+                          onCopied={notify}
+                        />
                       </td>
                       <td className="px-4 py-3">
                         {entry.category === '네이버 여론작업' ? (

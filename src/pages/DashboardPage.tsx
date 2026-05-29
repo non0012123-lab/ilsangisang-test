@@ -6,9 +6,12 @@ import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { coversDate, overlapsRange, isMultiDay } from '../utils/dateRange';
 
 const TODAY = '2026-05-29';
 const THIS_MONTH = '2026-05';
+const MONTH_START = '2026-05-01';
+const MONTH_END = '2026-05-31';
 
 // 로컬 날짜 기준 YYYY-MM-DD 포맷 (toISOString의 UTC 변환 오프바이원 방지)
 function fmtLocal(x: Date) {
@@ -32,20 +35,21 @@ export default function DashboardPage() {
   // 내 작업: admin은 전체, 일반 담당자는 본인 것만
   const myEntries = isAdmin ? allEntries : allEntries.filter(e => e.managerId === user?.id);
 
-  const todayTasks = [...myEntries.filter(e => e.date === TODAY)]
+  // 오늘 할 일: 기간 작업이 오늘에 걸쳐 있으면 포함
+  const todayTasks = [...myEntries.filter(e => coversDate(e, TODAY))]
     .sort((a, b) => {
       const ord = { pending: 0, 'in-progress': 1, completed: 2 };
       return ord[a.status] - ord[b.status];
     });
 
-  const monthEntries = myEntries.filter(e => e.date.startsWith(THIS_MONTH));
+  const monthEntries = myEntries.filter(e => e.date.startsWith(THIS_MONTH) || overlapsRange(e, MONTH_START, MONTH_END));
   const monthDone = monthEntries.filter(e => e.status === 'completed').length;
   const monthProg = monthEntries.filter(e => e.status === 'in-progress').length;
   const monthPend = monthEntries.filter(e => e.status === 'pending').length;
 
   const week = getWeekRange(TODAY);
   const weekEntries = myEntries
-    .filter(e => e.date >= week.start && e.date <= week.end)
+    .filter(e => overlapsRange(e, week.start, week.end))
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const upcoming = myEntries
@@ -56,7 +60,7 @@ export default function DashboardPage() {
   const myClients = [...new Set(myEntries.map(e => e.clientId))];
 
   // Team stats (admin only)
-  const teamToday = allEntries.filter(e => e.date === TODAY);
+  const teamToday = allEntries.filter(e => coversDate(e, TODAY));
 
   const updateEntry = (id: string, patch: Partial<typeof allEntries[0]>) =>
     setEntries(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
@@ -183,8 +187,9 @@ export default function DashboardPage() {
                         {new Date(entry.date + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' })}
                       </span>
                       <CategoryBadge category={entry.category} />
-                      <span className="text-sm text-gray-700 flex-1 truncate">
+                      <span className="text-sm text-gray-700 flex-1 truncate flex items-center gap-1.5">
                         {entry.opinionTitle ?? entry.keyword ?? entry.category}
+                        {isMultiDay(entry) && <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full shrink-0">기간</span>}
                       </span>
                       <span className="text-xs text-gray-400 shrink-0">{entry.clientName}</span>
                       <InlineStatus status={entry.status} onChange={s => updateEntry(entry.id, { status: s })} />

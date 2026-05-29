@@ -1,4 +1,5 @@
 import type { Report, Client, ScheduleEntry } from '../types';
+import { overlapsRange, isMultiDay, entryEnd } from './dateRange';
 
 function num(n: number | undefined) {
   if (!n) return '-';
@@ -21,10 +22,13 @@ function statusColor(s: string) {
 }
 
 export function downloadReportPdf(report: Report, client: Client, allEntries: ScheduleEntry[]) {
-  // 해당 보고서의 월(YYYY-MM)에 해당하는 클라이언트 항목 전체 표시
+  // 해당 보고서의 월(YYYY-MM)과 겹치는(기간 작업 포함) 클라이언트 항목 전체 표시
   const reportMonth = report.date.slice(0, 7); // "2026-05"
+  const mStart = `${reportMonth}-01`;
+  const [my, mm] = reportMonth.split('-').map(Number);
+  const mEnd = `${reportMonth}-${String(new Date(my, mm, 0).getDate()).padStart(2, '0')}`;
   const clientEntries = allEntries
-    .filter(e => e.clientId === client.id && e.date.startsWith(reportMonth))
+    .filter(e => e.clientId === client.id && overlapsRange(e, mStart, mEnd))
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const opinionEntries = clientEntries.filter(e => e.category === '네이버 여론작업');
@@ -46,7 +50,7 @@ export function downloadReportPdf(report: Report, client: Client, allEntries: Sc
 
   const entryRows = regularEntries.map((e, i) => `
     <tr style="background:${i % 2 === 0 ? '#ffffff' : '#f9fafb'}">
-      <td style="padding:8px 10px;font-size:12px;color:#6b7280;border-bottom:1px solid #f3f4f6;white-space:nowrap;">${e.date}</td>
+      <td style="padding:8px 10px;font-size:12px;color:#6b7280;border-bottom:1px solid #f3f4f6;white-space:nowrap;">${isMultiDay(e) ? `${e.date}<br/><span style="color:#2563eb;font-size:10px;">~ ${entryEnd(e)}</span>` : e.date}</td>
       <td style="padding:8px 10px;font-size:12px;color:#111827;font-weight:500;border-bottom:1px solid #f3f4f6;white-space:nowrap;">${e.managerName}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;">
         <span style="background:${categoryColor(e.category)}22;color:${categoryColor(e.category)};font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;">${e.category}</span>

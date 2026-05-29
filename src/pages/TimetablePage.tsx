@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Sparkles, Calendar, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Sparkles, Calendar, X, CalendarRange, ExternalLink } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 import ScheduleModal from '../components/ScheduleModal';
 import type { ScheduleEntry } from '../types';
+import { enumerateDays, isMultiDay, overlapsRange } from '../utils/dateRange';
 
 const CAT_COLOR: Record<string, string> = {
   'SNS': '#ec4899',
@@ -51,16 +52,22 @@ export default function TimetablePage() {
   const month = curDate.getMonth();
   const calDays = getCalendarDays(year, month);
   const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const monthStart = padDate(year, month, 1);
+  const monthEnd = padDate(year, month, new Date(year, month + 1, 0).getDate());
 
+  // 이번 달과 겹치는(기간 작업 포함) 모든 작업
   const visible = entries.filter(e =>
-    e.date.startsWith(monthPrefix) &&
+    overlapsRange(e, monthStart, monthEnd) &&
     (clientId === 'all' || e.clientId === clientId)
   );
 
+  // 기간 작업은 걸쳐 있는 모든 날짜 칸에 표시
   const byDay: Record<number, ScheduleEntry[]> = {};
   visible.forEach(e => {
-    const d = parseInt(e.date.split('-')[2]);
-    (byDay[d] ??= []).push(e);
+    enumerateDays(e, monthPrefix).forEach(ds => {
+      const d = parseInt(ds.split('-')[2]);
+      (byDay[d] ??= []).push(e);
+    });
   });
 
   const handleSave = (entry: ScheduleEntry) => {
@@ -183,10 +190,11 @@ export default function TimetablePage() {
                         <div className="space-y-0.5">
                           {dayEntries.slice(0, 3).map(e => (
                             <div key={e.id}
-                              className="text-xs px-1.5 py-0.5 rounded truncate text-white font-medium leading-tight"
+                              className={`text-xs px-1.5 py-0.5 rounded truncate text-white font-medium leading-tight flex items-center gap-1 ${isMultiDay(e) ? 'border-l-2 border-white/60' : ''}`}
                               style={{ backgroundColor: CAT_COLOR[e.category] ?? '#6b7280' }}
-                              title={e.opinionTitle ?? e.keyword ?? e.category}>
-                              {e.opinionTitle ?? e.keyword ?? e.category}
+                              title={`${e.opinionTitle ?? e.keyword ?? e.category}${isMultiDay(e) ? ` (${e.date}~${e.endDate})` : ''}`}>
+                              {isMultiDay(e) && <CalendarRange size={9} className="shrink-0" />}
+                              <span className="truncate">{e.opinionTitle ?? e.keyword ?? e.category}</span>
                             </div>
                           ))}
                           {dayEntries.length > 3 && (
@@ -248,10 +256,18 @@ export default function TimetablePage() {
                         {entry.opinionTitle ?? entry.keyword ?? entry.category}
                       </p>
                       <p className="text-xs text-gray-400 truncate">{entry.managerName} · {entry.clientName}</p>
+                      {isMultiDay(entry) && (
+                        <p className="text-xs text-blue-600 flex items-center gap-1 mt-1">
+                          <CalendarRange size={11} /> {entry.date} ~ {entry.endDate}
+                        </p>
+                      )}
                       {entry.link && (
                         <a href={entry.link} target="_blank" rel="noopener noreferrer"
                           onClick={e => e.stopPropagation()}
-                          className="text-xs text-blue-500 hover:underline mt-1 block truncate">{entry.link}</a>
+                          className="text-xs text-blue-500 hover:underline mt-1 flex items-center gap-1">
+                          <ExternalLink size={10} className="shrink-0" />
+                          <span className="truncate">{entry.link}</span>
+                        </a>
                       )}
                       {entry.metrics && Object.values(entry.metrics).some(v => v) && (
                         <div className="flex gap-2 mt-1.5 flex-wrap">

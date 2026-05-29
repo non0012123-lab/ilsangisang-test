@@ -95,11 +95,13 @@ export default function ScheduleModal({ entry, defaultDate, onSave, onClose }: P
     if (!form.date || !form.clientId || !form.managerId) { alert('필수 항목을 입력해주세요.'); return; }
     if (opinion && !form.opinionTitle) { alert('제목을 입력해주세요.'); return; }
     if (!opinion && !form.keyword) { alert('키워드를 입력해주세요.'); return; }
+    // 마감일이 시작일보다 앞서면 무효 처리
+    const endDate = form.endDate && form.endDate > form.date! ? form.endDate : undefined;
 
     const hasMetrics = Object.values(metrics).some(v => v !== undefined && v !== '');
     onSave({
       id: entry?.id ?? Date.now().toString(),
-      date: form.date!, managerId: form.managerId!, managerName: form.managerName!,
+      date: form.date!, endDate, managerId: form.managerId!, managerName: form.managerName!,
       category: form.category!, clientId: form.clientId!, clientName: form.clientName!,
       status: form.status!,
       keyword: form.keyword, link: form.link, rank: form.rank,
@@ -124,13 +126,30 @@ export default function ScheduleModal({ entry, defaultDate, onSave, onClose }: P
         </div>
 
         <div className="px-6 py-5 space-y-4">
-          {/* Row 1 */}
+          {/* 날짜: 시작일 / 마감일 */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">날짜 *</label>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">시작일 *</label>
               <input type="date" value={form.date ?? ''} onChange={e => set('date', e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">
+                마감일 <span className="text-gray-400 font-normal">(선택 · 기간 작업)</span>
+              </label>
+              <input type="date" value={form.endDate ?? ''} min={form.date}
+                onChange={e => set('endDate', e.target.value || undefined)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          {form.endDate && form.date && form.endDate > form.date && (
+            <p className="-mt-2 text-xs text-blue-600">
+              📅 {form.date} ~ {form.endDate} 기간 작업으로 타임테이블에 자동 표시됩니다.
+            </p>
+          )}
+
+          {/* Row 2 */}
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">상태 *</label>
               <select value={form.status} onChange={e => set('status', e.target.value)}
@@ -190,6 +209,14 @@ export default function ScheduleModal({ entry, defaultDate, onSave, onClose }: P
                   placeholder="주요 댓글 내용 (예: &quot;좋아요~&quot; / &quot;별로에요&quot;)"
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
               </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">
+                  링크 <span className="text-gray-400 font-normal">(선택 · 해당 게시물/검색결과 바로가기)</span>
+                </label>
+                <input type="url" value={form.link ?? ''} onChange={e => set('link', e.target.value)}
+                  placeholder="https://cafe.naver.com/..."
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
             </>
           ) : (
             <>
@@ -200,9 +227,11 @@ export default function ScheduleModal({ entry, defaultDate, onSave, onClose }: P
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">링크 *</label>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">
+                  링크 <span className="text-gray-400 font-normal">(선택 · 작업 후 입력 가능)</span>
+                </label>
                 <input type="url" value={form.link ?? ''} onChange={e => set('link', e.target.value)}
-                  placeholder="https://example.com"
+                  placeholder="https://example.com (나중에 표에서 바로 추가 가능)"
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
             </>

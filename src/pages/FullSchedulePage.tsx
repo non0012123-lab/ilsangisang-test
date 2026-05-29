@@ -1,21 +1,23 @@
 import { useState } from 'react';
-import { Plus, Pencil, Trash2, ExternalLink, Copy, Search, Filter } from 'lucide-react';
+import { Plus, Pencil, Trash2, Search, Filter, CalendarRange } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
+import InlineLink from '../components/InlineLink';
 import ScheduleModal from '../components/ScheduleModal';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
 import { USERS } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
+import { overlapsRange, isMultiDay } from '../utils/dateRange';
 
 const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
 export default function FullSchedulePage() {
   const { entries, setEntries, clients } = useApp();
-  const { copy, show: showToast } = useCopyToast();
+  const { notify, show: showToast } = useCopyToast();
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -34,8 +36,7 @@ export default function FullSchedulePage() {
     .filter(e => filterCategory === 'all' || e.category === filterCategory)
     .filter(e => filterStatus === 'all' || e.status === filterStatus)
     .filter(e => filterManager === 'all' || e.managerId === filterManager)
-    .filter(e => !dateFrom || e.date >= dateFrom)
-    .filter(e => !dateTo || e.date <= dateTo)
+    .filter(e => overlapsRange(e, dateFrom || undefined, dateTo || undefined))
     .filter(e => !search || (e.keyword ?? '').includes(search) || (e.opinionTitle ?? '').includes(search) || e.managerName.includes(search) || e.clientName.includes(search) || (e.link ?? '').includes(search))
     .sort((a, b) => b.date.localeCompare(a.date));
 
@@ -140,7 +141,13 @@ export default function FullSchedulePage() {
                   filtered.map((entry, i) => (
                     <tr key={entry.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="px-4 py-3 text-gray-400 font-mono text-xs">{String(i + 1).padStart(2, '0')}</td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap font-medium">{entry.date}</td>
+                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap font-medium">
+                        {isMultiDay(entry) ? (
+                          <span className="inline-flex items-center gap-1 text-blue-600" title={`${entry.date} ~ ${entry.endDate}`}>
+                            <CalendarRange size={12} /> {entry.date}<span className="text-gray-300">~</span>{entry.endDate?.slice(5)}
+                          </span>
+                        ) : entry.date}
+                      </td>
                       <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{entry.managerName}</td>
                       <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{entry.clientName}</td>
                       <td className="px-4 py-3"><CategoryBadge category={entry.category} /></td>
@@ -149,21 +156,11 @@ export default function FullSchedulePage() {
                           {entry.opinionTitle ?? entry.keyword ?? '-'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 max-w-[200px]">
-                        {entry.category === '네이버 여론작업' ? (
-                          <span className="text-xs text-gray-500">{entry.opinionContent?.slice(0, 50) ?? '-'}…</span>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
-                              className="table-link link-cell" title={entry.link ?? ''}>{entry.link}</a>
-                            <div className="flex gap-0.5 shrink-0">
-                              <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
-                                className="p-1 text-gray-300 hover:text-blue-500 transition-colors"><ExternalLink size={12} /></a>
-                              <button onClick={() => copy(entry.link ?? '')}
-                                className="p-1 text-gray-300 hover:text-gray-700 transition-colors" title="링크 복사"><Copy size={12} /></button>
-                            </div>
-                          </div>
+                      <td className="px-4 py-3 max-w-[220px]">
+                        {entry.category === '네이버 여론작업' && entry.opinionContent && (
+                          <span className="text-xs text-gray-500 line-clamp-1 mb-1 block">{entry.opinionContent.slice(0, 45)}…</span>
                         )}
+                        <InlineLink link={entry.link} onChange={v => updateEntry(entry.id, { link: v })} onCopied={notify} />
                       </td>
                       <td className="px-4 py-3">
                         {entry.category === '네이버 여론작업' ? (

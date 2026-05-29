@@ -56,6 +56,9 @@ const TOMORROW = '2026-05-30';
 const NEXT_WEEK = '2026-06-05';
 
 export const SCHEDULE_ENTRIES: ScheduleEntry[] = [
+  // 기간 작업 (시작일~마감일) - 타임테이블에 여러 날 걸쳐 표시
+  { id: 's_range1', date: '2026-05-25', endDate: '2026-05-31', managerId: 'u5', managerName: '정호성', category: '영상제작', keyword: '스타벅스 여름 브랜드 필름 제작', link: '', clientId: 'cl1', clientName: '스타벅스 코리아', status: 'in-progress', notes: '기획~촬영~편집 1주 일정' },
+  { id: 's_range2', date: '2026-05-28', endDate: '2026-06-03', managerId: 'u4', managerName: '최예진', category: '디자인제작', keyword: '현대차 EV 캠페인 비주얼 시리즈', clientId: 'cl2', clientName: '현대자동차', status: 'pending', notes: '배너 5종 + 카드뉴스 3종' },
   // Today
   { id: 's1', date: TODAY, managerId: 'u2', managerName: '이수연', category: 'SNS', keyword: '스타벅스 신메뉴 여름음료', link: 'https://www.instagram.com/starbuckskorea/', rank: 2, clientId: 'cl1', clientName: '스타벅스 코리아', status: 'completed', metrics: { likes: 8420, comments: 312, saves: 1540, reach: 124000, impressions: 210000 } },
   { id: 's2', date: TODAY, managerId: 'u3', managerName: '박지훈', category: '네이버', keyword: '현대 아이오닉6 연비', link: 'https://search.naver.com/search.naver?query=현대+아이오닉6+연비', rank: 5, clientId: 'cl2', clientName: '현대자동차', status: 'in-progress', metrics: { blogViews: 23400, cafeViews: 8900 } },

@@ -33,7 +33,8 @@ export interface User {
 
 export interface ScheduleEntry {
   id: string;
-  date: string;
+  date: string;        // 시작일 (하루 작업이면 종료일과 동일)
+  endDate?: string;    // 마감일 (기간 작업일 때만; 없으면 date 하루)
   managerId: string;
   managerName: string;
   category: Category;
