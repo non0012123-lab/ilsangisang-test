@@ -2,10 +2,11 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, CalendarDays, Users, LogOut,
   Hash, PlayCircle, Globe, Video, Paintbrush, ChevronDown, ChevronRight,
-  BarChart3, MessageSquare, CalendarRange, Sparkles, ClipboardList,
+  BarChart3, MessageSquare, CalendarRange, Sparkles, ClipboardList, Building2,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useApp } from '../context/AppContext';
 
 interface NavItem { to: string; icon: React.ReactNode; label: string; }
 
@@ -28,7 +29,11 @@ const categoryNav: NavItem[] = [
 
 export default function Sidebar() {
   const [catOpen, setCatOpen] = useState(true);
+  const [cliOpen, setCliOpen] = useState(true);
   const { user, logout } = useAuth();
+  const { clients } = useApp();
+  // 활성 클라이언트는 등록 즉시 자동으로 이 목록에 표시·연동됨
+  const navClients = clients.filter(c => c.status !== 'inactive');
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-60 bg-slate-900 flex flex-col z-40 select-none">
@@ -71,6 +76,29 @@ export default function Sidebar() {
                     `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ml-2 ${isActive ? 'bg-blue-600/20 text-blue-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
                   }
                 >{item.icon}{item.label}</NavLink>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Client section (등록된 클라이언트 자동 연동) */}
+        <div className="pt-1">
+          <button onClick={() => setCliOpen(v => !v)}
+            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider hover:text-slate-300 transition-colors">
+            <span>클라이언트별</span>
+            {cliOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </button>
+
+          {cliOpen && (
+            <div className="mt-1 space-y-0.5">
+              {navClients.length === 0 ? (
+                <p className="px-3 py-2 ml-2 text-xs text-slate-600">등록된 클라이언트 없음</p>
+              ) : navClients.map(c => (
+                <NavLink key={c.id} to={`/client/${c.id}`}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ml-2 ${isActive ? 'bg-blue-600/20 text-blue-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
+                  }
+                ><Building2 size={16} className="shrink-0" /><span className="truncate">{c.name}</span></NavLink>
               ))}
             </div>
           )}

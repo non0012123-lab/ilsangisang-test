@@ -5,7 +5,7 @@ import { REPORTS } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import CategoryBadge from '../components/CategoryBadge';
 import { downloadReportPdf } from '../utils/reportPdf';
-import { enumerateDays, isMultiDay, overlapsRange } from '../utils/dateRange';
+import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd } from '../utils/dateRange';
 import type { ScheduleEntry } from '../types';
 
 type Tab = 'dashboard' | 'timetable' | 'reports';
@@ -24,6 +24,10 @@ function getCalDays(year: number, month: number) {
   for (let i = 1; i <= cnt; i++) days.push(i);
   while (days.length % 7 !== 0) days.push(null);
   return days;
+}
+
+function padDate(year: number, month: number, day: number) {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
@@ -45,6 +49,34 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
       (byDay[d] ??= []).push(e);
     });
   });
+
+  // 주(7칸) 단위 분할 + 기간 작업을 한 줄 막대로 배치
+  const weeks: (number | null)[][] = [];
+  for (let i = 0; i < calDays.length; i += 7) weeks.push(calDays.slice(i, i + 7));
+
+  const placeWeek = (week: (number | null)[]) => {
+    const colDate = week.map(d => (d ? padDate(year, month, d) : null));
+    const items = monthEntries
+      .map(e => {
+        let startCol = -1, endCol = -1;
+        for (let c = 0; c < 7; c++) {
+          const ds = colDate[c];
+          if (ds && coversDate(e, ds)) { if (startCol === -1) startCol = c; endCol = c; }
+        }
+        return startCol === -1 ? null : { entry: e, startCol, endCol, span: endCol - startCol + 1, colDate };
+      })
+      .filter(Boolean) as { entry: ScheduleEntry; startCol: number; endCol: number; span: number; colDate: (string | null)[] }[];
+    items.sort((a, b) => b.span - a.span || a.startCol - b.startCol);
+    const laneEnds: number[] = [];
+    return items.map(it => {
+      let lane = laneEnds.findIndex(end => end < it.startCol);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.endCol); }
+      else laneEnds[lane] = it.endCol;
+      return { ...it, lane };
+    });
+  };
+
+  const MAX_LANES = 3, BAR_H = 16, BAR_GAP = 2, NUM_AREA = 26;
 
   const today = new Date('2026-05-29');
   const todayDay = (year === today.getFullYear() && month === today.getMonth()) ? today.getDate() : -1;
@@ -70,37 +102,61 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
               <div key={d} className={`py-2.5 text-center text-xs font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-500'}`}>{d}</div>
             ))}
           </div>
-          <div className="grid grid-cols-7">
-            {calDays.map((day, idx) => {
-              const de = day ? (byDay[day] ?? []) : [];
-              const isToday = day === todayDay;
-              const isSel = day === selDay;
-              const isSun = idx % 7 === 0;
-              const isSat = idx % 7 === 6;
+          <div>
+            {weeks.map((week, wi) => {
+              const placed = placeWeek(week);
+              const shown = placed.filter(p => p.lane < MAX_LANES);
+              const usedLanes = Math.min(MAX_LANES, placed.reduce((m, p) => Math.max(m, p.lane + 1), 0));
+              const weekMinH = Math.max(NUM_AREA + usedLanes * (BAR_H + BAR_GAP) + 8, 72);
               return (
-                <div key={idx}
-                  onClick={() => day && setSelDay(day === selDay ? null : day)}
-                  className={`min-h-[80px] p-1.5 border-b border-r border-gray-100 transition-colors ${
-                    !day ? 'bg-gray-50/50' : isSel ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : 'bg-white hover:bg-slate-50 cursor-pointer'
-                  }`}>
-                  {day && (
-                    <>
-                      <span className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-semibold mb-0.5 ${
-                        isToday ? 'bg-blue-600 text-white' : isSun ? 'text-red-500' : isSat ? 'text-blue-500' : 'text-gray-700'
-                      }`}>{day}</span>
-                      <div className="space-y-0.5">
-                        {de.slice(0, 2).map(e => (
-                          <div key={e.id} className={`text-xs px-1 py-0.5 rounded truncate text-white font-medium flex items-center gap-0.5 ${isMultiDay(e) ? 'border-l-2 border-white/60' : ''}`}
-                            style={{ backgroundColor: CAT_COLOR[e.category] ?? '#6b7280' }}
-                            title={`${e.opinionTitle ?? e.keyword ?? e.category}${isMultiDay(e) ? ` (${e.date}~${e.endDate})` : ''}`}>
-                            {isMultiDay(e) && <CalendarRange size={8} className="shrink-0" />}
-                            <span className="truncate">{e.opinionTitle ?? e.keyword ?? e.category}</span>
-                          </div>
-                        ))}
-                        {de.length > 2 && <div className="text-xs text-gray-400 px-1">+{de.length - 2}</div>}
+                <div key={wi} className="relative grid grid-cols-7 border-b border-gray-100 last:border-b-0" style={{ minHeight: weekMinH }}>
+                  {/* 날짜 셀 */}
+                  {week.map((day, ci) => {
+                    const isToday = day === todayDay;
+                    const isSel = day === selDay;
+                    const isSun = ci === 0;
+                    const isSat = ci === 6;
+                    const total = day ? placed.filter(p => ci >= p.startCol && ci <= p.endCol).length : 0;
+                    const over = day ? total - shown.filter(p => ci >= p.startCol && ci <= p.endCol).length : 0;
+                    return (
+                      <div key={ci}
+                        onClick={() => day && setSelDay(day === selDay ? null : day)}
+                        className={`relative border-r border-gray-100 last:border-r-0 transition-colors ${
+                          !day ? 'bg-gray-50/50' : isSel ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : 'bg-white hover:bg-slate-50 cursor-pointer'
+                        }`}>
+                        {day && (
+                          <span className={`m-1.5 w-6 h-6 flex items-center justify-center rounded-full text-xs font-semibold ${
+                            isToday ? 'bg-blue-600 text-white' : isSun ? 'text-red-500' : isSat ? 'text-blue-500' : 'text-gray-700'
+                          }`}>{day}</span>
+                        )}
+                        {over > 0 && <div className="absolute bottom-0.5 left-0 right-0 text-center text-[10px] text-gray-400">+{over}</div>}
                       </div>
-                    </>
-                  )}
+                    );
+                  })}
+                  {/* 작업 막대 오버레이 */}
+                  <div className="absolute inset-0 pointer-events-none">
+                    {shown.map(p => {
+                      const e = p.entry;
+                      const contPrev = e.date < (p.colDate[p.startCol] ?? '');
+                      const contNext = entryEnd(e) > (p.colDate[p.endCol] ?? '');
+                      const padL = contPrev ? 0 : 2, padR = contNext ? 0 : 2;
+                      return (
+                        <div key={e.id + '-' + wi}
+                          title={`${e.opinionTitle ?? e.keyword ?? e.category}${isMultiDay(e) ? ` (${e.date}~${e.endDate})` : ''}`}
+                          className={`absolute flex items-center gap-0.5 px-1 text-white text-[10px] font-medium leading-none overflow-hidden ${contPrev ? '' : 'rounded-l'} ${contNext ? '' : 'rounded-r'}`}
+                          style={{
+                            left: `calc(${p.startCol} * 100% / 7 + ${padL}px)`,
+                            width: `calc(${p.span} * 100% / 7 - ${padL + padR}px)`,
+                            top: NUM_AREA + p.lane * (BAR_H + BAR_GAP),
+                            height: BAR_H,
+                            backgroundColor: CAT_COLOR[e.category] ?? '#6b7280',
+                          }}>
+                          {contPrev ? <span className="shrink-0 opacity-80">↩</span> : isMultiDay(e) && <CalendarRange size={8} className="shrink-0" />}
+                          <span className="truncate">{e.opinionTitle ?? e.keyword ?? e.category}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}

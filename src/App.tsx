@@ -6,6 +6,7 @@ import DashboardPage from './pages/DashboardPage';
 import DailySchedulePage from './pages/DailySchedulePage';
 import FullSchedulePage from './pages/FullSchedulePage';
 import CategoryPage from './pages/CategoryPage';
+import ClientSchedulePage from './pages/ClientSchedulePage';
 import ClientManagementPage from './pages/ClientManagementPage';
 import ClientPortalPage from './pages/ClientPortalPage';
 import TimetablePage from './pages/TimetablePage';
@@ -32,6 +33,7 @@ function AppRoutes() {
       <Route path="/schedule/daily" element={<ProtectedRoute><DailySchedulePage /></ProtectedRoute>} />
       <Route path="/schedule/full" element={<ProtectedRoute><FullSchedulePage /></ProtectedRoute>} />
       <Route path="/category/:category" element={<ProtectedRoute><CategoryPage /></ProtectedRoute>} />
+      <Route path="/client/:clientId" element={<ProtectedRoute><ClientSchedulePage /></ProtectedRoute>} />
       <Route path="/clients" element={<ProtectedRoute><ClientManagementPage /></ProtectedRoute>} />
       <Route path="/timetable" element={<ProtectedRoute><TimetablePage /></ProtectedRoute>} />
       <Route path="/ai-planning" element={<ProtectedRoute><AIPlanningPage /></ProtectedRoute>} />

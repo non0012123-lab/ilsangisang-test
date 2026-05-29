@@ -27,14 +27,15 @@ const IS_OPINION = (cat: Category) => cat === '네이버 여론작업';
 interface Props {
   entry?: ScheduleEntry | null;
   defaultDate?: string;
+  defaultClientId?: string;
   onSave: (entry: ScheduleEntry) => void;
   onClose: () => void;
 }
 
-export default function ScheduleModal({ entry, defaultDate, onSave, onClose }: Props) {
+export default function ScheduleModal({ entry, defaultDate, defaultClientId, onSave, onClose }: Props) {
   const { clients } = useApp();
   const activeClients = clients.filter(c => c.status !== 'inactive');
-  const defaultClient = activeClients[0];
+  const defaultClient = activeClients.find(c => c.id === defaultClientId) ?? activeClients[0];
 
   const [form, setForm] = useState<Partial<ScheduleEntry>>(
     entry ?? {
