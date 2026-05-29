@@ -1,5 +1,5 @@
 import { useState, useRef, type ReactNode } from 'react';
-import { Upload, Sparkles, FileSpreadsheet, X, ChevronRight, CheckCircle2, AlertTriangle, Copy, Check } from 'lucide-react';
+import { Upload, Sparkles, FileSpreadsheet, X, ChevronRight, CheckCircle2, AlertTriangle, Copy, Check, ImageIcon, Download } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -65,8 +65,12 @@ export default function AIPlanningPage() {
   const [goal, setGoal] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [report, setReport] = useState('');
+  const [guidelineText, setGuidelineText] = useState('');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [images, setImages] = useState<{ channel: string; url: string }[]>([]);
+  const [imgLoading, setImgLoading] = useState(false);
+  const [imgError, setImgError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const activeClients = clients.filter(c => c.status !== 'inactive');
@@ -92,6 +96,8 @@ export default function AIPlanningPage() {
       if (file) {
         try { guideline = (await file.text()).slice(0, 12000); } catch { /* 바이너리 파일은 건너뜀 */ }
       }
+      setGuidelineText(guideline);
+      setImages([]); setImgError('');   // 새 분석 시 이전 이미지 초기화
       const res = await fetch('/api/ai-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -127,6 +133,29 @@ export default function AIPlanningPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch { /* 클립보드 권한 없음 */ }
+  };
+
+  const generateImages = async () => {
+    setImgLoading(true);
+    setImgError('');
+    try {
+      const res = await fetch('/api/ai-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientName: selectedClient?.name, guideline: guidelineText }),
+      });
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('AI 서버(/api/ai-image)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
+      }
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
+      setImages(Array.isArray(data.images) ? data.images : []);
+    } catch (e) {
+      setImgError(e instanceof Error ? e.message : '이미지 생성 중 오류가 발생했습니다.');
+    } finally {
+      setImgLoading(false);
+    }
   };
 
   const canAnalyze = clientId && period.start && period.end && campaignType;
@@ -411,6 +440,50 @@ export default function AIPlanningPage() {
                 <span className="text-xs bg-purple-50 text-purple-600 font-semibold px-2.5 py-1 rounded-full">AI 생성</span>
               </div>
               <ReportMarkdown text={report} />
+            </div>
+
+            {/* 이미지 시안 */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <ImageIcon size={18} className="text-purple-500" />
+                  <h3 className="font-bold text-gray-900">이미지 시안</h3>
+                  <span className="text-xs text-gray-400">블로그·SNS 각 2개</span>
+                </div>
+                <button onClick={generateImages} disabled={imgLoading}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 disabled:opacity-50 text-white">
+                  {imgLoading
+                    ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 생성 중... (최대 1~2분)</>
+                    : <><Sparkles size={14} /> {images.length ? '다시 생성' : '이미지 시안 생성'}</>}
+                </button>
+              </div>
+
+              {imgError && (
+                <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3 mb-4">
+                  <AlertTriangle size={16} className="shrink-0" /> {imgError}
+                </div>
+              )}
+
+              {images.length === 0 && !imgLoading && !imgError ? (
+                <p className="text-sm text-gray-400 py-6 text-center">
+                  가이드라인을 바탕으로 블로그·SNS 광고 이미지 초안을 생성합니다. 위 버튼을 눌러주세요.
+                </p>
+              ) : (
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {images.map((img, i) => (
+                    <div key={i} className="border border-gray-100 rounded-xl overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2 bg-gray-50">
+                        <span className="text-xs font-semibold text-gray-600">{img.channel} 시안 #{(i % 2) + 1}</span>
+                        <a href={img.url} download={`${img.channel}_시안_${(i % 2) + 1}.png`}
+                          className="flex items-center gap-1 text-xs text-gray-500 hover:text-purple-600 transition-colors">
+                          <Download size={12} /> 저장
+                        </a>
+                      </div>
+                      <img src={img.url} alt={`${img.channel} 시안 ${i + 1}`} className="w-full object-cover" />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
