@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Env (anon key는 공개해도 되지만 .env는 커밋하지 않음)
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

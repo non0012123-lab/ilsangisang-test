@@ -1,43 +1,26 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { BarChart3, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { BarChart3, Eye, EyeOff, ArrowRight, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-type Tab = 'employee' | 'client';
-
-// 직원 탭: 관리자 / 담당자 / 클라이언트 체험
-const DEMO_USERS = {
-  employee: [
-    { label: '관리자 (김민준)', email: 'admin@ilsangisang.com', password: 'admin123', badge: '관리자' },
-    { label: '담당자 (이수연)', email: 'lee@ilsangisang.com', password: 'pass123', badge: '담당자' },
-    { label: '스타벅스 클라이언트 체험', email: 'starbucks@client.com', password: 'client123', badge: '클라이언트' },
-  ],
-  client: [
-    { label: '스타벅스 코리아', email: 'starbucks@client.com', password: 'client123', badge: '' },
-    { label: '현대자동차', email: 'hyundai@client.com', password: 'client123', badge: '' },
-    { label: '올리브영', email: 'oliveyoung@client.com', password: 'client123', badge: '' },
-  ],
-};
-
 export default function LoginPage() {
-  const [tab, setTab] = useState<Tab>('employee');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
-  const { login } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const { login, configured } = useAuth();
   const navigate = useNavigate();
 
-  const doLogin = (e: string, p: string) => {
+  const doLogin = async () => {
+    if (busy) return;
     setError('');
-    const ok = login(e, p);
-    if (ok) {
-      const saved = localStorage.getItem('currentUser');
-      const user = saved ? JSON.parse(saved) : null;
-      navigate(user?.role === 'client' ? '/client-portal' : '/dashboard');
-    } else {
-      setError('이메일 또는 비밀번호가 올바르지 않습니다.');
-    }
+    if (!email || !password) { setError('이메일과 비밀번호를 입력해주세요.'); return; }
+    setBusy(true);
+    const { error } = await login(email, password);
+    setBusy(false);
+    if (error) { setError(error); return; }
+    navigate('/'); // 루트에서 역할에 따라 대시보드/포털로 분기
   };
 
   return (
@@ -85,17 +68,14 @@ export default function LoginPage() {
           </div>
 
           <h2 className="text-2xl font-bold text-gray-900 mb-2">로그인</h2>
-          <p className="text-gray-500 mb-8">계정 유형을 선택하고 로그인하세요.</p>
+          <p className="text-gray-500 mb-8">이메일과 비밀번호로 로그인하세요.</p>
 
-          {/* Tab */}
-          <div className="flex bg-gray-100 rounded-xl p-1 mb-6">
-            {(['employee', 'client'] as Tab[]).map(t => (
-              <button key={t} onClick={() => { setTab(t); setEmail(''); setPassword(''); setError(''); }}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                {t === 'employee' ? '직원 로그인' : '클라이언트 로그인'}
-              </button>
-            ))}
-          </div>
+          {!configured && (
+            <div className="mb-6 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>Supabase가 아직 연결되지 않았습니다. <code className="font-mono">.env</code>에 <code className="font-mono">VITE_SUPABASE_URL</code>·<code className="font-mono">VITE_SUPABASE_ANON_KEY</code>를 설정해주세요.</span>
+            </div>
+          )}
 
           {/* Form */}
           <div className="space-y-4">
@@ -104,7 +84,7 @@ export default function LoginPage() {
               <input type="email" value={email} onChange={e => setEmail(e.target.value)}
                 placeholder="이메일 주소 입력"
                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                onKeyDown={e => e.key === 'Enter' && doLogin(email, password)} />
+                onKeyDown={e => e.key === 'Enter' && doLogin()} />
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1.5">비밀번호</label>
@@ -112,41 +92,23 @@ export default function LoginPage() {
                 <input type={showPw ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
                   placeholder="비밀번호 입력"
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white pr-11"
-                  onKeyDown={e => e.key === 'Enter' && doLogin(email, password)} />
+                  onKeyDown={e => e.key === 'Enter' && doLogin()} />
                 <button onClick={() => setShowPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                   {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
             </div>
             {error && <p className="text-red-500 text-sm">{error}</p>}
-            <button onClick={() => doLogin(email, password)}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-              로그인 <ArrowRight size={16} />
+            <button onClick={doLogin} disabled={busy || !configured}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+              {busy ? '로그인 중...' : <>로그인 <ArrowRight size={16} /></>}
             </button>
           </div>
 
-          {/* Quick Login */}
-          <div className="mt-8">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">데모 계정으로 빠른 접속</p>
-            <div className="space-y-2">
-              {DEMO_USERS[tab].map(u => (
-                <button key={u.email} onClick={() => doLogin(u.email, u.password)}
-                  className="w-full flex items-center justify-between px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm hover:border-blue-300 hover:bg-blue-50 transition-colors group">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-700">{u.label}</span>
-                    {u.badge && (
-                      <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${u.badge === '클라이언트' ? 'bg-sky-100 text-sky-600' : u.badge === '담당자' ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'}`}>
-                        {u.badge}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-gray-400 text-xs group-hover:text-blue-500 flex items-center gap-1">
-                    {u.email} <ArrowRight size={12} />
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+          <p className="mt-8 text-center text-sm text-gray-500">
+            아직 계정이 없으신가요?{' '}
+            <Link to="/signup" className="font-semibold text-blue-600 hover:text-blue-700">회원가입</Link>
+          </p>
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import LoginPage from './pages/LoginPage';
+import SignupPage from './pages/SignupPage';
 import DashboardPage from './pages/DashboardPage';
 import DailySchedulePage from './pages/DailySchedulePage';
 import FullSchedulePage from './pages/FullSchedulePage';
@@ -13,8 +14,20 @@ import TimetablePage from './pages/TimetablePage';
 import AIPlanningPage from './pages/AIPlanningPage';
 import HandoverPage from './pages/HandoverPage';
 
+function FullScreenLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-gray-400">불러오는 중...</p>
+      </div>
+    </div>
+  );
+}
+
 function ProtectedRoute({ children, allowClient = false }: { children: React.ReactNode; allowClient?: boolean }) {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  if (loading) return <FullScreenLoader />;
   if (!user) return <Navigate to="/login" replace />;
   if (!allowClient && user.role === 'client') return <Navigate to="/client-portal" replace />;
   if (allowClient && user.role !== 'client') return <Navigate to="/dashboard" replace />;
@@ -22,11 +35,14 @@ function ProtectedRoute({ children, allowClient = false }: { children: React.Rea
 }
 
 function AppRoutes() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+
+  if (loading) return <FullScreenLoader />;
 
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to={user.role === 'client' ? '/client-portal' : '/dashboard'} replace /> : <LoginPage />} />
+      <Route path="/signup" element={user ? <Navigate to={user.role === 'client' ? '/client-portal' : '/dashboard'} replace /> : <SignupPage />} />
 
       {/* Employee routes */}
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />

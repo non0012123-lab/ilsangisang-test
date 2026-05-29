@@ -1,37 +1,125 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
-import type { User } from '../types';
-import { USERS } from '../data/mockData';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import type { Session } from '@supabase/supabase-js';
+import type { AuthUser, UserRole } from '../types';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+
+interface SignUpParams {
+  name: string;
+  email: string;
+  password: string;
+  department?: string;
+}
 
 interface AuthContextType {
-  user: User | null;
-  login: (email: string, password: string) => boolean;
-  logout: () => void;
+  user: AuthUser | null;
+  loading: boolean;
+  configured: boolean;
+  login: (email: string, password: string) => Promise<{ error?: string }>;
+  signUp: (params: SignUpParams) => Promise<{ error?: string }>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// profiles 행 → 앱에서 쓰는 AuthUser 형태로 변환
+interface ProfileRow {
+  id: string;
+  name: string | null;
+  email: string | null;
+  role: string | null;
+  department: string | null;
+  client_id: string | null;
+}
+
+function toAuthUser(row: ProfileRow, fallbackEmail?: string): AuthUser {
+  return {
+    id: row.id,
+    name: row.name ?? fallbackEmail ?? '사용자',
+    email: row.email ?? fallbackEmail ?? '',
+    role: (row.role as UserRole) ?? 'manager',
+    department: row.department ?? undefined,
+    clientId: row.client_id ?? undefined,
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('currentUser');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const login = (email: string, password: string): boolean => {
-    const found = USERS.find(u => u.email === email && u.password === password);
-    if (found) {
-      setUser(found);
-      localStorage.setItem('currentUser', JSON.stringify(found));
-      return true;
+  // 세션의 사용자에 대응하는 profiles 행을 읽어 상태에 반영
+  const loadProfile = async (session: Session | null) => {
+    if (!supabase || !session?.user) { setUser(null); return; }
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, name, email, role, department, client_id')
+      .eq('id', session.user.id)
+      .single();
+    if (error || !data) {
+      // 프로필이 아직 없으면 인증 정보만으로 최소 사용자 구성
+      setUser({
+        id: session.user.id,
+        name: (session.user.user_metadata?.name as string) ?? session.user.email ?? '사용자',
+        email: session.user.email ?? '',
+        role: 'manager',
+        department: (session.user.user_metadata?.department as string) ?? undefined,
+      });
+      return;
     }
-    return false;
+    setUser(toAuthUser(data as ProfileRow, session.user.email ?? undefined));
   };
 
-  const logout = () => {
+  useEffect(() => {
+    if (!supabase) { setLoading(false); return; }
+    let active = true;
+
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!active) return;
+      await loadProfile(data.session);
+      if (active) setLoading(false);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      loadProfile(session);
+    });
+
+    return () => { active = false; sub.subscription.unsubscribe(); };
+  }, []);
+
+  const login = async (email: string, password: string): Promise<{ error?: string }> => {
+    if (!supabase) return { error: 'Supabase가 설정되지 않았습니다. 환경변수를 확인해주세요.' };
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (error) return { error: '이메일 또는 비밀번호가 올바르지 않습니다.' };
+    return {};
+  };
+
+  const signUp = async ({ name, email, password, department }: SignUpParams): Promise<{ error?: string }> => {
+    if (!supabase) return { error: 'Supabase가 설정되지 않았습니다. 환경변수를 확인해주세요.' };
+    const { error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      // 트리거가 이 메타데이터로 profiles 행을 생성 (기본 role = manager)
+      options: { data: { name: name.trim(), department: department?.trim() || null } },
+    });
+    if (error) {
+      if (error.message.toLowerCase().includes('already') || error.message.toLowerCase().includes('registered'))
+        return { error: '이미 가입된 이메일입니다.' };
+      if (error.message.toLowerCase().includes('password'))
+        return { error: '비밀번호는 6자 이상이어야 합니다.' };
+      return { error: error.message };
+    }
+    return {};
+  };
+
+  const logout = async () => {
+    if (supabase) await supabase.auth.signOut();
     setUser(null);
-    localStorage.removeItem('currentUser');
   };
 
-  return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ user, loading, configured: isSupabaseConfigured, login, signUp, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {
