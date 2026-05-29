@@ -13,6 +13,16 @@ import ClientPortalPage from './pages/ClientPortalPage';
 import TimetablePage from './pages/TimetablePage';
 import AIPlanningPage from './pages/AIPlanningPage';
 import HandoverPage from './pages/HandoverPage';
+import PendingApprovalPage from './pages/PendingApprovalPage';
+import ApprovalsPage from './pages/ApprovalsPage';
+import type { AuthUser } from './types';
+
+// 역할별 첫 화면
+function homeFor(user: AuthUser): string {
+  if (user.role === 'pending') return '/pending';
+  if (user.role === 'client') return '/client-portal';
+  return '/dashboard';
+}
 
 function FullScreenLoader() {
   return (
@@ -25,10 +35,13 @@ function FullScreenLoader() {
   );
 }
 
-function ProtectedRoute({ children, allowClient = false }: { children: React.ReactNode; allowClient?: boolean }) {
+function ProtectedRoute({ children, allowClient = false, adminOnly = false }: { children: React.ReactNode; allowClient?: boolean; adminOnly?: boolean }) {
   const { user, loading } = useAuth();
   if (loading) return <FullScreenLoader />;
   if (!user) return <Navigate to="/login" replace />;
+  // 승인 전(pending)에는 어떤 내부 화면에도 접근 불가
+  if (user.role === 'pending') return <Navigate to="/pending" replace />;
+  if (adminOnly && user.role !== 'admin') return <Navigate to="/dashboard" replace />;
   if (!allowClient && user.role === 'client') return <Navigate to="/client-portal" replace />;
   if (allowClient && user.role !== 'client') return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
@@ -41,8 +54,15 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to={user.role === 'client' ? '/client-portal' : '/dashboard'} replace /> : <LoginPage />} />
-      <Route path="/signup" element={user ? <Navigate to={user.role === 'client' ? '/client-portal' : '/dashboard'} replace /> : <SignupPage />} />
+      <Route path="/login" element={user ? <Navigate to={homeFor(user)} replace /> : <LoginPage />} />
+      <Route path="/signup" element={user ? <Navigate to={homeFor(user)} replace /> : <SignupPage />} />
+
+      {/* 승인 대기 화면 (로그인은 됐으나 미승인) */}
+      <Route path="/pending" element={
+        !user ? <Navigate to="/login" replace />
+          : user.role === 'pending' ? <PendingApprovalPage />
+          : <Navigate to={homeFor(user)} replace />
+      } />
 
       {/* Employee routes */}
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
@@ -51,6 +71,7 @@ function AppRoutes() {
       <Route path="/category/:category" element={<ProtectedRoute><CategoryPage /></ProtectedRoute>} />
       <Route path="/client/:clientId" element={<ProtectedRoute><ClientSchedulePage /></ProtectedRoute>} />
       <Route path="/clients" element={<ProtectedRoute><ClientManagementPage /></ProtectedRoute>} />
+      <Route path="/approvals" element={<ProtectedRoute adminOnly><ApprovalsPage /></ProtectedRoute>} />
       <Route path="/timetable" element={<ProtectedRoute><TimetablePage /></ProtectedRoute>} />
       <Route path="/ai-planning" element={<ProtectedRoute><AIPlanningPage /></ProtectedRoute>} />
       <Route path="/handover" element={<ProtectedRoute><HandoverPage /></ProtectedRoute>} />
@@ -59,7 +80,7 @@ function AppRoutes() {
       <Route path="/client-portal" element={<ProtectedRoute allowClient><ClientPortalPage /></ProtectedRoute>} />
 
       {/* Default redirect */}
-      <Route path="/" element={<Navigate to={user ? (user.role === 'client' ? '/client-portal' : '/dashboard') : '/login'} replace />} />
+      <Route path="/" element={<Navigate to={user ? homeFor(user) : '/login'} replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

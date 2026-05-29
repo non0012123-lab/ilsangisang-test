@@ -17,6 +17,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (params: SignUpParams) => Promise<{ error?: string }>;
   logout: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -36,7 +37,7 @@ function toAuthUser(row: ProfileRow, fallbackEmail?: string): AuthUser {
     id: row.id,
     name: row.name ?? fallbackEmail ?? '사용자',
     email: row.email ?? fallbackEmail ?? '',
-    role: (row.role as UserRole) ?? 'manager',
+    role: (row.role as UserRole) ?? 'pending',
     department: row.department ?? undefined,
     clientId: row.client_id ?? undefined,
   };
@@ -55,12 +56,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq('id', session.user.id)
       .single();
     if (error || !data) {
-      // 프로필이 아직 없으면 인증 정보만으로 최소 사용자 구성
+      // 프로필이 아직 없으면 승인 대기로 취급 (안전 기본값)
       setUser({
         id: session.user.id,
         name: (session.user.user_metadata?.name as string) ?? session.user.email ?? '사용자',
         email: session.user.email ?? '',
-        role: 'manager',
+        role: 'pending',
         department: (session.user.user_metadata?.department as string) ?? undefined,
       });
       return;
@@ -115,8 +116,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  // 승인 상태가 바뀌었을 수 있으니 프로필을 다시 읽음 (승인 대기 화면의 '상태 확인'용)
+  const refreshProfile = async () => {
+    if (!supabase) return;
+    const { data } = await supabase.auth.getSession();
+    await loadProfile(data.session);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, configured: isSupabaseConfigured, login, signUp, logout }}>
+    <AuthContext.Provider value={{ user, loading, configured: isSupabaseConfigured, login, signUp, logout, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

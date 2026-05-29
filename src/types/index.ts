@@ -1,6 +1,6 @@
 export type Category = 'SNS' | '유튜브' | '네이버' | '영상제작' | '디자인제작' | '네이버 여론작업' | '기타';
 export type ScheduleStatus = 'pending' | 'in-progress' | 'completed';
-export type UserRole = 'admin' | 'manager' | 'client';
+export type UserRole = 'admin' | 'manager' | 'client' | 'pending';
 
 export interface AIMetrics {
   views?: number;

@@ -2,11 +2,12 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, CalendarDays, Users, LogOut,
   Hash, PlayCircle, Globe, Video, Paintbrush, ChevronDown, ChevronRight,
-  BarChart3, MessageSquare, CalendarRange, Sparkles, ClipboardList, Building2,
+  BarChart3, MessageSquare, CalendarRange, Sparkles, ClipboardList, Building2, ShieldCheck,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { supabase } from '../lib/supabase';
 
 interface NavItem { to: string; icon: React.ReactNode; label: string; }
 
@@ -34,6 +35,14 @@ export default function Sidebar() {
   const { clients } = useApp();
   // 활성 클라이언트는 등록 즉시 자동으로 이 목록에 표시·연동됨
   const navClients = clients.filter(c => c.status !== 'inactive');
+
+  const isAdmin = user?.role === 'admin';
+  const [pendingCount, setPendingCount] = useState(0);
+  useEffect(() => {
+    if (!isAdmin || !supabase) return;
+    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'pending')
+      .then(({ count }) => setPendingCount(count ?? 0));
+  }, [isAdmin]);
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-60 bg-slate-900 flex flex-col z-40 select-none">
@@ -110,6 +119,17 @@ export default function Sidebar() {
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
             }
           ><Users size={18} />클라이언트 관리</NavLink>
+          {isAdmin && (
+            <NavLink to="/approvals"
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
+              }
+            ><ShieldCheck size={18} />가입 승인
+              {pendingCount > 0 && (
+                <span className="ml-auto text-xs font-bold bg-amber-400 text-slate-900 px-1.5 py-0.5 rounded-full">{pendingCount}</span>
+              )}
+            </NavLink>
+          )}
           <NavLink to="/handover"
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
