@@ -1,53 +1,59 @@
 import { useState, useRef, type ReactNode } from 'react';
-import { Upload, Sparkles, FileSpreadsheet, X, ChevronRight, Calendar, Hash, PlayCircle, Globe, Video, Paintbrush, MessageSquare, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
+import { Upload, Sparkles, FileSpreadsheet, X, ChevronRight, CheckCircle2, AlertTriangle, Copy, Check } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 
 type Step = 1 | 2 | 3;
 
-interface PlanTask { category: string; content: string; status: string }
-interface PlanWeek { week: string; date: string; tasks: PlanTask[] }
-interface AIPlan { weeks: PlanWeek[]; memo?: string }
-
 const CAMPAIGN_TYPES = ['브랜드 인지도', '신제품 출시', '시즌 프로모션', '이벤트/캠페인', '커뮤니티 활성화', '위기 관리', '기타'];
 
-// 카테고리 → 표시용 색상/아이콘 (AI 결과·샘플 공통)
-const CATEGORY_META: Record<string, { color: string; icon: ReactNode }> = {
-  'SNS': { color: '#ec4899', icon: <Hash size={12} /> },
-  '유튜브': { color: '#ef4444', icon: <PlayCircle size={12} /> },
-  '네이버': { color: '#22c55e', icon: <Globe size={12} /> },
-  '영상제작': { color: '#a855f7', icon: <Video size={12} /> },
-  '디자인제작': { color: '#f97316', icon: <Paintbrush size={12} /> },
-  '네이버 여론작업': { color: '#0ea5e9', icon: <MessageSquare size={12} /> },
-  '기타': { color: '#6b7280', icon: <Hash size={12} /> },
-};
-const metaFor = (category: string) => CATEGORY_META[category] ?? CATEGORY_META['기타'];
+// ── 아주 가벼운 마크다운 렌더러 (제목/목록/굵게) ──
+function renderInline(text: string): ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
+    /^\*\*[^*]+\*\*$/.test(p)
+      ? <strong key={i} className="font-semibold text-gray-900">{p.slice(2, -2)}</strong>
+      : <span key={i}>{p}</span>
+  );
+}
 
-const SAMPLE_PLAN: AIPlan = {
-  weeks: [
-    { week: '1주차', date: '06.01 ~ 06.07', tasks: [
-      { category: 'SNS', content: '캠페인 론칭 예고 포스팅 (인스타그램 스토리 × 3)', status: '예정' },
-      { category: '디자인제작', content: '메인 배너 디자인 및 SNS 템플릿 제작', status: '예정' },
-      { category: '네이버', content: '키워드 리서치 및 블로그 포스팅 기획 (3건)', status: '예정' },
-    ]},
-    { week: '2주차', date: '06.08 ~ 06.14', tasks: [
-      { category: 'SNS', content: '메인 콘텐츠 피드 게시 + 해시태그 캠페인 시작', status: '예정' },
-      { category: '유튜브', content: '브랜드 스토리 영상 업로드 (5분 내외)', status: '예정' },
-      { category: '네이버 여론작업', content: '커뮤니티 반응 모니터링 및 여론 분석', status: '예정' },
-    ]},
-    { week: '3주차', date: '06.15 ~ 06.21', tasks: [
-      { category: 'SNS', content: '중간 성과 체크 + 리타겟팅 콘텐츠 게시', status: '예정' },
-      { category: '영상제작', content: '숏폼 리뷰 영상 편집 및 릴스/쇼츠 배포', status: '예정' },
-      { category: '네이버', content: '블로그 2차 포스팅 및 검색 노출 최적화', status: '예정' },
-    ]},
-    { week: '4주차', date: '06.22 ~ 06.30', tasks: [
-      { category: 'SNS', content: '클로징 이벤트 게시 및 성과 공유 콘텐츠', status: '예정' },
-      { category: '네이버 여론작업', content: '최종 여론 분석 리포트 작성', status: '예정' },
-      { category: '디자인제작', content: '성과 인포그래픽 및 결과 카드뉴스 제작', status: '예정' },
-    ]},
-  ],
-};
+function ReportMarkdown({ text }: { text: string }) {
+  const blocks: ReactNode[] = [];
+  let bullets: string[] = [];
+  const flush = () => {
+    if (bullets.length) {
+      blocks.push(
+        <ul key={`u${blocks.length}`} className="list-disc pl-5 space-y-1 my-2">
+          {bullets.map((li, i) => <li key={i} className="text-sm text-gray-700 leading-relaxed">{renderInline(li)}</li>)}
+        </ul>
+      );
+      bullets = [];
+    }
+  };
+
+  text.split('\n').forEach(raw => {
+    const line = raw.trimEnd();
+    if (/^#{1,6}\s/.test(line)) {
+      flush();
+      const level = line.match(/^#+/)![0].length;
+      const content = line.replace(/^#{1,6}\s/, '');
+      const cls = level <= 1 ? 'text-lg font-bold mt-5 mb-2 text-gray-900'
+        : level === 2 ? 'text-base font-bold mt-4 mb-1.5 text-gray-900'
+        : 'text-sm font-semibold mt-3 mb-1 text-gray-800';
+      blocks.push(<p key={`h${blocks.length}`} className={cls}>{renderInline(content)}</p>);
+    } else if (/^\s*[-*]\s+/.test(line)) {
+      bullets.push(line.replace(/^\s*[-*]\s+/, ''));
+    } else if (line.trim() === '') {
+      flush();
+      blocks.push(<div key={`s${blocks.length}`} className="h-2" />);
+    } else {
+      flush();
+      blocks.push(<p key={`p${blocks.length}`} className="text-sm text-gray-700 leading-relaxed my-1">{renderInline(line)}</p>);
+    }
+  });
+  flush();
+  return <div>{blocks}</div>;
+}
 
 export default function AIPlanningPage() {
   const { clients } = useApp();
@@ -58,8 +64,9 @@ export default function AIPlanningPage() {
   const [campaignType, setCampaignType] = useState('');
   const [goal, setGoal] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [plan, setPlan] = useState<AIPlan | null>(null);
+  const [report, setReport] = useState('');
   const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const activeClients = clients.filter(c => c.status !== 'inactive');
@@ -83,7 +90,7 @@ export default function AIPlanningPage() {
       // CSV/텍스트 가이드라인은 본문을 함께 전달 (xlsx/pdf 등 바이너리는 생략됨)
       let guideline = '';
       if (file) {
-        try { guideline = (await file.text()).slice(0, 8000); } catch { /* 바이너리 파일은 건너뜀 */ }
+        try { guideline = (await file.text()).slice(0, 12000); } catch { /* 바이너리 파일은 건너뜀 */ }
       }
       const res = await fetch('/api/ai-plan', {
         method: 'POST',
@@ -99,12 +106,13 @@ export default function AIPlanningPage() {
       });
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.includes('application/json')) {
-        // GitHub Pages 등 함수가 없는 환경에서는 SPA fallback(HTML)이 돌아옴
+        // 함수가 없는 환경(GitHub Pages 등)에서는 SPA fallback(HTML)이 돌아옴
         throw new Error('AI 서버(/api/ai-plan)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
       }
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
-      setPlan({ weeks: Array.isArray(data.weeks) ? data.weeks : [], memo: data.memo });
+      if (!res.ok || data.error) throw new Error(data.detail ? `${data.error} — ${data.detail}` : (data.error ?? `요청 실패 (${res.status})`));
+      if (!data.report) throw new Error('리포트가 비어 있습니다.');
+      setReport(data.report as string);
       setStep(3);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'AI 분석 중 오류가 발생했습니다.');
@@ -113,12 +121,19 @@ export default function AIPlanningPage() {
     }
   };
 
+  const copyReport = async () => {
+    try {
+      await navigator.clipboard.writeText(report);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch { /* 클립보드 권한 없음 */ }
+  };
+
   const canAnalyze = clientId && period.start && period.end && campaignType;
-  const result = plan ?? SAMPLE_PLAN;   // AI 결과가 없으면 샘플 표시
 
   return (
     <Layout>
-      <Header title="AI 기획 어시스턴트" subtitle="가이드라인을 업로드하면 AI가 최적의 콘텐츠 플랜을 제안합니다" />
+      <Header title="AI 기획 어시스턴트" subtitle="가이드라인을 업로드하면 AI가 업체를 검색·분석해 기획 리포트를 작성합니다" />
       <div className="flex-1 p-6 space-y-5">
 
         {/* Step indicator */}
@@ -127,7 +142,7 @@ export default function AIPlanningPage() {
             {[
               { n: 1, label: '가이드라인 업로드' },
               { n: 2, label: '기획 설정' },
-              { n: 3, label: 'AI 플랜 결과' },
+              { n: 3, label: 'AI 기획 리포트' },
             ].map((s, i) => (
               <div key={s.n} className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
@@ -153,7 +168,7 @@ export default function AIPlanningPage() {
               <h3 className="font-bold text-gray-900 mb-1">가이드라인 파일 업로드</h3>
               <p className="text-sm text-gray-500 mb-5">엑셀(.xlsx, .xls) 또는 CSV 파일을 업로드해주세요.<br />브랜드 가이드라인, 캠페인 기획안, 콘텐츠 방향성 등을 포함하세요.</p>
 
-              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.pdf" className="hidden" onChange={handleFile} />
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.pdf,.txt" className="hidden" onChange={handleFile} />
 
               {file ? (
                 <div className="border-2 border-green-200 bg-green-50 rounded-2xl p-5 flex items-center gap-4">
@@ -178,14 +193,14 @@ export default function AIPlanningPage() {
                     <Upload size={24} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
                   </div>
                   <p className="font-semibold text-gray-700 mb-1">파일을 드래그하거나 클릭하여 업로드</p>
-                  <p className="text-sm text-gray-400">.xlsx / .xls / .csv / .pdf 지원</p>
+                  <p className="text-sm text-gray-400">.xlsx / .xls / .csv / .txt / .pdf 지원</p>
                 </div>
               )}
 
               <div className="mt-4 p-4 bg-blue-50 rounded-xl">
                 <p className="text-xs font-semibold text-blue-700 mb-1.5">포함하면 좋은 내용</p>
                 <ul className="space-y-1">
-                  {['브랜드 톤앤매너 및 금지 표현', '타겟 고객층 정보', '캠페인 키 메시지', '참고 경쟁사 및 벤치마킹 사례', '예산 및 채널 우선순위'].map(t => (
+                  {['업체명·업종 및 핵심 소개', '진행할 마케팅 채널(블로그/카페/SNS/유튜브)', '브랜드 톤앤매너 및 금지 표현', '타겟 고객층 정보', '참고 경쟁사 및 벤치마킹 사례'].map(t => (
                     <li key={t} className="text-xs text-blue-600 flex items-center gap-1.5">
                       <span className="w-1 h-1 bg-blue-400 rounded-full" /> {t}
                     </li>
@@ -202,21 +217,18 @@ export default function AIPlanningPage() {
                   </div>
                   <div>
                     <p className="font-bold text-lg">AI 기획 어시스턴트</p>
-                    <p className="text-purple-200 text-sm">GPT 기반 콘텐츠 플래너</p>
+                    <p className="text-purple-200 text-sm">웹 검색 기반 기획 리포트</p>
                   </div>
                 </div>
                 <p className="text-purple-100 text-sm leading-relaxed mb-4">
-                  가이드라인 파일을 분석하여 클라이언트 업종, 타겟층, 캠페인 목표에 맞는 최적의 월간 콘텐츠 플랜을 자동으로 생성합니다.
+                  가이드라인에 명시된 채널만 골라, 업체명을 직접 검색·분석하여 채널별 실행 기획 리포트를 작성합니다.
                 </p>
                 <div className="space-y-2">
-                  {['가이드라인 자동 분석', '채널별 최적 콘텐츠 제안', '주간 타임테이블 자동 생성', '스케줄 자동 반영'].map(f => (
+                  {['블로그 메인·롱테일 키워드 추천', '네이버 카페 여론 작업 기획', 'SNS 디자인 방향성 제안', '유튜브 유형별 기획·대본 흐름'].map(f => (
                     <div key={f} className="flex items-center gap-2 text-sm text-purple-100">
                       <CheckCircle2 size={14} className="text-purple-300 shrink-0" /> {f}
                     </div>
                   ))}
-                </div>
-                <div className="mt-4 px-3 py-2 bg-white/10 rounded-lg text-xs text-purple-200 text-center">
-                  🚀 백엔드 연동 후 정식 서비스 예정
                 </div>
               </div>
 
@@ -225,7 +237,7 @@ export default function AIPlanningPage() {
                 <p className="text-xs text-gray-500 mb-4">어떤 형식으로 작성해야 할지 모르겠다면 샘플을 참고하세요.</p>
                 <button
                   onClick={() => {
-                    const content = '항목,내용\n브랜드명,예시 브랜드\n타겟층,20-35세 여성\n톤앤매너,친근하고 감성적인\n금지표현,할인,최저가\n주력 채널,인스타그램/유튜브\n월 게시 횟수,SNS 20회 유튜브 4회\n';
+                    const content = '항목,내용\n업체명,예시 브랜드\n업종,카페/디저트\n진행 채널,블로그,SNS\n타겟층,20-35세 여성\n톤앤매너,친근하고 감성적인\n금지표현,할인,최저가\n';
                     const blob = new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
@@ -331,7 +343,7 @@ export default function AIPlanningPage() {
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
                 <p className="text-xs font-bold text-amber-700 mb-1.5">⚠️ 안내</p>
                 <p className="text-xs text-amber-600 leading-relaxed">
-                  AI 분석 결과는 참고용 제안입니다. 실제 적용 전 담당자가 검토하고 수정해주세요. 생성된 일정은 타임테이블에 자동으로 반영됩니다.
+                  AI 리포트는 참고용 제안입니다. 업체명을 웹에서 검색해 작성하므로 사실관계는 담당자가 다시 확인하고 보완해주세요. 웹 검색·추론으로 1~2분 정도 걸릴 수 있습니다.
                 </p>
               </div>
             </div>
@@ -359,7 +371,7 @@ export default function AIPlanningPage() {
               {isAnalyzing ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  AI 분석 중... (약 10~30초 소요)
+                  AI 분석 중... (웹 검색·추론, 최대 1~2분)
                 </>
               ) : (
                 <><Sparkles size={16} /> AI 기획 분석 시작</>
@@ -368,72 +380,37 @@ export default function AIPlanningPage() {
           </div>
         )}
 
-        {/* Step 3: Results */}
+        {/* Step 3: Report */}
         {step === 3 && (
           <div className="space-y-5">
             <div className="bg-gradient-to-r from-purple-600 to-violet-700 rounded-2xl p-5 text-white flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <CheckCircle2 size={28} className="text-purple-200" />
                 <div>
-                  <p className="font-bold text-lg">AI 기획 완료!</p>
+                  <p className="font-bold text-lg">AI 기획 리포트 완료!</p>
                   <p className="text-purple-200 text-sm">
                     {selectedClient?.name ?? '클라이언트'} · {campaignType} · {period.start} ~ {period.end}
                   </p>
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => setStep(1)}
+                <button onClick={() => setStep(2)}
                   className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white text-sm font-semibold rounded-xl transition-colors">
                   다시 생성
                 </button>
-                <button
-                  onClick={() => alert('타임테이블 자동 반영 기능은 백엔드 연동 후 사용 가능합니다.')}
+                <button onClick={copyReport}
                   className="px-4 py-2 bg-white text-purple-700 text-sm font-semibold rounded-xl hover:bg-purple-50 transition-colors flex items-center gap-2">
-                  <Calendar size={14} /> 타임테이블에 반영
+                  {copied ? <><Check size={14} /> 복사됨</> : <><Copy size={14} /> 리포트 복사</>}
                 </button>
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-gray-900">AI 추천 월간 콘텐츠 플랜</h3>
-                <span className="text-xs bg-purple-50 text-purple-600 font-semibold px-2.5 py-1 rounded-full">
-                  {plan ? 'AI 생성' : '샘플'}
-                </span>
+                <h3 className="font-bold text-gray-900">AI 기획 리포트</h3>
+                <span className="text-xs bg-purple-50 text-purple-600 font-semibold px-2.5 py-1 rounded-full">AI 생성</span>
               </div>
-
-              <div className="space-y-4">
-                {result.weeks.map((week, wi) => (
-                  <div key={wi} className="border border-gray-100 rounded-xl overflow-hidden">
-                    <div className="bg-gray-50 px-4 py-2.5 flex items-center justify-between">
-                      <span className="font-semibold text-gray-900 text-sm">{week.week}</span>
-                      <span className="text-xs text-gray-400">{week.date}</span>
-                    </div>
-                    <div className="divide-y divide-gray-50">
-                      {week.tasks.map((task, ti) => (
-                        <div key={ti} className="px-4 py-3 flex items-start gap-3 hover:bg-gray-50/50 transition-colors">
-                          <span className="flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded-full text-white shrink-0"
-                            style={{ backgroundColor: metaFor(task.category).color }}>
-                            {metaFor(task.category).icon} {task.category}
-                          </span>
-                          <span className="text-sm text-gray-700 flex-1">{task.content}</span>
-                          <span className="text-xs bg-amber-50 text-amber-600 font-medium px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1">
-                            <Clock size={10} /> {task.status}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4 p-4 bg-blue-50 rounded-xl">
-                <p className="text-xs font-bold text-blue-700 mb-1">💡 AI 추천 메모</p>
-                <p className="text-xs text-blue-600 leading-relaxed">
-                  {result.memo ??
-                    `${campaignType} 캠페인의 경우 1~2주차에 인지도 확보에 집중하고, 3~4주차에 전환 유도 콘텐츠를 배치하는 전략이 효과적입니다. 특히 SNS 릴스와 유튜브 쇼츠의 시너지 효과를 노리면 노출수를 극대화할 수 있습니다.`}
-                </p>
-              </div>
+              <ReportMarkdown text={report} />
             </div>
           </div>
         )}
