@@ -33,7 +33,7 @@ const TABS = [
 export default function CategoryPage() {
   const { category = 'sns' } = useParams<{ category: string }>();
   const config = CATEGORY_CONFIG[category] ?? CATEGORY_CONFIG.sns;
-  const { entries, setEntries } = useApp();
+  const { entries, saveEntry, removeEntry, patchEntry } = useApp();
   const { notify, show: showToast } = useCopyToast();
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
@@ -42,12 +42,11 @@ export default function CategoryPage() {
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const handleSave = (entry: ScheduleEntry) => {
-    setEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [entry, ...prev]);
+    saveEntry(entry);
     setModal({ open: false });
   };
-  const handleDelete = (id: string) => { if (confirm('삭제하시겠습니까?')) setEntries(prev => prev.filter(e => e.id !== id)); };
-  const updateEntry = (id: string, patch: Partial<ScheduleEntry>) =>
-    setEntries(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
+  const handleDelete = (id: string) => { if (confirm('삭제하시겠습니까?')) removeEntry(id); };
+  const updateEntry = (id: string, patch: Partial<ScheduleEntry>) => patchEntry(id, patch);
 
   const completed = filtered.filter(e => e.status === 'completed').length;
   const inProg = filtered.filter(e => e.status === 'in-progress').length;

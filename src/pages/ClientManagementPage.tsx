@@ -26,7 +26,7 @@ function StatusDot({ status }: { status: Client['status'] }) {
 }
 
 export default function ClientManagementPage() {
-  const { entries, clients, setClients } = useApp();
+  const { entries, clients, saveClient } = useApp();
   const [selected, setSelected] = useState<Client | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editClient, setEditClient] = useState<Client | null>(null);
@@ -44,16 +44,17 @@ export default function ClientManagementPage() {
     if (!form.name || !form.email) { alert('업체명과 이메일은 필수입니다.'); return; }
     if (editClient) {
       const updated = { ...form, id: editClient.id };
-      setClients(prev => prev.map(c => c.id === editClient.id ? updated : c));
+      saveClient(updated);
       if (selected?.id === editClient.id) setSelected(updated);
     } else {
-      setClients(prev => [...prev, { ...form, id: Date.now().toString() }]);
+      saveClient({ ...form, id: Date.now().toString() });
     }
     setShowForm(false);
   };
 
   const handleStatusChange = (clientId: string, status: Client['status']) => {
-    setClients(prev => prev.map(c => c.id === clientId ? { ...c, status } : c));
+    const c = clients.find(x => x.id === clientId);
+    if (c) saveClient({ ...c, status });
     if (selected?.id === clientId) setSelected(prev => prev ? { ...prev, status } : null);
   };
 

@@ -18,7 +18,7 @@ const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제�
 function toDateStr(d: Date) { return fmtLocal(d); }
 
 export default function DailySchedulePage() {
-  const { entries, setEntries, clients } = useApp();
+  const { entries, saveEntry, removeEntry, patchEntry, clients } = useApp();
   const { notify, show: showToast } = useCopyToast();
 
   const [date, setDate] = useState(toDateStr(new Date('2026-05-29')));
@@ -60,16 +60,12 @@ export default function DailySchedulePage() {
       e.managerName.includes(search) || e.clientName.includes(search) || (e.link ?? '').includes(search));
 
   const handleSave = (entry: ScheduleEntry) => {
-    setEntries(prev => {
-      if (prev.some(e => e.id === entry.id)) return prev.map(e => e.id === entry.id ? entry : e);
-      return [entry, ...prev]; // newest at top
-    });
+    saveEntry(entry);
     setModal({ open: false });
   };
-  const handleDelete = (id: string) => { if (confirm('삭제하시겠습니까?')) setEntries(prev => prev.filter(e => e.id !== id)); };
+  const handleDelete = (id: string) => { if (confirm('삭제하시겠습니까?')) removeEntry(id); };
 
-  const updateEntry = (id: string, patch: Partial<ScheduleEntry>) =>
-    setEntries(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
+  const updateEntry = (id: string, patch: Partial<ScheduleEntry>) => patchEntry(id, patch);
 
   const displayDate = new Date(date + 'T00:00:00').toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
 

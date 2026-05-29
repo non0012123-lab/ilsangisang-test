@@ -16,7 +16,7 @@ import { overlapsRange, isMultiDay } from '../utils/dateRange';
 const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
 export default function FullSchedulePage() {
-  const { entries, setEntries, clients } = useApp();
+  const { entries, saveEntry, removeEntry, patchEntry, clients } = useApp();
   const { notify, show: showToast } = useCopyToast();
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
@@ -41,12 +41,11 @@ export default function FullSchedulePage() {
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const handleSave = (entry: ScheduleEntry) => {
-    setEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [entry, ...prev]);
+    saveEntry(entry);
     setModal({ open: false });
   };
-  const handleDelete = (id: string) => { if (confirm('삭제하시겠습니까?')) setEntries(prev => prev.filter(e => e.id !== id)); };
-  const updateEntry = (id: string, patch: Partial<ScheduleEntry>) =>
-    setEntries(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
+  const handleDelete = (id: string) => { if (confirm('삭제하시겠습니까?')) removeEntry(id); };
+  const updateEntry = (id: string, patch: Partial<ScheduleEntry>) => patchEntry(id, patch);
 
   return (
     <Layout>

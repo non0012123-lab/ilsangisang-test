@@ -42,7 +42,7 @@ const STATUS_STYLE: Record<string, string> = {
 const STATUS_LABEL: Record<string, string> = { completed: '완료', 'in-progress': '진행중', pending: '대기' };
 
 export default function TimetablePage() {
-  const { entries, setEntries, clients } = useApp();
+  const { entries, saveEntry, saveEntries, clients } = useApp();
   const [clientId, setClientId] = useState('all');
   const [curDate, setCurDate] = useState(new Date(2026, 4, 1));
   const [selectedDay, setSelectedDay] = useState<number | null>(29);
@@ -106,14 +106,14 @@ export default function TimetablePage() {
   const NUM_AREA = 32;   // 날짜 숫자 영역 높이(px)
 
   const handleSave = (entry: ScheduleEntry) => {
-    setEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [entry, ...prev]);
+    saveEntry(entry);
     setModal({ open: false });
   };
 
   const openAdd = (day: number) => setModal({ open: true, entry: null, date: padDate(year, month, day) });
 
   const addAiEntries = (newEntries: ScheduleEntry[]) => {
-    setEntries(prev => [...newEntries, ...prev]);
+    saveEntries(newEntries);
     setAiOpen(false);
   };
 

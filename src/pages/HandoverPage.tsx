@@ -91,7 +91,7 @@ function CollapsibleSection({
 }
 
 export default function HandoverPage() {
-  const { entries, clients, handoverDocs, setHandoverDocs } = useApp();
+  const { entries, clients, handoverDocs, saveHandover } = useApp();
   const { user } = useAuth();
   const [selectedId, setSelectedId] = useState<string | null>(handoverDocs[0]?.id ?? null);
   const [tab, setTab] = useState<DocTab>('overview');
@@ -111,7 +111,7 @@ export default function HandoverPage() {
 
   const saveEdit = () => {
     if (!draft) return;
-    setHandoverDocs(prev => prev.map(d => d.id === draft.id ? { ...draft, updatedAt: '2026-05-29', authorId: user?.id ?? draft.authorId, authorName: user?.name ?? draft.authorName } : d));
+    saveHandover({ ...draft, updatedAt: '2026-05-29', authorId: user?.id ?? draft.authorId, authorName: user?.name ?? draft.authorName });
     setEditing(false);
     setDraft(null);
   };
@@ -140,7 +140,7 @@ export default function HandoverPage() {
       specialNotes: '',
       managerMemo: '',
     };
-    setHandoverDocs(prev => [...prev, newDoc]);
+    saveHandover(newDoc);
     setSelectedId(newDoc.id);
     setShowNewForm(false);
     setNewClientId('');

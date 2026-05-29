@@ -29,7 +29,7 @@ function getWeekRange(base: string) {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { entries: allEntries, setEntries } = useApp();
+  const { entries: allEntries, patchEntry } = useApp();
   const isAdmin = user?.role === 'admin';
 
   // 내 작업: admin은 전체, 일반 담당자는 본인 것만
@@ -63,7 +63,7 @@ export default function DashboardPage() {
   const teamToday = allEntries.filter(e => coversDate(e, TODAY));
 
   const updateEntry = (id: string, patch: Partial<typeof allEntries[0]>) =>
-    setEntries(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
+    patchEntry(id, patch);
 
   const greet = () => {
     const h = 10; // fixed for demo
