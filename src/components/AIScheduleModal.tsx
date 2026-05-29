@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Sparkles, AlertTriangle, Trash2, CalendarPlus } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
 
 const CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
@@ -28,7 +29,10 @@ interface Props {
 
 export default function AIScheduleModal({ onClose, onAdd }: Props) {
   const { members, clients } = useApp();
+  const { user } = useAuth();
   const activeClients = clients.filter(c => c.status !== 'inactive');
+  // 담당자명이 매칭되지 않으면 작성 중인 본인을 기본 담당자로
+  const selfId = user?.id && members.some(m => m.id === user.id) ? user.id : '';
 
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
@@ -77,7 +81,7 @@ export default function AIScheduleModal({ onClose, onAdd }: Props) {
         tempId: `${Date.now()}-${i}`,
         date: (e.date as string) ?? '',
         endDate: (e.endDate as string) && (e.endDate as string) !== 'null' ? (e.endDate as string) : '',
-        managerId: matchManager((e.managerName as string) ?? ''),
+        managerId: matchManager((e.managerName as string) ?? '') || selfId,
         clientId: matchClient((e.clientName as string) ?? ''),
         category: matchCategory((e.category as string) ?? ''),
         keyword: (e.keyword as string) ?? '',
