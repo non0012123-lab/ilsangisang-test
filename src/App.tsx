@@ -14,11 +14,13 @@ import TimetablePage from './pages/TimetablePage';
 import AIPlanningPage from './pages/AIPlanningPage';
 import HandoverPage from './pages/HandoverPage';
 import PendingApprovalPage from './pages/PendingApprovalPage';
+import SuspendedPage from './pages/SuspendedPage';
 import ApprovalsPage from './pages/ApprovalsPage';
 import type { AuthUser } from './types';
 
 // 역할별 첫 화면
 function homeFor(user: AuthUser): string {
+  if (user.status === 'suspended') return '/suspended';
   if (user.role === 'pending') return '/pending';
   if (user.role === 'client') return '/client-portal';
   return '/dashboard';
@@ -39,6 +41,8 @@ function ProtectedRoute({ children, allowClient = false, adminOnly = false }: { 
   const { user, loading } = useAuth();
   if (loading) return <FullScreenLoader />;
   if (!user) return <Navigate to="/login" replace />;
+  // 중지된 계정은 어떤 내부 화면에도 접근 불가
+  if (user.status === 'suspended') return <Navigate to="/suspended" replace />;
   // 승인 전(pending)에는 어떤 내부 화면에도 접근 불가
   if (user.role === 'pending') return <Navigate to="/pending" replace />;
   if (adminOnly && user.role !== 'admin') return <Navigate to="/dashboard" replace />;
@@ -60,7 +64,15 @@ function AppRoutes() {
       {/* 승인 대기 화면 (로그인은 됐으나 미승인) */}
       <Route path="/pending" element={
         !user ? <Navigate to="/login" replace />
+          : user.status === 'suspended' ? <Navigate to="/suspended" replace />
           : user.role === 'pending' ? <PendingApprovalPage />
+          : <Navigate to={homeFor(user)} replace />
+      } />
+
+      {/* 계정 중지 안내 화면 */}
+      <Route path="/suspended" element={
+        !user ? <Navigate to="/login" replace />
+          : user.status === 'suspended' ? <SuspendedPage />
           : <Navigate to={homeFor(user)} replace />
       } />
 

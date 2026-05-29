@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import type { AuthUser, UserRole } from '../types';
+import type { AuthUser, UserRole, AccountStatus } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface SignUpParams {
@@ -30,6 +30,7 @@ interface ProfileRow {
   role: string | null;
   department: string | null;
   client_id: string | null;
+  status: string | null;
 }
 
 function toAuthUser(row: ProfileRow, fallbackEmail?: string): AuthUser {
@@ -40,6 +41,7 @@ function toAuthUser(row: ProfileRow, fallbackEmail?: string): AuthUser {
     role: (row.role as UserRole) ?? 'pending',
     department: row.department ?? undefined,
     clientId: row.client_id ?? undefined,
+    status: (row.status as AccountStatus) ?? 'active',
   };
 }
 
@@ -52,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!supabase || !session?.user) { setUser(null); return; }
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, name, email, role, department, client_id')
+      .select('id, name, email, role, department, client_id, status')
       .eq('id', session.user.id)
       .single();
     if (error || !data) {

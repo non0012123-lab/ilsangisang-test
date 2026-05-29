@@ -38,6 +38,8 @@ export interface TeamMember {
   department?: string;
 }
 
+export type AccountStatus = 'active' | 'suspended';
+
 // Supabase 인증 + profiles 테이블에서 만들어지는 로그인 사용자
 export interface AuthUser {
   id: string;          // auth.users.id (uuid)
@@ -46,6 +48,7 @@ export interface AuthUser {
   role: UserRole;
   department?: string;
   clientId?: string;
+  status?: AccountStatus;   // 'suspended' 면 내부 접근 차단
 }
 
 export interface ScheduleEntry {

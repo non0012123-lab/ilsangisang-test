@@ -1,35 +1,53 @@
-import { useState, useRef } from 'react';
-import { Upload, Sparkles, FileSpreadsheet, X, ChevronRight, Calendar, Hash, PlayCircle, Globe, Video, Paintbrush, MessageSquare, CheckCircle2, Clock } from 'lucide-react';
+import { useState, useRef, type ReactNode } from 'react';
+import { Upload, Sparkles, FileSpreadsheet, X, ChevronRight, Calendar, Hash, PlayCircle, Globe, Video, Paintbrush, MessageSquare, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 
 type Step = 1 | 2 | 3;
 
+interface PlanTask { category: string; content: string; status: string }
+interface PlanWeek { week: string; date: string; tasks: PlanTask[] }
+interface AIPlan { weeks: PlanWeek[]; memo?: string }
+
 const CAMPAIGN_TYPES = ['브랜드 인지도', '신제품 출시', '시즌 프로모션', '이벤트/캠페인', '커뮤니티 활성화', '위기 관리', '기타'];
 
-const SAMPLE_PLAN = [
-  { week: '1주차', date: '06.01 ~ 06.07', tasks: [
-    { category: 'SNS', icon: <Hash size={12} />, color: '#ec4899', content: '캠페인 론칭 예고 포스팅 (인스타그램 스토리 × 3)', status: '예정' },
-    { category: '디자인제작', icon: <Paintbrush size={12} />, color: '#f97316', content: '메인 배너 디자인 및 SNS 템플릿 제작', status: '예정' },
-    { category: '네이버', icon: <Globe size={12} />, color: '#22c55e', content: '키워드 리서치 및 블로그 포스팅 기획 (3건)', status: '예정' },
-  ]},
-  { week: '2주차', date: '06.08 ~ 06.14', tasks: [
-    { category: 'SNS', icon: <Hash size={12} />, color: '#ec4899', content: '메인 콘텐츠 피드 게시 + 해시태그 캠페인 시작', status: '예정' },
-    { category: '유튜브', icon: <PlayCircle size={12} />, color: '#ef4444', content: '브랜드 스토리 영상 업로드 (5분 내외)', status: '예정' },
-    { category: '네이버 여론작업', icon: <MessageSquare size={12} />, color: '#0ea5e9', content: '커뮤니티 반응 모니터링 및 여론 분석', status: '예정' },
-  ]},
-  { week: '3주차', date: '06.15 ~ 06.21', tasks: [
-    { category: 'SNS', icon: <Hash size={12} />, color: '#ec4899', content: '중간 성과 체크 + 리타겟팅 콘텐츠 게시', status: '예정' },
-    { category: '영상제작', icon: <Video size={12} />, color: '#a855f7', content: '숏폼 리뷰 영상 편집 및 릴스/쇼츠 배포', status: '예정' },
-    { category: '네이버', icon: <Globe size={12} />, color: '#22c55e', content: '블로그 2차 포스팅 및 검색 노출 최적화', status: '예정' },
-  ]},
-  { week: '4주차', date: '06.22 ~ 06.30', tasks: [
-    { category: 'SNS', icon: <Hash size={12} />, color: '#ec4899', content: '클로징 이벤트 게시 및 성과 공유 콘텐츠', status: '예정' },
-    { category: '네이버 여론작업', icon: <MessageSquare size={12} />, color: '#0ea5e9', content: '최종 여론 분석 리포트 작성', status: '예정' },
-    { category: '디자인제작', icon: <Paintbrush size={12} />, color: '#f97316', content: '성과 인포그래픽 및 결과 카드뉴스 제작', status: '예정' },
-  ]},
-];
+// 카테고리 → 표시용 색상/아이콘 (AI 결과·샘플 공통)
+const CATEGORY_META: Record<string, { color: string; icon: ReactNode }> = {
+  'SNS': { color: '#ec4899', icon: <Hash size={12} /> },
+  '유튜브': { color: '#ef4444', icon: <PlayCircle size={12} /> },
+  '네이버': { color: '#22c55e', icon: <Globe size={12} /> },
+  '영상제작': { color: '#a855f7', icon: <Video size={12} /> },
+  '디자인제작': { color: '#f97316', icon: <Paintbrush size={12} /> },
+  '네이버 여론작업': { color: '#0ea5e9', icon: <MessageSquare size={12} /> },
+  '기타': { color: '#6b7280', icon: <Hash size={12} /> },
+};
+const metaFor = (category: string) => CATEGORY_META[category] ?? CATEGORY_META['기타'];
+
+const SAMPLE_PLAN: AIPlan = {
+  weeks: [
+    { week: '1주차', date: '06.01 ~ 06.07', tasks: [
+      { category: 'SNS', content: '캠페인 론칭 예고 포스팅 (인스타그램 스토리 × 3)', status: '예정' },
+      { category: '디자인제작', content: '메인 배너 디자인 및 SNS 템플릿 제작', status: '예정' },
+      { category: '네이버', content: '키워드 리서치 및 블로그 포스팅 기획 (3건)', status: '예정' },
+    ]},
+    { week: '2주차', date: '06.08 ~ 06.14', tasks: [
+      { category: 'SNS', content: '메인 콘텐츠 피드 게시 + 해시태그 캠페인 시작', status: '예정' },
+      { category: '유튜브', content: '브랜드 스토리 영상 업로드 (5분 내외)', status: '예정' },
+      { category: '네이버 여론작업', content: '커뮤니티 반응 모니터링 및 여론 분석', status: '예정' },
+    ]},
+    { week: '3주차', date: '06.15 ~ 06.21', tasks: [
+      { category: 'SNS', content: '중간 성과 체크 + 리타겟팅 콘텐츠 게시', status: '예정' },
+      { category: '영상제작', content: '숏폼 리뷰 영상 편집 및 릴스/쇼츠 배포', status: '예정' },
+      { category: '네이버', content: '블로그 2차 포스팅 및 검색 노출 최적화', status: '예정' },
+    ]},
+    { week: '4주차', date: '06.22 ~ 06.30', tasks: [
+      { category: 'SNS', content: '클로징 이벤트 게시 및 성과 공유 콘텐츠', status: '예정' },
+      { category: '네이버 여론작업', content: '최종 여론 분석 리포트 작성', status: '예정' },
+      { category: '디자인제작', content: '성과 인포그래픽 및 결과 카드뉴스 제작', status: '예정' },
+    ]},
+  ],
+};
 
 export default function AIPlanningPage() {
   const { clients } = useApp();
@@ -40,6 +58,8 @@ export default function AIPlanningPage() {
   const [campaignType, setCampaignType] = useState('');
   const [goal, setGoal] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [plan, setPlan] = useState<AIPlan | null>(null);
+  const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const activeClients = clients.filter(c => c.status !== 'inactive');
@@ -56,15 +76,45 @@ export default function AIPlanningPage() {
     if (f) setFile(f);
   };
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     setIsAnalyzing(true);
-    setTimeout(() => {
-      setIsAnalyzing(false);
+    setError('');
+    try {
+      // CSV/텍스트 가이드라인은 본문을 함께 전달 (xlsx/pdf 등 바이너리는 생략됨)
+      let guideline = '';
+      if (file) {
+        try { guideline = (await file.text()).slice(0, 8000); } catch { /* 바이너리 파일은 건너뜀 */ }
+      }
+      const res = await fetch('/api/ai-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientName: selectedClient?.name,
+          industry: selectedClient?.industry,
+          period,
+          campaignType,
+          goal,
+          guideline,
+        }),
+      });
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        // GitHub Pages 등 함수가 없는 환경에서는 SPA fallback(HTML)이 돌아옴
+        throw new Error('AI 서버(/api/ai-plan)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
+      }
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
+      setPlan({ weeks: Array.isArray(data.weeks) ? data.weeks : [], memo: data.memo });
       setStep(3);
-    }, 2800);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'AI 분석 중 오류가 발생했습니다.');
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const canAnalyze = clientId && period.start && period.end && campaignType;
+  const result = plan ?? SAMPLE_PLAN;   // AI 결과가 없으면 샘플 표시
 
   return (
     <Layout>
@@ -288,6 +338,12 @@ export default function AIPlanningPage() {
           </div>
         )}
 
+        {step === 2 && error && (
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+            <AlertTriangle size={16} className="shrink-0" /> {error}
+          </div>
+        )}
+
         {step === 2 && (
           <div className="flex justify-between">
             <button onClick={() => setStep(1)}
@@ -341,12 +397,14 @@ export default function AIPlanningPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold text-gray-900">AI 추천 월간 콘텐츠 플랜</h3>
-                <span className="text-xs bg-purple-50 text-purple-600 font-semibold px-2.5 py-1 rounded-full">AI 생성 (샘플)</span>
+                <span className="text-xs bg-purple-50 text-purple-600 font-semibold px-2.5 py-1 rounded-full">
+                  {plan ? 'AI 생성' : '샘플'}
+                </span>
               </div>
 
               <div className="space-y-4">
-                {SAMPLE_PLAN.map(week => (
-                  <div key={week.week} className="border border-gray-100 rounded-xl overflow-hidden">
+                {result.weeks.map((week, wi) => (
+                  <div key={wi} className="border border-gray-100 rounded-xl overflow-hidden">
                     <div className="bg-gray-50 px-4 py-2.5 flex items-center justify-between">
                       <span className="font-semibold text-gray-900 text-sm">{week.week}</span>
                       <span className="text-xs text-gray-400">{week.date}</span>
@@ -355,8 +413,8 @@ export default function AIPlanningPage() {
                       {week.tasks.map((task, ti) => (
                         <div key={ti} className="px-4 py-3 flex items-start gap-3 hover:bg-gray-50/50 transition-colors">
                           <span className="flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded-full text-white shrink-0"
-                            style={{ backgroundColor: task.color }}>
-                            {task.icon} {task.category}
+                            style={{ backgroundColor: metaFor(task.category).color }}>
+                            {metaFor(task.category).icon} {task.category}
                           </span>
                           <span className="text-sm text-gray-700 flex-1">{task.content}</span>
                           <span className="text-xs bg-amber-50 text-amber-600 font-medium px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1">
@@ -372,8 +430,8 @@ export default function AIPlanningPage() {
               <div className="mt-4 p-4 bg-blue-50 rounded-xl">
                 <p className="text-xs font-bold text-blue-700 mb-1">💡 AI 추천 메모</p>
                 <p className="text-xs text-blue-600 leading-relaxed">
-                  {campaignType} 캠페인의 경우 1~2주차에 인지도 확보에 집중하고, 3~4주차에 전환 유도 콘텐츠를 배치하는 전략이 효과적입니다.
-                  특히 SNS 릴스와 유튜브 쇼츠의 시너지 효과를 노리면 노출수를 극대화할 수 있습니다.
+                  {result.memo ??
+                    `${campaignType} 캠페인의 경우 1~2주차에 인지도 확보에 집중하고, 3~4주차에 전환 유도 콘텐츠를 배치하는 전략이 효과적입니다. 특히 SNS 릴스와 유튜브 쇼츠의 시너지 효과를 노리면 노출수를 극대화할 수 있습니다.`}
                 </p>
               </div>
             </div>

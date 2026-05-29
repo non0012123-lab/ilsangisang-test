@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ShieldCheck, UserCheck, Clock, RefreshCw, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, UserCheck, Clock, RefreshCw, AlertTriangle, Ban, RotateCcw, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { supabase } from '../lib/supabase';
@@ -14,6 +14,7 @@ interface Profile {
   role: UserRole;
   department: string | null;
   client_id: string | null;
+  status: 'active' | 'suspended';
   created_at: string;
 }
 
@@ -37,7 +38,7 @@ export default function ApprovalsPage() {
     setLoading(true);
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, name, email, role, department, client_id, created_at')
+      .select('id, name, email, role, department, client_id, status, created_at')
       .order('created_at', { ascending: false });
     if (error) setError(error.message);
     else setProfiles((data ?? []) as Profile[]);
@@ -58,6 +59,33 @@ export default function ApprovalsPage() {
     else {
       setProfiles(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
       // 담당자 드롭다운(스케줄 등록)에 즉시 반영
+      await reloadMembers();
+    }
+    setBusyId(null);
+  };
+
+  // 계정 중지 / 복구
+  const setStatus = async (id: string, status: 'active' | 'suspended') => {
+    if (!supabase) return;
+    setBusyId(id); setError('');
+    const { error } = await supabase.from('profiles').update({ status }).eq('id', id);
+    if (error) setError(`상태 변경 실패: ${error.message}`);
+    else {
+      setProfiles(prev => prev.map(p => p.id === id ? { ...p, status } : p));
+      await reloadMembers();
+    }
+    setBusyId(null);
+  };
+
+  // 탈퇴 (프로필 삭제) — 되돌릴 수 없음
+  const removeUser = async (p: Profile) => {
+    if (!supabase) return;
+    if (!window.confirm(`'${p.name ?? p.email}' 계정을 탈퇴 처리할까요?\n프로필이 삭제되며 더 이상 서비스에 접근할 수 없습니다. (되돌릴 수 없음)`)) return;
+    setBusyId(p.id); setError('');
+    const { error } = await supabase.from('profiles').delete().eq('id', p.id);
+    if (error) setError(`탈퇴 실패: ${error.message}`);
+    else {
+      setProfiles(prev => prev.filter(x => x.id !== p.id));
       await reloadMembers();
     }
     setBusyId(null);
@@ -121,7 +149,7 @@ export default function ApprovalsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
-                    {['이름', '이메일', '부서', '역할', '연결 클라이언트'].map(h => (
+                    {['이름', '이메일', '부서', '역할', '연결 클라이언트', '상태', '관리'].map(h => (
                       <th key={h} className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -151,6 +179,34 @@ export default function ApprovalsPage() {
                             {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                           </select>
                         ) : <span className="text-gray-300">-</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        {p.status === 'suspended'
+                          ? <span className="text-xs font-semibold bg-red-50 text-red-600 px-2 py-0.5 rounded-full">중지됨</span>
+                          : <span className="text-xs font-semibold bg-green-50 text-green-600 px-2 py-0.5 rounded-full">활성</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        {p.role === 'admin' || p.id === user?.id ? (
+                          <span className="text-gray-300 text-xs">-</span>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            {p.status === 'suspended' ? (
+                              <button onClick={() => setStatus(p.id, 'active')} disabled={busyId === p.id}
+                                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 transition-colors whitespace-nowrap">
+                                <RotateCcw size={12} /> 복구
+                              </button>
+                            ) : (
+                              <button onClick={() => setStatus(p.id, 'suspended')} disabled={busyId === p.id}
+                                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors whitespace-nowrap">
+                                <Ban size={12} /> 중지
+                              </button>
+                            )}
+                            <button onClick={() => removeUser(p)} disabled={busyId === p.id}
+                              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors whitespace-nowrap">
+                              <Trash2 size={12} /> 탈퇴
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
