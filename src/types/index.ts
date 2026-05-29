@@ -3,19 +3,19 @@ export type ScheduleStatus = 'pending' | 'in-progress' | 'completed';
 export type UserRole = 'admin' | 'manager' | 'client';
 
 export interface AIMetrics {
-  views?: number;        // 조회수
-  likes?: number;        // 좋아요
-  comments?: number;     // 댓글수
-  shares?: number;       // 공유수
-  saves?: number;        // 저장수
-  impressions?: number;  // 노출수
-  reach?: number;        // 도달수
-  followers?: number;    // 팔로워수
-  blogViews?: number;    // 블로그 조회수
-  cafeViews?: number;    // 카페 조회수
-  watchTime?: string;    // 시청 시간
-  subscribers?: number;  // 구독자수
-  clicks?: number;       // 클릭수
+  views?: number;
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  saves?: number;
+  impressions?: number;
+  reach?: number;
+  followers?: number;
+  blogViews?: number;
+  cafeViews?: number;
+  watchTime?: string;
+  subscribers?: number;
+  clicks?: number;
   custom?: { label: string; value: string }[];
   aiAnalyzed?: boolean;
   analyzedAt?: string;
@@ -37,17 +37,14 @@ export interface ScheduleEntry {
   managerId: string;
   managerName: string;
   category: Category;
-  // 일반 카테고리 필드
   keyword?: string;
   link?: string;
   rank?: number;
-  // 네이버 여론작업 전용 필드
-  opinionTitle?: string;   // 제목
-  opinionContent?: string; // 내용
-  opinionComments?: string; // 댓글
-  // 공통
+  opinionTitle?: string;
+  opinionContent?: string;
+  opinionComments?: string;
   screenshot?: string;
-  metrics?: AIMetrics;     // AI 분석 결과 (인사이트 데이터)
+  metrics?: AIMetrics;
   clientId: string;
   clientName: string;
   status: ScheduleStatus;
@@ -79,4 +76,40 @@ export interface Report {
   summary: string;
   highlights?: string[];
   fileSize?: string;
+}
+
+// ── 인수인계 ──────────────────────────────────────────
+
+export interface KeyContact {
+  id: string;
+  name: string;
+  role: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+}
+
+export interface ImportantLink {
+  id: string;
+  title: string;
+  url: string;
+  category: string;
+  notes?: string;
+}
+
+export interface HandoverDoc {
+  id: string;
+  clientId: string;
+  clientName: string;
+  authorId: string;
+  authorName: string;
+  updatedAt: string;
+  overview: string;
+  keyContacts: KeyContact[];
+  importantLinks: ImportantLink[];
+  guidelines: string;
+  tone: string;
+  dontDo: string;
+  specialNotes: string;
+  managerMemo: string;
 }

@@ -1,4 +1,4 @@
-import type { User, Client, ScheduleEntry, Report } from '../types';
+import type { User, Client, ScheduleEntry, Report, HandoverDoc } from '../types';
 
 export const USERS: User[] = [
   { id: 'u1', name: '김민준', email: 'admin@ilsangisang.com', role: 'admin', department: '전략팀', password: 'admin123' },
@@ -135,3 +135,74 @@ export const REPORTS: Report[] = [
     fileSize: '1.5 MB',
   },
 ];
+
+export const HANDOVER_DOCS: HandoverDoc[] = [
+  {
+    id: 'hd1',
+    clientId: 'cl1',
+    clientName: '스타벅스 코리아',
+    authorId: 'u2',
+    authorName: '이수연',
+    updatedAt: '2026-05-28',
+    overview: '스타벅스 코리아 SNS 및 온라인 마케팅 전담. 주력 채널은 인스타그램(@starbuckskorea, 팔로워 약 200만)이며 매주 3-4건 피드, 매일 스토리 운영 중. 시즌 음료 출시마다 대규모 캠페인 진행.',
+    keyContacts: [
+      { id: 'kc1', name: '박현수', role: '마케팅 팀장', phone: '010-1234-5678', email: 'park@starbucks.co.kr', notes: '최종 컨펌 담당. 오전 중 연락하면 빠르게 응답. 카카오톡 선호.' },
+      { id: 'kc2', name: '김소영', role: '콘텐츠 담당자', phone: '010-2345-6789', email: 'kim.sy@starbucks.co.kr', notes: '실무 담당자. 소재 요청 및 수정사항 여기로 연락. 매우 꼼꼼함.' },
+    ],
+    importantLinks: [
+      { id: 'il1', title: '인스타그램 공식 채널', url: 'https://www.instagram.com/starbuckskorea/', category: 'SNS', notes: '주 3-4회 피드 게시 중' },
+      { id: 'il2', title: '스타벅스 공식 홈페이지', url: 'https://www.starbucks.co.kr', category: '웹사이트', notes: '신메뉴·이벤트 정보 확인 필수' },
+      { id: 'il3', title: '네이버 브랜드 블로그', url: 'https://blog.naver.com/starbuckskorea', category: '네이버', notes: '월 2회 이상 포스팅 유지' },
+    ],
+    guidelines: '1. 게시물 최소 2일 전 클라이언트 컨펌 필수\n2. 해시태그 최대 15개, 핵심 3-5개 포함\n3. 스타벅스 공식 브랜드 컬러(#00704A) 사용\n4. 매월 1일 전월 성과보고서 전달\n5. 신메뉴 출시 시 3일 전부터 예고 콘텐츠 제작\n6. 사진은 반드시 고해상도(최소 1080px) 사용',
+    tone: '친근하고 따뜻한 톤. "~해요" "~입니다" 혼용 가능. 이모지는 적절히 사용(과도 지양). 20-35세 청년층 대상이나 전 연령 공감 가능한 내용. 영어 단어 과도 사용 금지.',
+    dontDo: '- 경쟁사(이디야, 투썸 등) 직접 언급 절대 금지\n- "최저가", "할인" 등 가격 강조 금지\n- 확인되지 않은 출시 정보 게시 금지\n- 정치/사회적 민감 이슈 관련 콘텐츠 금지\n- 로고 변형 또는 배경색 임의 변경 금지',
+    specialNotes: '- 시즌 음료 출시 2주 전부터 협의 시작\n- 연말·크리스마스 캠페인은 3개월 전 기획\n- 인스타 알고리즘상 화요일~목요일 오전 11시-오후 1시 게시 효율 높음\n- 팔로워 이벤트 진행 시 반드시 법무팀 검토 거친 약관 사용',
+    managerMemo: '담당하면서 가장 중요한 건 속도입니다. 시즌 음료나 이벤트 정보가 나오면 경쟁사보다 빠르게 콘텐츠를 올리는 게 핵심이에요. 박현수 팀장님은 항상 바쁘시니 카카오톡으로 먼저 연락드리고, 정식 수정 요청은 이메일로 하는 게 좋아요. 김소영 담당자님은 오탈자, 해시태그 하나하나 체크하시니 게시 전 최종 확인 꼭 받으세요. 11-1월 크리스마스 시즌이 가장 바쁜 시기로 이때 리소스를 집중 배분해야 합니다.',
+  },
+  {
+    id: 'hd2',
+    clientId: 'cl2',
+    clientName: '현대자동차',
+    authorId: 'u5',
+    authorName: '정호성',
+    updatedAt: '2026-05-25',
+    overview: '현대자동차 신차 출시 캠페인 및 유튜브 채널 관리 담당. 아이오닉 시리즈(전기차) 중심으로 콘텐츠 제작. 유튜브 구독자 100만+ 채널 운영.',
+    keyContacts: [
+      { id: 'kc3', name: '김지영', role: '디지털마케팅 팀장', phone: '010-3456-7890', email: 'kim.jy@hyundai.com', notes: '전체 방향성 결정. 월간 회의 주관. 신차 정보 가장 먼저 공유해줌.' },
+      { id: 'kc4', name: '이현준', role: '영상콘텐츠 담당', phone: '010-4567-8901', email: 'lee.hj@hyundai.com', notes: '영상 소재 및 편집 방향 협의 담당. 빠른 피드백.' },
+    ],
+    importantLinks: [
+      { id: 'il4', title: '유튜브 공식 채널', url: 'https://www.youtube.com/@HyundaiWorldwide', category: '유튜브', notes: '주 1-2회 영상 업로드 목표' },
+      { id: 'il5', title: '아이오닉 6 공식 페이지', url: 'https://www.hyundai.com/kr/ko/e/vehicles/ioniq6', category: '웹사이트', notes: '신차 스펙 및 가격 확인' },
+      { id: 'il6', title: '현대 인스타그램', url: 'https://www.instagram.com/hyundai_korea/', category: 'SNS', notes: '유튜브 영상 연계 쇼츠 배포' },
+    ],
+    guidelines: '1. 영상 업로드 최소 3일 전 클라이언트 시사회 진행\n2. 자동차 스펙/가격 수치는 반드시 확인 후 기재\n3. 경쟁사 차량 직접 비교 금지\n4. 시승 영상은 반드시 전문 드라이버 동반\n5. 배경음악은 저작권 클리어된 것만 사용',
+    tone: '신뢰감 있고 전문적인 톤. 전기차 기술력과 혁신성 강조. 환경 친화적 이미지 부각. 영어 기술 용어는 한글 설명 병기. 지나치게 딱딱하지 않게 스토리텔링 방식 선호.',
+    dontDo: '- 타 자동차 브랜드 직접 비교 금지\n- 확인되지 않은 기술 스펙 언급 금지\n- 정치적 이슈와 연결 금지\n- 사고/결함 관련 민감한 내용 절대 금지',
+    specialNotes: '- 신차 출시 1개월 전부터 티저 콘텐츠 기획\n- 유튜브 쇼츠는 세로형 9:16 비율 필수\n- 자동차 특성상 날씨·조명이 영상 퀄리티에 직결됨. 야외 촬영은 맑은 날씨 확보 필수\n- 전기차 관련 충전 인프라 언급 시 민감할 수 있으니 긍정적 방향으로만 서술',
+    managerMemo: '현대차 담당은 촬영 일정 조율이 가장 까다롭습니다. 차량 대여, 촬영 장소, 날씨를 모두 맞춰야 하므로 최소 2주 전부터 준비하세요. 김지영 팀장님은 데이터 기반 보고를 매우 중요시하시니 조회수, CTR, 시청 시간 등 구체적인 수치로 보고하는 습관을 들이세요. 아이오닉 시리즈가 핵심 라인업이므로 이 차종 관련 콘텐츠 우선순위 높게 잡으세요.',
+  },
+  {
+    id: 'hd3',
+    clientId: 'cl3',
+    clientName: '올리브영',
+    authorId: 'u2',
+    authorName: '이수연',
+    updatedAt: '2026-05-20',
+    overview: '올리브영 SNS 운영 및 신상품 프로모션 담당. 인스타그램(@oliveyoung_official) 중심으로 뷰티 제품 리뷰 및 시즌 프로모션 콘텐츠 제작.',
+    keyContacts: [
+      { id: 'kc5', name: '이민정', role: '소셜미디어 담당자', phone: '010-5678-9012', email: 'lee.mj@oliveyoung.com', notes: '모든 SNS 관련 커뮤니케이션 담당. 빠른 응답. 카카오톡 선호.' },
+    ],
+    importantLinks: [
+      { id: 'il7', title: '올리브영 인스타그램', url: 'https://www.instagram.com/oliveyoung_official/', category: 'SNS', notes: '주 4-5회 피드 게시' },
+      { id: 'il8', title: '올리브영 공식 앱', url: 'https://www.oliveyoung.co.kr', category: '웹사이트', notes: '신상품·프로모션 정보 확인' },
+    ],
+    guidelines: '1. 제품 리뷰 시 반드시 실제 사용 사진 포함\n2. 가격 표기 시 할인가 기준 (정가 병기)\n3. #올리브영 #oliveyoung 해시태그 필수\n4. 신상품 출시일 맞춰 게시 (출시 당일 오전 10시)',
+    tone: '트렌디하고 활기찬 톤. 뷰티에 관심 많은 20대 여성 타겟. 제품 성분, 효능 강조. 친구에게 알려주는 듯한 자연스러운 문체.',
+    dontDo: '- 경쟁사(CJ 올리브마트, 랄라블라) 비교 금지\n- 의학적 효능 과장 광고 금지\n- 미성년자 대상 화장품 콘텐츠 지양\n- 인플루언서 협찬 시 #광고 표기 필수',
+    specialNotes: '- 연 2회 메가세일(봄/여름, 가을/겨울)이 가장 중요한 시기\n- 올영어워즈 시즌에 콘텐츠 집중\n- MZ세대 트렌드에 민감한 클라이언트이므로 유행어, 밈 활용 적극 권장\n- 뷰티 인플루언서 협업 콘텐츠 반응 매우 좋음',
+    managerMemo: '올리브영 담당에서 가장 중요한 건 트렌드 캐치입니다. SNS에서 뜨는 제품/성분/트렌드를 누구보다 빠르게 캐치해서 콘텐츠화하는 게 핵심이에요. 이민정 담당자님은 밤에도 카톡 주시는 분이라 소통 속도는 빠른데, 그만큼 빠른 응답이 기대됩니다. 메가세일 시즌에는 리소스를 2-3배 잡아야 할 정도로 업무량이 급증하니 미리 준비하세요.',
+  },
+];
+

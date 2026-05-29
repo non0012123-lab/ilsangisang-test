@@ -5,10 +5,11 @@ import { useAuth } from '../context/AuthContext';
 
 type Tab = 'employee' | 'client';
 
-// 직원 탭: 두 번째를 클라이언트 체험 계정으로 변경
+// 직원 탭: 관리자 / 담당자 / 클라이언트 체험
 const DEMO_USERS = {
   employee: [
     { label: '관리자 (김민준)', email: 'admin@ilsangisang.com', password: 'admin123', badge: '관리자' },
+    { label: '담당자 (이수연)', email: 'lee@ilsangisang.com', password: 'pass123', badge: '담당자' },
     { label: '스타벅스 클라이언트 체험', email: 'starbucks@client.com', password: 'client123', badge: '클라이언트' },
   ],
   client: [
@@ -134,7 +135,7 @@ export default function LoginPage() {
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-gray-700">{u.label}</span>
                     {u.badge && (
-                      <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${u.badge === '클라이언트' ? 'bg-sky-100 text-sky-600' : 'bg-blue-100 text-blue-600'}`}>
+                      <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${u.badge === '클라이언트' ? 'bg-sky-100 text-sky-600' : u.badge === '담당자' ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'}`}>
                         {u.badge}
                       </span>
                     )}

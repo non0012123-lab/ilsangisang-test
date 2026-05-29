@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, CalendarDays, Users, LogOut,
   Hash, PlayCircle, Globe, Video, Paintbrush, ChevronDown, ChevronRight,
-  BarChart3, MessageSquare, CalendarRange, Sparkles,
+  BarChart3, MessageSquare, CalendarRange, Sparkles, ClipboardList,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -76,12 +76,17 @@ export default function Sidebar() {
           )}
         </div>
 
-        <div className="pt-2 border-t border-slate-700/50">
+        <div className="pt-2 border-t border-slate-700/50 space-y-0.5">
           <NavLink to="/clients"
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
             }
           ><Users size={18} />클라이언트 관리</NavLink>
+          <NavLink to="/handover"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
+            }
+          ><ClipboardList size={18} />인수인계</NavLink>
         </div>
       </nav>
 

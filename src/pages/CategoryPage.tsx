@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useParams, NavLink } from 'react-router-dom';
-import { Plus, Pencil, Trash2, ExternalLink, Copy, Image, Hash, PlayCircle, Globe, Video, Paintbrush, MessageSquare } from 'lucide-react';
+import { Plus, Pencil, Trash2, ExternalLink, Copy, Hash, PlayCircle, Globe, Video, Paintbrush, MessageSquare } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
-import StatusBadge from '../components/StatusBadge';
+import InlineStatus from '../components/InlineStatus';
+import InlineScreenshot from '../components/InlineScreenshot';
 import ScheduleModal from '../components/ScheduleModal';
 import type { ScheduleEntry, Category } from '../types';
 import { useApp } from '../context/AppContext';
@@ -43,6 +44,8 @@ export default function CategoryPage() {
     setModal({ open: false });
   };
   const handleDelete = (id: string) => { if (confirm('삭제하시겠습니까?')) setEntries(prev => prev.filter(e => e.id !== id)); };
+  const updateEntry = (id: string, patch: Partial<ScheduleEntry>) =>
+    setEntries(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
 
   const completed = filtered.filter(e => e.status === 'completed').length;
   const inProg = filtered.filter(e => e.status === 'in-progress').length;
@@ -111,7 +114,7 @@ export default function CategoryPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <StatusBadge status={entry.status} />
+                      <InlineStatus status={entry.status} onChange={s => updateEntry(entry.id, { status: s })} />
                       <button onClick={() => setModal({ open: true, entry })}
                         className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"><Pencil size={14} /></button>
                       <button onClick={() => handleDelete(entry.id)}
@@ -136,12 +139,14 @@ export default function CategoryPage() {
                   <div className="flex items-center gap-4">
                     {entry.metrics?.views && <span className="text-xs text-gray-500">👁 {entry.metrics.views.toLocaleString()} 조회</span>}
                     {entry.metrics?.comments && <span className="text-xs text-gray-500">💬 {entry.metrics.comments.toLocaleString()} 댓글</span>}
-                    {entry.screenshot && (
-                      <button onClick={() => setPreviewImg(entry.screenshot!)}
-                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700">
-                        <Image size={12} /> 캡처본 보기
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-gray-400">캡처본:</span>
+                      <InlineScreenshot
+                        screenshot={entry.screenshot}
+                        onChange={v => updateEntry(entry.id, { screenshot: v })}
+                        onPreview={setPreviewImg}
+                      />
+                    </div>
                   </div>
                 </div>
               ))
@@ -191,13 +196,15 @@ export default function CategoryPage() {
                           {entry.rank ? <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-50 text-blue-700 font-bold text-xs">{entry.rank}</span> : <span className="text-gray-300">-</span>}
                         </td>
                         <td className="px-4 py-3">
-                          {entry.screenshot ? (
-                            <button onClick={() => setPreviewImg(entry.screenshot!)}>
-                              <img src={entry.screenshot} alt="" className="w-9 h-9 rounded-lg object-cover border border-gray-200 hover:opacity-80" />
-                            </button>
-                          ) : <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center text-gray-300"><Image size={14} /></div>}
+                          <InlineScreenshot
+                            screenshot={entry.screenshot}
+                            onChange={v => updateEntry(entry.id, { screenshot: v })}
+                            onPreview={setPreviewImg}
+                          />
                         </td>
-                        <td className="px-4 py-3"><StatusBadge status={entry.status} /></td>
+                        <td className="px-4 py-3">
+                          <InlineStatus status={entry.status} onChange={s => updateEntry(entry.id, { status: s })} />
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex gap-1">
                             <button onClick={() => setModal({ open: true, entry })}

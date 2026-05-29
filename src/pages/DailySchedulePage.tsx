@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Plus, Pencil, Trash2, ExternalLink, Copy, Image, ChevronLeft, ChevronRight, Search, Filter } from 'lucide-react';
+import { Plus, Pencil, Trash2, ExternalLink, Copy, ChevronLeft, ChevronRight, Search, Filter } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
-import StatusBadge from '../components/StatusBadge';
+import InlineStatus from '../components/InlineStatus';
+import InlineScreenshot from '../components/InlineScreenshot';
 import ScheduleModal from '../components/ScheduleModal';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
@@ -61,6 +62,9 @@ export default function DailySchedulePage() {
     setModal({ open: false });
   };
   const handleDelete = (id: string) => { if (confirm('삭제하시겠습니까?')) setEntries(prev => prev.filter(e => e.id !== id)); };
+
+  const updateEntry = (id: string, patch: Partial<ScheduleEntry>) =>
+    setEntries(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
 
   const displayDate = new Date(date + 'T00:00:00').toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
 
@@ -215,15 +219,18 @@ export default function DailySchedulePage() {
                         ) : <span className="text-gray-300">-</span>}
                       </td>
                       <td className="px-4 py-3">
-                        {entry.screenshot ? (
-                          <button onClick={() => setPreviewImg(entry.screenshot!)}>
-                            <img src={entry.screenshot} alt="" className="w-9 h-9 rounded-lg object-cover border border-gray-200 hover:opacity-80" />
-                          </button>
-                        ) : (
-                          <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center text-gray-300"><Image size={14} /></div>
-                        )}
+                        <InlineScreenshot
+                          screenshot={entry.screenshot}
+                          onChange={v => updateEntry(entry.id, { screenshot: v })}
+                          onPreview={setPreviewImg}
+                        />
                       </td>
-                      <td className="px-4 py-3"><StatusBadge status={entry.status} /></td>
+                      <td className="px-4 py-3">
+                        <InlineStatus
+                          status={entry.status}
+                          onChange={s => updateEntry(entry.id, { status: s })}
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-1">
                           <button onClick={() => setModal({ open: true, entry })}

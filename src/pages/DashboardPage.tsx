@@ -1,128 +1,275 @@
-import { CheckCircle2, Clock, Users, TrendingUp, ArrowUpRight, Plus } from 'lucide-react';
+import { CheckCircle2, Clock, Calendar, ArrowUpRight, Plus, TrendingUp, Users, Flame } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
-import StatusBadge from '../components/StatusBadge';
+import InlineStatus from '../components/InlineStatus';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 
 const TODAY = '2026-05-29';
+const THIS_MONTH = '2026-05';
+
+// 로컬 날짜 기준 YYYY-MM-DD 포맷 (toISOString의 UTC 변환 오프바이원 방지)
+function fmtLocal(x: Date) {
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+
+function getWeekRange(base: string) {
+  const d = new Date(base + 'T00:00:00');
+  const day = d.getDay();
+  const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  return { start: fmtLocal(mon), end: fmtLocal(sun) };
+}
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { entries: SCHEDULE_ENTRIES, clients: CLIENTS } = useApp();
-  const todayEntries = SCHEDULE_ENTRIES.filter(e => e.date === TODAY);
-  const completed = SCHEDULE_ENTRIES.filter(e => e.status === 'completed').length;
-  const inProgress = SCHEDULE_ENTRIES.filter(e => e.status === 'in-progress').length;
-  const activeClients = CLIENTS.filter(c => c.status === 'active').length;
+  const { user } = useAuth();
+  const { entries: allEntries, setEntries } = useApp();
+  const isAdmin = user?.role === 'admin';
 
-  const stats = [
-    { label: '오늘 작업', value: todayEntries.length, icon: <TrendingUp size={20} />, color: 'text-blue-600', bg: 'bg-blue-50', change: '+2' },
-    { label: '완료된 작업', value: completed, icon: <CheckCircle2 size={20} />, color: 'text-green-600', bg: 'bg-green-50', change: '+5' },
-    { label: '진행중', value: inProgress, icon: <Clock size={20} />, color: 'text-amber-600', bg: 'bg-amber-50', change: '' },
-    { label: '활성 클라이언트', value: activeClients, icon: <Users size={20} />, color: 'text-purple-600', bg: 'bg-purple-50', change: '' },
-  ];
+  // 내 작업: admin은 전체, 일반 담당자는 본인 것만
+  const myEntries = isAdmin ? allEntries : allEntries.filter(e => e.managerId === user?.id);
 
-  const recentEntries = SCHEDULE_ENTRIES
-    .filter(e => e.date <= TODAY)
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 8);
+  const todayTasks = [...myEntries.filter(e => e.date === TODAY)]
+    .sort((a, b) => {
+      const ord = { pending: 0, 'in-progress': 1, completed: 2 };
+      return ord[a.status] - ord[b.status];
+    });
+
+  const monthEntries = myEntries.filter(e => e.date.startsWith(THIS_MONTH));
+  const monthDone = monthEntries.filter(e => e.status === 'completed').length;
+  const monthProg = monthEntries.filter(e => e.status === 'in-progress').length;
+  const monthPend = monthEntries.filter(e => e.status === 'pending').length;
+
+  const week = getWeekRange(TODAY);
+  const weekEntries = myEntries
+    .filter(e => e.date >= week.start && e.date <= week.end)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const upcoming = myEntries
+    .filter(e => e.date > TODAY && e.status !== 'completed')
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 5);
+
+  const myClients = [...new Set(myEntries.map(e => e.clientId))];
+
+  // Team stats (admin only)
+  const teamToday = allEntries.filter(e => e.date === TODAY);
+
+  const updateEntry = (id: string, patch: Partial<typeof allEntries[0]>) =>
+    setEntries(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
+
+  const greet = () => {
+    const h = 10; // fixed for demo
+    if (h < 12) return '좋은 아침이에요';
+    if (h < 18) return '안녕하세요';
+    return '오늘도 수고하셨어요';
+  };
 
   return (
     <Layout>
-      <Header title="대시보드" subtitle="일상이상커뮤니케이션 마케팅 현황" />
-      <div className="flex-1 p-6 space-y-6">
-        {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {stats.map(stat => (
-            <div key={stat.label} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-              <div className="flex items-start justify-between">
-                <div className={`w-10 h-10 rounded-xl ${stat.bg} ${stat.color} flex items-center justify-center`}>
-                  {stat.icon}
-                </div>
-                {stat.change && (
-                  <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-                    {stat.change}
-                  </span>
-                )}
-              </div>
-              <p className="text-3xl font-bold text-gray-900 mt-3">{stat.value}</p>
-              <p className="text-sm text-gray-500 mt-0.5">{stat.label}</p>
+      <Header title="내 대시보드" subtitle={`${user?.name}님의 작업 현황`} />
+      <div className="flex-1 p-6 space-y-5">
+
+        {/* Welcome */}
+        <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-5 text-white flex items-center justify-between">
+          <div>
+            <p className="text-blue-200 text-sm mb-1">{greet()},</p>
+            <h2 className="text-2xl font-bold">{user?.name} 님 👋</h2>
+            {user?.department && <p className="text-blue-200 text-sm mt-1">{user.department}</p>}
+          </div>
+          <div className="text-right">
+            <p className="text-blue-200 text-xs mb-1">오늘의 작업</p>
+            <p className="text-4xl font-bold">{todayTasks.length}<span className="text-xl font-normal text-blue-200 ml-1">건</span></p>
+            {todayTasks.filter(e => e.status === 'completed').length > 0 && (
+              <p className="text-blue-200 text-xs mt-1">
+                {todayTasks.filter(e => e.status === 'completed').length}건 완료 ✓
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Month Stats */}
+        <div className="grid grid-cols-4 gap-3">
+          {[
+            { label: '이번달 완료', value: monthDone, icon: <CheckCircle2 size={18} />, color: 'text-green-600', bg: 'bg-green-50' },
+            { label: '진행중', value: monthProg, icon: <Clock size={18} />, color: 'text-blue-600', bg: 'bg-blue-50' },
+            { label: '예정', value: monthPend, icon: <Calendar size={18} />, color: 'text-amber-600', bg: 'bg-amber-50' },
+            { label: '담당 클라이언트', value: myClients.length, icon: <Users size={18} />, color: 'text-purple-600', bg: 'bg-purple-50' },
+          ].map(s => (
+            <div key={s.label} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+              <div className={`w-9 h-9 rounded-xl ${s.bg} ${s.color} flex items-center justify-center mb-2`}>{s.icon}</div>
+              <p className="text-2xl font-bold text-gray-900">{s.value}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>
             </div>
           ))}
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Recent Schedule */}
-          <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-50">
-              <h3 className="font-bold text-gray-900">최근 스케줄</h3>
-              <button
-                onClick={() => navigate('/schedule/full')}
-                className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 font-medium"
-              >
-                전체보기 <ArrowUpRight size={14} />
+        <div className="grid lg:grid-cols-5 gap-5">
+          {/* Today's Tasks */}
+          <div className="lg:col-span-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-gray-900 flex items-center gap-2">
+                <Flame size={16} className="text-orange-500" />
+                오늘 할 일
+                {todayTasks.length > 0 && (
+                  <span className="text-xs bg-orange-100 text-orange-600 font-semibold px-2 py-0.5 rounded-full">{todayTasks.length}건</span>
+                )}
+              </h3>
+              <button onClick={() => navigate('/schedule/daily')}
+                className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 font-medium">
+                일일 스케줄 <ArrowUpRight size={14} />
               </button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-50">
-                    <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-3">날짜</th>
-                    <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-4 py-3">담당자</th>
-                    <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-4 py-3">카테고리</th>
-                    <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-4 py-3">키워드</th>
-                    <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-4 py-3">상태</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentEntries.map(entry => (
-                    <tr key={entry.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
-                      <td className="px-6 py-3 text-gray-600 whitespace-nowrap">{entry.date}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{entry.managerName}</td>
-                      <td className="px-4 py-3"><CategoryBadge category={entry.category} /></td>
-                      <td className="px-4 py-3 text-gray-700 max-w-[160px] truncate">{entry.opinionTitle ?? entry.keyword ?? '-'}</td>
-                      <td className="px-4 py-3"><StatusBadge status={entry.status} /></td>
+
+            {todayTasks.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center">
+                <p className="text-2xl mb-2">🎉</p>
+                <p className="font-semibold text-gray-700">오늘 예정된 작업이 없습니다</p>
+                <p className="text-sm text-gray-400 mt-1">여유로운 하루 보내세요!</p>
+                <button onClick={() => navigate('/schedule/daily')}
+                  className="mt-3 flex items-center gap-1.5 mx-auto px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors">
+                  <Plus size={14} /> 스케줄 추가
+                </button>
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      {['카테고리', '클라이언트', '키워드/제목', '상태'].map(h => (
+                        <th key={h} className="text-left text-xs font-semibold text-gray-500 px-4 py-2.5 whitespace-nowrap">{h}</th>
+                      ))}
                     </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {todayTasks.map(entry => (
+                      <tr key={entry.id} className="hover:bg-gray-50/50 transition-colors">
+                        <td className="px-4 py-3"><CategoryBadge category={entry.category} /></td>
+                        <td className="px-4 py-3 text-gray-600 text-xs whitespace-nowrap">{entry.clientName}</td>
+                        <td className="px-4 py-3 text-gray-800 max-w-[160px]">
+                          <span className="truncate block text-xs" title={entry.opinionTitle ?? entry.keyword}>
+                            {entry.opinionTitle ?? entry.keyword ?? '-'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <InlineStatus
+                            status={entry.status}
+                            onChange={s => updateEntry(entry.id, { status: s })}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* This Week */}
+            <div className="flex items-center justify-between mt-2">
+              <h3 className="font-bold text-gray-900">이번 주 일정</h3>
+              <span className="text-xs text-gray-400">{week.start} ~ {week.end}</span>
+            </div>
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              {weekEntries.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-6">이번 주 일정이 없습니다.</p>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {weekEntries.map(entry => (
+                    <div key={entry.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 transition-colors">
+                      <span className="text-xs text-gray-400 w-16 shrink-0 font-medium">
+                        {new Date(entry.date + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' })}
+                      </span>
+                      <CategoryBadge category={entry.category} />
+                      <span className="text-sm text-gray-700 flex-1 truncate">
+                        {entry.opinionTitle ?? entry.keyword ?? entry.category}
+                      </span>
+                      <span className="text-xs text-gray-400 shrink-0">{entry.clientName}</span>
+                      <InlineStatus status={entry.status} onChange={s => updateEntry(entry.id, { status: s })} />
+                    </div>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Client List */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-50">
-              <h3 className="font-bold text-gray-900">클라이언트 현황</h3>
-              <button
-                onClick={() => navigate('/clients')}
-                className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 font-medium"
-              >
-                관리 <ArrowUpRight size={14} />
-              </button>
-            </div>
-            <div className="p-4 space-y-3">
-              {CLIENTS.filter(c => c.status === 'active').map(client => (
-                <div key={client.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
-                  onClick={() => navigate('/clients')}>
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-sm shrink-0">
-                    {client.name[0]}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-900 text-sm truncate">{client.name}</p>
-                    <p className="text-xs text-gray-400 truncate">{client.industry}</p>
-                  </div>
-                  <span className="w-2 h-2 bg-green-400 rounded-full shrink-0" />
+          {/* Right panel */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* Upcoming */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
+                <h3 className="font-bold text-gray-900">예정된 작업</h3>
+                <TrendingUp size={15} className="text-gray-400" />
+              </div>
+              {upcoming.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-6">예정된 작업이 없습니다.</p>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {upcoming.map(entry => (
+                    <div key={entry.id} className="px-5 py-3 flex items-center gap-3">
+                      <div className="text-center shrink-0">
+                        <p className="text-xs font-bold text-blue-600">
+                          {new Date(entry.date + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {new Date(entry.date + 'T00:00:00').toLocaleDateString('ko-KR', { weekday: 'short' })}
+                        </p>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-gray-900 truncate">{entry.opinionTitle ?? entry.keyword ?? entry.category}</p>
+                        <p className="text-xs text-gray-400 truncate">{entry.clientName} · {entry.category}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-              <button
-                onClick={() => navigate('/clients')}
-                className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-gray-200 rounded-xl text-sm text-gray-400 hover:border-blue-300 hover:text-blue-500 transition-colors"
-              >
-                <Plus size={14} />
-                클라이언트 추가
-              </button>
+              )}
             </div>
+
+            {/* Quick Actions */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <h3 className="font-bold text-gray-900 mb-3 text-sm">빠른 실행</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { label: '스케줄 추가', path: '/schedule/daily', emoji: '📋' },
+                  { label: '전체 스케줄', path: '/schedule/full', emoji: '📅' },
+                  { label: '타임테이블', path: '/timetable', emoji: '🗓️' },
+                  { label: 'AI 기획', path: '/ai-planning', emoji: '🤖' },
+                ].map(a => (
+                  <button key={a.path} onClick={() => navigate(a.path)}
+                    className="flex items-center gap-2 p-3 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50 text-sm text-gray-700 hover:text-blue-700 transition-colors font-medium">
+                    <span>{a.emoji}</span> {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Admin: Team overview */}
+            {isAdmin && (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
+                <div className="px-5 py-4 border-b border-gray-50">
+                  <h3 className="font-bold text-gray-900 text-sm">팀 오늘 현황</h3>
+                </div>
+                <div className="p-4 space-y-2">
+                  {[
+                    { label: '전체 오늘 작업', value: teamToday.length },
+                    { label: '완료', value: teamToday.filter(e => e.status === 'completed').length },
+                    { label: '진행중', value: teamToday.filter(e => e.status === 'in-progress').length },
+                    { label: '대기중', value: teamToday.filter(e => e.status === 'pending').length },
+                  ].map(s => (
+                    <div key={s.label} className="flex justify-between items-center text-sm">
+                      <span className="text-gray-500">{s.label}</span>
+                      <span className="font-bold text-gray-900">{s.value}건</span>
+                    </div>
+                  ))}
+                  <button onClick={() => navigate('/schedule/full')}
+                    className="w-full mt-2 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
+                    전체 스케줄 보기 →
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
