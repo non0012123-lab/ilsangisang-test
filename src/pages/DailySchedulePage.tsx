@@ -36,10 +36,13 @@ export default function DailySchedulePage() {
   const prevDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() - 1); setDate(toDateStr(d)); };
   const nextDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() + 1); setDate(toDateStr(d)); };
 
-  // All entries covering this day (기간 작업 포함) - newest first
+  // All entries covering this day (기간 작업 포함) - newest first, 기간 작업은 맨 아래
   const allDayEntries = entries
     .filter(e => coversDate(e, date))
     .sort((a, b) => {
+      // 마감기간(기간 작업)이 있는 스케줄은 항상 목록 맨 아래로
+      const aMulti = isMultiDay(a) ? 1 : 0, bMulti = isMultiDay(b) ? 1 : 0;
+      if (aMulti !== bMulti) return aMulti - bMulti;
       const aTs = Number(a.id), bTs = Number(b.id);
       if (!isNaN(aTs) && !isNaN(bTs)) return bTs - aTs; // both new: desc
       if (!isNaN(aTs)) return -1; // a is newer

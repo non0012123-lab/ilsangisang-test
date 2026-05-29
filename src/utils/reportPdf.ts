@@ -231,8 +231,6 @@ export function downloadReportPdf(report: Report, client: Client, allEntries: Sc
   </button>
   <button onclick="window.close()" style="background:#f1f5f9;color:#64748b;border:none;padding:12px 20px;border-radius:10px;font-size:14px;cursor:pointer;">닫기</button>
 </div>
-
-<script>window.addEventListener('load', () => setTimeout(() => window.print(), 800));</script>
 </body>
 </html>`;
 
