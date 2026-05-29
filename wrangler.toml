@@ -1,0 +1,7 @@
+# Cloudflare Pages 설정 (프리뷰/배포 + Functions 실행)
+#  • 로컬 프리뷰:  npm run cf:dev    → http://localhost:8788 (앱 + /api/* 함수)
+#  • 프리뷰 배포:  npm run cf:preview (Cloudflare 의 preview 환경으로 업로드)
+#  • 운영 배포:    npm run cf:deploy
+name = "ilsangisang-test"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-05-01"

@@ -17,6 +17,10 @@ dist-ssr
 .env.*
 !.env.example
 
+# Cloudflare 로컬 시크릿 / 캐시
+.dev.vars
+.wrangler
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
