@@ -13,6 +13,7 @@ import ClientPortalPage from './pages/ClientPortalPage';
 import TimetablePage from './pages/TimetablePage';
 import AIPlanningPage from './pages/AIPlanningPage';
 import AIResultsPage from './pages/AIResultsPage';
+import KeywordToolPage from './pages/KeywordToolPage';
 import HandoverPage from './pages/HandoverPage';
 import PendingApprovalPage from './pages/PendingApprovalPage';
 import SuspendedPage from './pages/SuspendedPage';
@@ -88,6 +89,7 @@ function AppRoutes() {
       <Route path="/timetable" element={<ProtectedRoute><TimetablePage /></ProtectedRoute>} />
       <Route path="/ai-planning" element={<ProtectedRoute><AIPlanningPage /></ProtectedRoute>} />
       <Route path="/ai-results" element={<ProtectedRoute><AIResultsPage /></ProtectedRoute>} />
+      <Route path="/keyword-tool" element={<ProtectedRoute><KeywordToolPage /></ProtectedRoute>} />
       <Route path="/handover" element={<ProtectedRoute><HandoverPage /></ProtectedRoute>} />
 
       {/* Client portal */}

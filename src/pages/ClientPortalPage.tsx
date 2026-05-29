@@ -1,14 +1,15 @@
 import { useState } from 'react';
-import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare, CalendarRange, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare, CalendarRange, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { REPORTS } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import CategoryBadge from '../components/CategoryBadge';
+import KeywordTool from '../components/KeywordTool';
 import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd } from '../utils/dateRange';
 import type { ScheduleEntry } from '../types';
 
-type Tab = 'dashboard' | 'timetable' | 'reports';
+type Tab = 'dashboard' | 'timetable' | 'reports' | 'keywords';
 
 const CAT_COLOR: Record<string, string> = {
   'SNS': '#ec4899', '유튜브': '#ef4444', '네이버': '#22c55e',
@@ -287,6 +288,7 @@ export default function ClientPortalPage() {
             { key: 'dashboard', icon: <TrendingUp size={15} />, label: '작업 현황' },
             { key: 'timetable', icon: <CalendarRange size={15} />, label: '타임테이블' },
             { key: 'reports', icon: <FileText size={15} />, label: '보고서' },
+            { key: 'keywords', icon: <Search size={15} />, label: '키워드 조회' },
           ] as { key: Tab; icon: React.ReactNode; label: string }[]).map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all ${
@@ -468,6 +470,9 @@ export default function ClientPortalPage() {
             </div>
           </div>
         )}
+
+        {/* Tab: Keywords */}
+        {tab === 'keywords' && <KeywordTool />}
       </div>
     </div>
   );
