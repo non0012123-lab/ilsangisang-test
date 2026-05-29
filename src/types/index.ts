@@ -137,6 +137,7 @@ export interface HandoverDoc {
   id: string;
   clientId: string;
   clientName: string;
+  title?: string;      // 수동 제목(선택). 없으면 현재 클라이언트명을 사용
   authorId: string;
   authorName: string;
   updatedAt: string;

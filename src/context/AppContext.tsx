@@ -24,6 +24,7 @@ interface AppContextType {
   removeEntry: (id: string) => void;
   saveClient: (client: Client) => void;
   saveHandover: (doc: HandoverDoc) => void;
+  removeHandover: (id: string) => void;
 }
 
 export interface AiPlanJobInput {
@@ -115,6 +116,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const saveHandover = useCallback((doc: HandoverDoc) => {
     setHandoverDocs(prev => prev.some(d => d.id === doc.id) ? prev.map(d => d.id === doc.id ? doc : d) : [...prev, doc]);
     persistOne('handover_docs', doc);
+  }, []);
+  const removeHandover = useCallback((id: string) => {
+    setHandoverDocs(prev => prev.filter(d => d.id !== id));
+    persistDelete('handover_docs', id);
   }, []);
 
   // ── AI 기획 결과 (이미지는 용량 때문에 DB 저장 제외; 로컬 세션에만 유지) ──
@@ -231,7 +236,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       entries, clients, handoverDocs, members, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
       aiPlanRunning, aiPlanError, startAiPlanJob,
-      saveEntry, saveEntries, patchEntry, removeEntry, saveClient, saveHandover,
+      saveEntry, saveEntries, patchEntry, removeEntry, saveClient, saveHandover, removeHandover,
     }}>
       {children}
     </AppContext.Provider>

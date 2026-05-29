@@ -93,8 +93,11 @@ function CollapsibleSection({
 }
 
 export default function HandoverPage() {
-  const { entries, clients, handoverDocs, saveHandover, aiHistory } = useApp();
+  const { entries, clients, handoverDocs, saveHandover, removeHandover, aiHistory } = useApp();
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  // 표시용 이름: 수동 제목이 있으면 그것, 없으면 현재 클라이언트명(이름 변경 자동 연동)
+  const docName = (d: HandoverDoc) => d.title?.trim() || clients.find(c => c.id === d.clientId)?.name || d.clientName;
   const [selectedId, setSelectedId] = useState<string | null>(handoverDocs[0]?.id ?? null);
   const [tab, setTab] = useState<DocTab>('overview');
   const [editing, setEditing] = useState(false);
@@ -178,7 +181,16 @@ export default function HandoverPage() {
 
   const clientEntries = selected ? entries.filter(e => e.clientId === selected.clientId).sort((a, b) => b.date.localeCompare(a.date)) : [];
 
-  const promptText = selected ? generatePrompt(selected, entries) : '';
+  const promptText = selected ? generatePrompt({ ...selected, clientName: docName(selected) }, entries) : '';
+
+  const handleDelete = () => {
+    if (!selected) return;
+    if (!window.confirm(`'${docName(selected)}' 인수인계 문서를 삭제할까요? (되돌릴 수 없음)`)) return;
+    removeHandover(selected.id);
+    setSelectedId(null);
+    setEditing(false);
+    setDraft(null);
+  };
   const copyPrompt = () => {
     navigator.clipboard.writeText(promptText);
     setPromptCopied(true);
@@ -221,7 +233,7 @@ export default function HandoverPage() {
                 className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors ${
                   selectedId === doc.id ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
                 }`}>
-                <p className={`font-semibold text-sm truncate ${selectedId === doc.id ? 'text-white' : 'text-gray-900'}`}>{doc.clientName}</p>
+                <p className={`font-semibold text-sm truncate ${selectedId === doc.id ? 'text-white' : 'text-gray-900'}`}>{docName(doc)}</p>
                 <p className={`text-xs truncate mt-0.5 ${selectedId === doc.id ? 'text-blue-200' : 'text-gray-400'}`}>
                   {doc.authorName} · {doc.updatedAt}
                 </p>
@@ -243,16 +255,27 @@ export default function HandoverPage() {
             {/* Doc Header */}
             <div className="bg-white border-b border-gray-100 px-6 py-4">
               <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold">
-                    {selected.clientName[0]}
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold shrink-0">
+                    {docName(selected)[0]}
                   </div>
-                  <div>
-                    <h2 className="font-bold text-gray-900">{selected.clientName} 인수인계 문서</h2>
-                    <p className="text-xs text-gray-400">작성: {selected.authorName} · 최종 수정: {selected.updatedAt}</p>
-                  </div>
+                  {editing ? (
+                    <div className="flex-1 min-w-0">
+                      <input
+                        value={draft?.title ?? ''}
+                        onChange={e => setDraft(d => d ? { ...d, title: e.target.value } : d)}
+                        placeholder={`${clients.find(c => c.id === selected.clientId)?.name ?? selected.clientName} (제목 미입력 시 클라이언트명 사용)`}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      <p className="text-xs text-gray-400 mt-1">제목을 비워두면 클라이언트 이름이 자동으로 연동됩니다.</p>
+                    </div>
+                  ) : (
+                    <div className="min-w-0">
+                      <h2 className="font-bold text-gray-900 truncate">{docName(selected)} 인수인계 문서</h2>
+                      <p className="text-xs text-gray-400">작성: {selected.authorName} · 최종 수정: {selected.updatedAt}</p>
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   {editing ? (
                     <>
                       <button onClick={cancelEdit} className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition-colors">
@@ -263,9 +286,16 @@ export default function HandoverPage() {
                       </button>
                     </>
                   ) : (
-                    <button onClick={startEdit} className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition-colors">
-                      <Pencil size={14} /> 수정
-                    </button>
+                    <>
+                      <button onClick={startEdit} className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition-colors">
+                        <Pencil size={14} /> 수정
+                      </button>
+                      {isAdmin && (
+                        <button onClick={handleDelete} className="flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 rounded-xl text-sm hover:bg-red-50 transition-colors">
+                          <Trash2 size={14} /> 삭제
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
