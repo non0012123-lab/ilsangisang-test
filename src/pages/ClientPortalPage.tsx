@@ -1,34 +1,8 @@
-import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink } from 'lucide-react';
+import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { CLIENTS, SCHEDULE_ENTRIES, REPORTS } from '../data/mockData';
 import CategoryBadge from '../components/CategoryBadge';
-
-function downloadReport(title: string, summary: string, highlights: string[] = []) {
-  const content = [
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    `  일상이상커뮤니케이션 - 성과 보고서`,
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '',
-    `제목: ${title}`,
-    `생성일: ${new Date().toLocaleDateString('ko-KR')}`,
-    '',
-    '■ 요약',
-    summary,
-    '',
-    ...(highlights.length > 0 ? ['■ 주요 성과', ...highlights.map(h => `  • ${h}`), ''] : []),
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '  © 2026 일상이상커뮤니케이션',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-  ].join('\n');
-
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${title}.txt`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+import { downloadReportPdf } from '../utils/reportPdf';
 
 export default function ClientPortalPage() {
   const { user, logout } = useAuth();
@@ -44,9 +18,13 @@ export default function ClientPortalPage() {
   const pending = currentMonth.filter(e => e.status === 'pending').length;
 
   const recentEntries = entries
-    .filter(e => e.date <= TODAY)
+    .filter(e => e.date <= TODAY && e.category !== '네이버 여론작업')
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 6);
+
+  const opinionEntries = entries
+    .filter(e => e.category === '네이버 여론작업' && e.date <= TODAY)
+    .sort((a, b) => b.date.localeCompare(a.date));
 
   if (!client) {
     return (
@@ -76,8 +54,7 @@ export default function ClientPortalPage() {
           </div>
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-500 hidden md:block">{user?.name} 님</span>
-            <button onClick={logout}
-              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-red-500 transition-colors">
+            <button onClick={logout} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-red-500 transition-colors">
               <LogOut size={14} /> 로그아웃
             </button>
           </div>
@@ -112,9 +89,7 @@ export default function ClientPortalPage() {
             { label: '예정', value: pending, icon: <Calendar size={18} />, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
           ].map(s => (
             <div key={s.label} className={`bg-white rounded-2xl border ${s.border} p-5`}>
-              <div className={`w-10 h-10 rounded-xl ${s.bg} ${s.color} flex items-center justify-center mb-3`}>
-                {s.icon}
-              </div>
+              <div className={`w-10 h-10 rounded-xl ${s.bg} ${s.color} flex items-center justify-center mb-3`}>{s.icon}</div>
               <p className="text-3xl font-bold text-gray-900">{s.value}</p>
               <p className="text-sm text-gray-500 mt-0.5">5월 {s.label}</p>
             </div>
@@ -145,18 +120,15 @@ export default function ClientPortalPage() {
                       <tr key={entry.id} className="hover:bg-gray-50/50 transition-colors">
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{entry.date}</td>
                         <td className="px-4 py-3"><CategoryBadge category={entry.category} /></td>
-                        <td className="px-4 py-3 text-gray-800 max-w-[120px]">
+                        <td className="px-4 py-3 text-gray-800 max-w-[100px]">
                           <span className="truncate block text-xs" title={entry.keyword}>{entry.keyword}</span>
                         </td>
                         <td className="px-4 py-3 max-w-[160px]">
                           <div className="flex items-center gap-1">
                             <a href={entry.link} target="_blank" rel="noopener noreferrer"
-                              className="table-link link-cell text-xs"
-                              title={entry.link}>{entry.link}</a>
+                              className="table-link link-cell text-xs" title={entry.link}>{entry.link}</a>
                             <a href={entry.link} target="_blank" rel="noopener noreferrer"
-                              className="shrink-0 p-0.5 text-gray-300 hover:text-blue-500">
-                              <ExternalLink size={11} />
-                            </a>
+                              className="shrink-0 p-0.5 text-gray-300 hover:text-blue-500"><ExternalLink size={11} /></a>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -191,9 +163,7 @@ export default function ClientPortalPage() {
                 reports.map(report => (
                   <div key={report.id} className="border border-gray-100 rounded-xl p-4 hover:border-blue-200 transition-colors">
                     <div className="flex items-start justify-between mb-2">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        report.type === 'monthly' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'
-                      }`}>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${report.type === 'monthly' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
                         {report.type === 'monthly' ? '월간' : report.type === 'weekly' ? '주간' : '커스텀'}
                       </span>
                       <span className="text-xs text-gray-400">{report.fileSize}</span>
@@ -205,18 +175,16 @@ export default function ClientPortalPage() {
                       <div className="mb-3 space-y-1">
                         {report.highlights.slice(0, 2).map((h, i) => (
                           <p key={i} className="text-xs text-gray-500 flex items-center gap-1">
-                            <span className="w-1 h-1 bg-blue-400 rounded-full shrink-0" />
-                            {h}
+                            <span className="w-1 h-1 bg-blue-400 rounded-full shrink-0" /> {h}
                           </p>
                         ))}
                       </div>
                     )}
                     <button
-                      onClick={() => downloadReport(report.title, report.summary, report.highlights)}
+                      onClick={() => downloadReportPdf(report, client, SCHEDULE_ENTRIES)}
                       className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"
                     >
-                      <Download size={13} />
-                      보고서 다운로드
+                      <Download size={13} /> PDF 보고서 다운로드
                     </button>
                   </div>
                 ))
@@ -224,6 +192,50 @@ export default function ClientPortalPage() {
             </div>
           </div>
         </div>
+
+        {/* 네이버 여론작업 Section */}
+        {opinionEntries.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
+            <div className="px-6 py-4 border-b border-gray-50 flex items-center gap-2">
+              <MessageSquare size={16} className="text-sky-600" />
+              <h3 className="font-bold text-gray-900">네이버 여론작업 현황</h3>
+              <span className="ml-auto text-xs text-gray-400">{opinionEntries.length}건</span>
+            </div>
+            <div className="p-4 space-y-3">
+              {opinionEntries.map(entry => (
+                <div key={entry.id} className="border border-sky-100 rounded-xl p-4 bg-sky-50/50">
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-900">{entry.opinionTitle}</h4>
+                      <p className="text-xs text-gray-400 mt-0.5">{entry.date} · {entry.managerName}</p>
+                    </div>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                      entry.status === 'completed' ? 'bg-green-50 text-green-700' :
+                      entry.status === 'in-progress' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
+                    }`}>
+                      {entry.status === 'completed' ? '완료' : entry.status === 'in-progress' ? '진행중' : '대기중'}
+                    </span>
+                  </div>
+                  {entry.opinionContent && (
+                    <p className="text-sm text-gray-700 leading-relaxed mb-2">{entry.opinionContent}</p>
+                  )}
+                  {entry.opinionComments && (
+                    <div className="bg-white rounded-lg px-3 py-2 border border-sky-100">
+                      <p className="text-xs font-semibold text-gray-500 mb-1">주요 반응</p>
+                      <p className="text-xs text-gray-600 italic">"{entry.opinionComments}"</p>
+                    </div>
+                  )}
+                  {(entry.metrics?.views || entry.metrics?.comments) && (
+                    <div className="flex gap-3 mt-2">
+                      {entry.metrics.views && <span className="text-xs text-gray-500">👁 {entry.metrics.views.toLocaleString()} 조회</span>}
+                      {entry.metrics.comments && <span className="text-xs text-gray-500">💬 {entry.metrics.comments.toLocaleString()} 댓글</span>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
