@@ -13,6 +13,10 @@ interface AppContextType {
   aiHistory: AiPlanResult[];
   saveAiPlan: (plan: AiPlanResult) => void;
   removeAiPlan: (id: string) => void;
+  // AI 기획 분석을 앱 전역에서 실행 → 페이지를 떠나도 계속 진행되고 결과가 보관됨
+  aiPlanRunning: boolean;
+  aiPlanError: string;
+  startAiPlanJob: (input: AiPlanJobInput) => Promise<string | null>;
   // 업무 데이터 영구 저장(레코드 단위) — 로컬 상태 갱신 + Supabase 반영
   saveEntry: (entry: ScheduleEntry) => void;
   saveEntries: (entries: ScheduleEntry[]) => void;
@@ -21,6 +25,19 @@ interface AppContextType {
   saveClient: (client: Client) => void;
   saveHandover: (doc: HandoverDoc) => void;
 }
+
+export interface AiPlanJobInput {
+  clientId: string;
+  clientName: string;
+  industry?: string;
+  period: { start: string; end: string };
+  campaignType: string;
+  goal: string;
+  guideline: string;
+  authorName?: string;
+}
+
+const nowMs = () => Date.now();
 
 const AppContext = createContext<AppContextType | null>(null);
 
@@ -36,6 +53,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [handoverDocs, setHandoverDocs] = useState<HandoverDoc[]>(HANDOVER_DOCS);
   const [members, setMembers] = useState<TeamMember[]>(MOCK_MEMBERS);
   const [aiHistory, setAiHistory] = useState<AiPlanResult[]>([]);
+  const [aiPlanRunning, setAiPlanRunning] = useState(false);
+  const [aiPlanError, setAiPlanError] = useState('');
   const uid = user?.id;
 
   // 헬퍼에서 최신 배열을 참조하기 위한 ref (setState 업데이터 내 부수효과 회피)
@@ -109,6 +128,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
     persistDelete('ai_plans', id);
   }, []);
 
+  // AI 기획 분석을 전역에서 실행 (페이지 언마운트와 무관하게 끝까지 진행 → 결과 보관)
+  const startAiPlanJob = useCallback(async (input: AiPlanJobInput): Promise<string | null> => {
+    setAiPlanRunning(true);
+    setAiPlanError('');
+    try {
+      const res = await fetch('/api/ai-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientName: input.clientName,
+          industry: input.industry,
+          period: input.period,
+          campaignType: input.campaignType,
+          goal: input.goal,
+          guideline: input.guideline,
+        }),
+      });
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('AI 서버(/api/ai-plan)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
+      }
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.detail ? `${data.error} — ${data.detail}` : (data.error ?? `요청 실패 (${res.status})`));
+      if (!data.report) throw new Error('리포트가 비어 있습니다.');
+
+      const ts = nowMs();
+      const result: AiPlanResult = {
+        id: ts.toString(),
+        createdAt: ts,
+        clientId: input.clientId,
+        clientName: input.clientName,
+        campaignType: input.campaignType,
+        period: { ...input.period },
+        guideline: input.guideline,
+        report: data.report as string,
+        authorName: input.authorName,
+        images: [],
+      };
+      saveAiPlan(result);
+      return result.id;
+    } catch (e) {
+      setAiPlanError(e instanceof Error ? e.message : 'AI 분석 중 오류가 발생했습니다.');
+      return null;
+    } finally {
+      setAiPlanRunning(false);
+    }
+  }, [saveAiPlan]);
+
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
     if (!supabase) return;
@@ -163,6 +230,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       entries, clients, handoverDocs, members, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
+      aiPlanRunning, aiPlanError, startAiPlanJob,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, saveHandover,
     }}>
       {children}

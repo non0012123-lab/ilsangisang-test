@@ -6,17 +6,15 @@ import ReportDocument from '../components/ReportDocument';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { openAiPlanPrint } from '../utils/aiPlanPdf';
-import type { AiPlanResult } from '../types';
 
 type Step = 1 | 2;
 
 const CAMPAIGN_TYPES = ['브랜드 인지도', '신제품 출시', '시즌 프로모션', '이벤트/캠페인', '커뮤니티 활성화', '위기 관리', '기타'];
 
 const fmtTime = (ts: number) => new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-const nowMs = () => Date.now();
 
 export default function AIPlanningPage() {
-  const { clients, aiHistory, saveAiPlan } = useApp();
+  const { clients, aiHistory, saveAiPlan, aiPlanRunning, aiPlanError, startAiPlanJob } = useApp();
   const { user } = useAuth();
   const [step, setStep] = useState<Step>(1);
   const [file, setFile] = useState<File | null>(null);
@@ -24,8 +22,6 @@ export default function AIPlanningPage() {
   const [period, setPeriod] = useState({ start: '', end: '' });
   const [campaignType, setCampaignType] = useState('');
   const [goal, setGoal] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [imgLoading, setImgLoading] = useState(false);
   const [imgError, setImgError] = useState('');
@@ -47,52 +43,21 @@ export default function AIPlanningPage() {
   };
 
   const handleAnalyze = async () => {
-    if (!file) return;
-    setIsAnalyzing(true);
-    setError('');
-    try {
-      // CSV/텍스트 가이드라인은 본문을 함께 전달 (xlsx/pdf 등 바이너리는 생략됨)
-      let guideline = '';
-      try { guideline = (await file.text()).slice(0, 12000); } catch { /* 바이너리 파일은 건너뜀 */ }
+    if (!file || aiPlanRunning) return;
+    // CSV/텍스트 가이드라인은 본문을 함께 전달 (xlsx/pdf 등 바이너리는 생략됨)
+    let guideline = '';
+    try { guideline = (await file.text()).slice(0, 12000); } catch { /* 바이너리 파일은 건너뜀 */ }
 
-      const res = await fetch('/api/ai-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientName: selectedClient?.name,
-          industry: selectedClient?.industry,
-          period, campaignType, goal, guideline,
-        }),
-      });
-      const contentType = res.headers.get('content-type') ?? '';
-      if (!contentType.includes('application/json')) {
-        throw new Error('AI 서버(/api/ai-plan)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
-      }
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.detail ? `${data.error} — ${data.detail}` : (data.error ?? `요청 실패 (${res.status})`));
-      if (!data.report) throw new Error('리포트가 비어 있습니다.');
-
-      const ts = nowMs();
-      const result: AiPlanResult = {
-        id: ts.toString(),
-        createdAt: ts,
-        clientId: selectedClient?.id ?? '',
-        clientName: selectedClient?.name ?? '클라이언트',
-        campaignType,
-        period: { ...period },
-        guideline,
-        report: data.report as string,
-        authorName: user?.name,
-        images: [],
-      };
-      saveAiPlan(result);
-      setViewingId(result.id);
-      setStep(2);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'AI 분석 중 오류가 발생했습니다.');
-    } finally {
-      setIsAnalyzing(false);
-    }
+    // 분석은 앱 전역에서 실행 → 이 페이지를 떠나도 계속 진행되고 결과가 보관됨
+    const id = await startAiPlanJob({
+      clientId: selectedClient?.id ?? '',
+      clientName: selectedClient?.name ?? '클라이언트',
+      industry: selectedClient?.industry,
+      period, campaignType, goal, guideline,
+      authorName: user?.name,
+    });
+    // 이 페이지에 그대로 있으면 결과를 바로 표시 (떠났으면 'AI 기획 결과'에서 확인)
+    if (id) { setViewingId(id); setStep(2); }
   };
 
   const copyReport = async () => {
@@ -285,20 +250,27 @@ export default function AIPlanningPage() {
               </div>
             </div>
 
-            {error && (
+            {aiPlanError && (
               <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
-                <AlertTriangle size={16} className="shrink-0" /> {error}
+                <AlertTriangle size={16} className="shrink-0" /> {aiPlanError}
+              </div>
+            )}
+
+            {aiPlanRunning && (
+              <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl px-4 py-3">
+                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                분석이 진행 중입니다. 다른 메뉴로 이동해도 계속 진행되며, 완료되면 <strong>AI 기획 결과</strong>에 저장됩니다.
               </div>
             )}
 
             <div className="flex justify-end">
-              <button onClick={handleAnalyze} disabled={!canAnalyze || isAnalyzing}
+              <button onClick={handleAnalyze} disabled={!canAnalyze || aiPlanRunning}
                 className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
-                  canAnalyze && !isAnalyzing
+                  canAnalyze && !aiPlanRunning
                     ? 'bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 text-white'
                     : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                 }`}>
-                {isAnalyzing
+                {aiPlanRunning
                   ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> AI 분석 중...</>
                   : <><Sparkles size={16} /> AI 기획 분석 시작</>}
               </button>
