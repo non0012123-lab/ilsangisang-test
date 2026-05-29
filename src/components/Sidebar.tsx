@@ -30,7 +30,7 @@ const categoryNav: NavItem[] = [
   { to: '/category/naver-opinion',  icon: <MessageSquare size={16} />, label: '네이버 여론작업' },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const [catOpen, setCatOpen] = useState(true);
   const [cliOpen, setCliOpen] = useState(true);
   const { user, logout } = useAuth();
@@ -47,7 +47,11 @@ export default function Sidebar() {
   }, [isAdmin]);
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-60 bg-slate-900 flex flex-col z-40 select-none">
+    <>
+      {/* 모바일 오버레이 */}
+      {mobileOpen && <div className="lg:hidden fixed inset-0 bg-black/40 z-40" onClick={onClose} />}
+
+      <aside className={`fixed left-0 top-0 h-screen w-60 bg-slate-900 flex flex-col z-50 select-none transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
       {/* Logo */}
       <div className="px-5 py-5 border-b border-slate-700/50">
         <div className="flex items-center gap-2.5">
@@ -64,7 +68,7 @@ export default function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
         {mainNav.map(item => (
-          <NavLink key={item.to} to={item.to}
+          <NavLink key={item.to} to={item.to} onClick={onClose}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
             }
@@ -82,7 +86,7 @@ export default function Sidebar() {
           {catOpen && (
             <div className="mt-1 space-y-0.5">
               {categoryNav.map(item => (
-                <NavLink key={item.to} to={item.to}
+                <NavLink key={item.to} to={item.to} onClick={onClose}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ml-2 ${isActive ? 'bg-blue-600/20 text-blue-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
                   }
@@ -105,7 +109,7 @@ export default function Sidebar() {
               {navClients.length === 0 ? (
                 <p className="px-3 py-2 ml-2 text-xs text-slate-600">등록된 클라이언트 없음</p>
               ) : navClients.map(c => (
-                <NavLink key={c.id} to={`/client/${c.id}`}
+                <NavLink key={c.id} to={`/client/${c.id}`} onClick={onClose}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ml-2 ${isActive ? 'bg-blue-600/20 text-blue-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
                   }
@@ -116,13 +120,13 @@ export default function Sidebar() {
         </div>
 
         <div className="pt-2 border-t border-slate-700/50 space-y-0.5">
-          <NavLink to="/clients"
+          <NavLink to="/clients" onClick={onClose}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
             }
           ><Users size={18} />클라이언트 관리</NavLink>
           {isAdmin && (
-            <NavLink to="/approvals"
+            <NavLink to="/approvals" onClick={onClose}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
               }
@@ -132,7 +136,7 @@ export default function Sidebar() {
               )}
             </NavLink>
           )}
-          <NavLink to="/handover"
+          <NavLink to="/handover" onClick={onClose}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
             }
@@ -155,6 +159,7 @@ export default function Sidebar() {
           </button>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

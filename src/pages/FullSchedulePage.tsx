@@ -122,8 +122,8 @@ export default function FullSchedulePage() {
 
         <div className="text-sm text-gray-500">총 <span className="font-semibold text-gray-900">{filtered.length}</span>건</div>
 
-        {/* Table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        {/* Table (md 이상) */}
+        <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -192,6 +192,40 @@ export default function FullSchedulePage() {
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* Cards (md 미만 · 모바일) */}
+        <div className="md:hidden space-y-3">
+          {filtered.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-gray-100 py-10 text-center text-gray-400 text-sm">조건에 맞는 스케줄이 없습니다.</div>
+          ) : filtered.map(entry => (
+            <div key={entry.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-gray-700 flex items-center gap-1">
+                  {isMultiDay(entry)
+                    ? <><CalendarRange size={13} className="text-blue-600" /> {entry.date}<span className="text-gray-300">~</span>{entry.endDate?.slice(5)}</>
+                    : entry.date}
+                </span>
+                <div className="flex gap-1">
+                  <button onClick={() => setModal({ open: true, entry })}
+                    className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"><Pencil size={15} /></button>
+                  <button onClick={() => handleDelete(entry.id)}
+                    className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={15} /></button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <CategoryBadge category={entry.category} />
+                <InlineStatus status={entry.status} onChange={s => updateEntry(entry.id, { status: s })} />
+                {entry.rank ? <span className="inline-flex items-center justify-center px-2 h-6 rounded-lg bg-blue-50 text-blue-700 font-bold text-xs">{entry.rank}위</span> : null}
+              </div>
+              <p className="font-semibold text-gray-900 text-sm mb-0.5 break-words">{entry.opinionTitle ?? entry.keyword ?? '-'}</p>
+              <p className="text-xs text-gray-500 mb-2">{entry.managerName} · {entry.clientName}</p>
+              <div className="flex items-center gap-3 flex-wrap">
+                <InlineLink link={entry.link} onChange={v => updateEntry(entry.id, { link: v })} onCopied={notify} />
+                <InlineScreenshot screenshot={entry.screenshot} onChange={v => updateEntry(entry.id, { screenshot: v })} onPreview={setPreviewImg} />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

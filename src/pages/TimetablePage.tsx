@@ -168,11 +168,11 @@ export default function TimetablePage() {
           </div>
         </div>
 
-        <div className="flex gap-4">
+        <div className="flex flex-col lg:flex-row gap-4">
           {/* Calendar */}
-          <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="flex-1 min-w-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
             {/* Weekday header */}
-            <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50">
+            <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50 min-w-[680px]">
               {WEEKDAYS.map((d, i) => (
                 <div key={d} className={`py-3 text-center text-xs font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-500'}`}>
                   {d}
@@ -187,7 +187,7 @@ export default function TimetablePage() {
                 const usedLanes = Math.min(MAX_LANES, placed.reduce((m, p) => Math.max(m, p.lane + 1), 0));
                 const weekMinH = Math.max(NUM_AREA + usedLanes * (BAR_H + BAR_GAP) + 10, 96);
                 return (
-                  <div key={wi} className="relative grid grid-cols-7 border-b border-gray-50 last:border-b-0"
+                  <div key={wi} className="relative grid grid-cols-7 border-b border-gray-200 last:border-b-0 min-w-[680px]"
                     style={{ minHeight: weekMinH }}>
                     {/* 날짜 셀 (배경 · 숫자 · 선택/추가 · 초과 표시) */}
                     {week.map((day, ci) => {
@@ -200,7 +200,7 @@ export default function TimetablePage() {
                       return (
                         <div key={ci}
                           onClick={() => day && setSelectedDay(day === selectedDay ? null : day)}
-                          className={`relative border-r border-gray-50 last:border-r-0 transition-colors ${
+                          className={`relative border-r border-gray-200 last:border-r-0 transition-colors ${
                             !day ? 'bg-gray-50/50' :
                             isSel ? 'bg-blue-50/60 ring-1 ring-inset ring-blue-200' :
                             'hover:bg-slate-50 cursor-pointer'
@@ -270,7 +270,7 @@ export default function TimetablePage() {
 
           {/* Day Detail Panel */}
           {selectedDay ? (
-            <div className="w-72 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col">
+            <div className="w-full lg:w-72 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col">
               <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                 <div>
                   <p className="font-bold text-gray-900">{month + 1}월 {selectedDay}일</p>
@@ -341,7 +341,7 @@ export default function TimetablePage() {
             </div>
           ) : (
             /* Mini stats when no day selected */
-            <div className="w-64 space-y-3">
+            <div className="w-full lg:w-64 space-y-3">
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">{month + 1}월 현황</p>
                 <div className="space-y-2">
