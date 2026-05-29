@@ -1,7 +1,8 @@
 import { useState, useRef, type ChangeEvent } from 'react';
 import { X, Upload, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import type { ScheduleEntry, Category, ScheduleStatus, AIMetrics } from '../types';
-import { CLIENTS, USERS } from '../data/mockData';
+import { USERS } from '../data/mockData';
+import { useApp } from '../context/AppContext';
 
 const CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 const STATUSES: { value: ScheduleStatus; label: string }[] = [
@@ -30,13 +31,17 @@ interface Props {
 }
 
 export default function ScheduleModal({ entry, onSave, onClose }: Props) {
+  const { clients } = useApp();
+  const activeClients = clients.filter(c => c.status !== 'inactive');
+  const defaultClient = activeClients[0];
+
   const [form, setForm] = useState<Partial<ScheduleEntry>>(
     entry ?? {
       date: new Date().toISOString().split('T')[0],
       status: 'pending',
       category: 'SNS',
-      clientId: CLIENTS[0].id,
-      clientName: CLIENTS[0].name,
+      clientId: defaultClient?.id ?? '',
+      clientName: defaultClient?.name ?? '',
       managerId: USERS.find(u => u.role !== 'client')?.id ?? '',
       managerName: USERS.find(u => u.role !== 'client')?.name ?? '',
     }
@@ -55,7 +60,7 @@ export default function ScheduleModal({ entry, onSave, onClose }: Props) {
   };
 
   const handleClient = (id: string) => {
-    const c = CLIENTS.find(c => c.id === id);
+    const c = clients.find(cl => cl.id === id);
     if (c) setForm(prev => ({ ...prev, clientId: c.id, clientName: c.name }));
   };
 
@@ -143,7 +148,7 @@ export default function ScheduleModal({ entry, onSave, onClose }: Props) {
               <label className="block text-xs font-semibold text-gray-600 mb-1">클라이언트 *</label>
               <select value={form.clientId} onChange={e => handleClient(e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                {CLIENTS.filter(c => c.status !== 'inactive').map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>

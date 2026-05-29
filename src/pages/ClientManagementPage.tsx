@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { Plus, Phone, Mail, Calendar, X, Pencil, Users } from 'lucide-react';
+import { Plus, Mail, Calendar, X, Pencil, Users, Phone } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
-import { CLIENTS, SCHEDULE_ENTRIES, REPORTS } from '../data/mockData';
+import { useApp } from '../context/AppContext';
 import type { Client, Category } from '../types';
 
-const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작'];
+const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업'];
+const STATUS_ORDER: Record<string, number> = { active: 0, pending: 1, inactive: 2 };
 
 const EMPTY_CLIENT: Omit<Client, 'id'> = {
   name: '', industry: '', contactPerson: '', email: '', phone: '',
@@ -25,14 +26,16 @@ function StatusDot({ status }: { status: Client['status'] }) {
 }
 
 export default function ClientManagementPage() {
-  const [clients, setClients] = useState<Client[]>(CLIENTS);
+  const { entries, clients, setClients } = useApp();
   const [selected, setSelected] = useState<Client | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editClient, setEditClient] = useState<Client | null>(null);
   const [form, setForm] = useState<Omit<Client, 'id'>>(EMPTY_CLIENT);
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  const filtered = clients.filter(c => filterStatus === 'all' || c.status === filterStatus);
+  // Sort: active → pending → inactive
+  const sorted = [...clients].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
+  const filtered = sorted.filter(c => filterStatus === 'all' || c.status === filterStatus);
 
   const openAdd = () => { setForm(EMPTY_CLIENT); setEditClient(null); setShowForm(true); };
   const openEdit = (c: Client) => { setForm({ ...c }); setEditClient(c); setShowForm(true); };
@@ -40,11 +43,18 @@ export default function ClientManagementPage() {
   const handleSave = () => {
     if (!form.name || !form.email) { alert('업체명과 이메일은 필수입니다.'); return; }
     if (editClient) {
-      setClients(prev => prev.map(c => c.id === editClient.id ? { ...form, id: editClient.id } : c));
+      const updated = { ...form, id: editClient.id };
+      setClients(prev => prev.map(c => c.id === editClient.id ? updated : c));
+      if (selected?.id === editClient.id) setSelected(updated);
     } else {
       setClients(prev => [...prev, { ...form, id: Date.now().toString() }]);
     }
     setShowForm(false);
+  };
+
+  const handleStatusChange = (clientId: string, status: Client['status']) => {
+    setClients(prev => prev.map(c => c.id === clientId ? { ...c, status } : c));
+    if (selected?.id === clientId) setSelected(prev => prev ? { ...prev, status } : null);
   };
 
   const toggleCategory = (cat: Category) => {
@@ -56,8 +66,7 @@ export default function ClientManagementPage() {
     }));
   };
 
-  const clientEntries = selected ? SCHEDULE_ENTRIES.filter(e => e.clientId === selected.id) : [];
-  const clientReports = selected ? REPORTS.filter(r => r.clientId === selected.id) : [];
+  const clientEntries = selected ? entries.filter(e => e.clientId === selected.id) : [];
 
   return (
     <Layout>
@@ -66,12 +75,10 @@ export default function ClientManagementPage() {
         {selected ? (
           /* === Client Detail View === */
           <div className="space-y-5">
-            <button onClick={() => setSelected(null)}
-              className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 transition-colors">
+            <button onClick={() => setSelected(null)} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 transition-colors">
               ← 목록으로
             </button>
 
-            {/* Client Info Card */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-4">
@@ -84,15 +91,26 @@ export default function ClientManagementPage() {
                       <StatusDot status={selected.status} />
                     </div>
                     <p className="text-gray-500 text-sm">{selected.industry}</p>
-                    <div className="flex gap-1 mt-2">
+                    <div className="flex gap-1 mt-2 flex-wrap">
                       {selected.categories.map(c => <CategoryBadge key={c} category={c} />)}
                     </div>
                   </div>
                 </div>
-                <button onClick={() => openEdit(selected)}
-                  className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition-colors">
-                  <Pencil size={14} /> 수정
-                </button>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selected.status}
+                    onChange={e => handleStatusChange(selected.id, e.target.value as Client['status'])}
+                    className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="active">활성</option>
+                    <option value="pending">대기</option>
+                    <option value="inactive">비활성</option>
+                  </select>
+                  <button onClick={() => openEdit(selected)}
+                    className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition-colors">
+                    <Pencil size={14} /> 수정
+                  </button>
+                </div>
               </div>
 
               <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-4 pt-5 border-t border-gray-100">
@@ -103,10 +121,8 @@ export default function ClientManagementPage() {
                   { label: '계약 시작', value: selected.startDate, icon: <Calendar size={14} /> },
                 ].map(info => (
                   <div key={info.label}>
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 mb-1">
-                      {info.icon} {info.label}
-                    </div>
-                    <p className="text-sm text-gray-800 font-medium">{info.value}</p>
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 mb-1">{info.icon} {info.label}</div>
+                    <p className="text-sm text-gray-800 font-medium">{info.value || '-'}</p>
                   </div>
                 ))}
               </div>
@@ -127,7 +143,7 @@ export default function ClientManagementPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-gray-50 border-b border-gray-100">
-                        {['날짜', '담당자', '카테고리', '키워드', '링크', '순위', '상태'].map(h => (
+                        {['날짜', '담당자', '카테고리', '키워드/제목', '링크', '순위', '상태'].map(h => (
                           <th key={h} className="text-left text-xs font-semibold text-gray-500 px-4 py-3 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -138,10 +154,12 @@ export default function ClientManagementPage() {
                           <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{entry.date}</td>
                           <td className="px-4 py-3 font-medium text-gray-900">{entry.managerName}</td>
                           <td className="px-4 py-3"><CategoryBadge category={entry.category} /></td>
-                          <td className="px-4 py-3 text-gray-700 max-w-[160px] truncate">{entry.keyword}</td>
+                          <td className="px-4 py-3 text-gray-700 max-w-[160px] truncate">{entry.opinionTitle ?? entry.keyword ?? '-'}</td>
                           <td className="px-4 py-3 max-w-[180px]">
-                            <a href={entry.link} target="_blank" rel="noopener noreferrer"
-                              className="table-link link-cell" title={entry.link}>{entry.link}</a>
+                            {entry.link
+                              ? <a href={entry.link} target="_blank" rel="noopener noreferrer" className="table-link link-cell" title={entry.link}>{entry.link}</a>
+                              : <span className="text-gray-300 text-xs">-</span>
+                            }
                           </td>
                           <td className="px-4 py-3 text-center">
                             {entry.rank ? <span className="text-blue-700 font-bold">{entry.rank}</span> : '-'}
@@ -161,48 +179,16 @@ export default function ClientManagementPage() {
                 </div>
               )}
             </div>
-
-            {/* Reports */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
-              <div className="px-6 py-4 border-b border-gray-50">
-                <h3 className="font-bold text-gray-900">보고서 ({clientReports.length}건)</h3>
-              </div>
-              {clientReports.length === 0 ? (
-                <p className="text-center py-10 text-gray-400 text-sm">등록된 보고서가 없습니다.</p>
-              ) : (
-                <div className="p-4 grid sm:grid-cols-2 gap-3">
-                  {clientReports.map(report => (
-                    <div key={report.id} className="border border-gray-100 rounded-xl p-4 hover:border-blue-200 transition-colors">
-                      <div className="flex items-start justify-between mb-2">
-                        <div>
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                            report.type === 'monthly' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'
-                          }`}>
-                            {report.type === 'monthly' ? '월간' : report.type === 'weekly' ? '주간' : '커스텀'}
-                          </span>
-                          <h4 className="text-sm font-semibold text-gray-900 mt-1.5">{report.title}</h4>
-                        </div>
-                        <span className="text-xs text-gray-400">{report.fileSize}</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mb-3">{report.period} · {report.date}</p>
-                      <p className="text-xs text-gray-600 mb-3 line-clamp-2">{report.summary}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
         ) : (
           /* === Client List === */
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex gap-2">
-                {['all', 'active', 'inactive', 'pending'].map(s => (
-                  <button key={s}
-                    onClick={() => setFilterStatus(s)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filterStatus === s ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-                  >
-                    {s === 'all' ? '전체' : s === 'active' ? '활성' : s === 'inactive' ? '비활성' : '대기'}
+                {['all', 'active', 'pending', 'inactive'].map(s => (
+                  <button key={s} onClick={() => setFilterStatus(s)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filterStatus === s ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                    {s === 'all' ? '전체' : s === 'active' ? '활성' : s === 'pending' ? '대기' : '비활성'}
                     <span className="ml-1.5 text-xs opacity-75">
                       ({s === 'all' ? clients.length : clients.filter(c => c.status === s).length})
                     </span>
@@ -211,15 +197,13 @@ export default function ClientManagementPage() {
               </div>
               <button onClick={openAdd}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors">
-                <Plus size={16} />
-                클라이언트 추가
+                <Plus size={16} /> 클라이언트 추가
               </button>
             </div>
 
             <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {filtered.map(client => (
-                <div key={client.id}
-                  onClick={() => setSelected(client)}
+                <div key={client.id} onClick={() => setSelected(client)}
                   className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 cursor-pointer hover:border-blue-200 hover:shadow-md transition-all group">
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-3">
@@ -242,9 +226,7 @@ export default function ClientManagementPage() {
                     <div className="flex items-center gap-2"><Mail size={12} /> {client.email}</div>
                     <div className="flex items-center gap-2"><Calendar size={12} /> 계약 시작: {client.startDate}</div>
                     {client.monthlyBudget && (
-                      <div className="flex items-center gap-2 font-medium text-blue-600">
-                        월 {client.monthlyBudget}
-                      </div>
+                      <div className="font-medium text-blue-600">월 {client.monthlyBudget}</div>
                     )}
                   </div>
                 </div>
@@ -276,13 +258,11 @@ export default function ClientManagementPage() {
                 ].map(f => (
                   <div key={f.key}>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">{f.label}</label>
-                    <input
-                      type={f.type ?? 'text'}
+                    <input type={f.type ?? 'text'}
                       value={(form as Record<string, unknown>)[f.key] as string ?? ''}
                       onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
                       placeholder={f.placeholder}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 ))}
               </div>
@@ -291,12 +271,10 @@ export default function ClientManagementPage() {
                 <label className="block text-xs font-semibold text-gray-600 mb-2">카테고리</label>
                 <div className="flex gap-2 flex-wrap">
                   {ALL_CATEGORIES.map(cat => (
-                    <button key={cat}
-                      onClick={() => toggleCategory(cat)}
+                    <button key={cat} onClick={() => toggleCategory(cat)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                         form.categories.includes(cat) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
-                      }`}
-                    >{cat}</button>
+                      }`}>{cat}</button>
                   ))}
                 </div>
               </div>

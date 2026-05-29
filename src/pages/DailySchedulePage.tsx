@@ -5,16 +5,20 @@ import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
 import StatusBadge from '../components/StatusBadge';
 import ScheduleModal from '../components/ScheduleModal';
+import { useApp } from '../context/AppContext';
+import { useCopyToast } from '../hooks/useCopyToast';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
-import { SCHEDULE_ENTRIES, CLIENTS, USERS } from '../data/mockData';
+import { USERS, CLIENTS } from '../data/mockData';
 
 const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
 function toDateStr(d: Date) { return d.toISOString().split('T')[0]; }
 
 export default function DailySchedulePage() {
+  const { entries, setEntries } = useApp();
+  const { copy, show: showToast } = useCopyToast();
+
   const [date, setDate] = useState(toDateStr(new Date('2026-05-29')));
-  const [entries, setEntries] = useState<ScheduleEntry[]>(SCHEDULE_ENTRIES);
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -29,22 +33,36 @@ export default function DailySchedulePage() {
   const prevDay = () => { const d = new Date(date); d.setDate(d.getDate() - 1); setDate(toDateStr(d)); };
   const nextDay = () => { const d = new Date(date); d.setDate(d.getDate() + 1); setDate(toDateStr(d)); };
 
-  const dayEntries = entries
+  // All entries for this day (before search/filter) - newest first
+  const allDayEntries = entries
     .filter(e => e.date === date)
+    .sort((a, b) => {
+      const aTs = Number(a.id), bTs = Number(b.id);
+      if (!isNaN(aTs) && !isNaN(bTs)) return bTs - aTs; // both new: desc
+      if (!isNaN(aTs)) return -1; // a is newer
+      if (!isNaN(bTs)) return 1;
+      return 0;
+    });
+
+  const dayEntries = allDayEntries
     .filter(e => filterClient === 'all' || e.clientId === filterClient)
     .filter(e => filterCategory === 'all' || e.category === filterCategory)
     .filter(e => filterStatus === 'all' || e.status === filterStatus)
     .filter(e => filterManager === 'all' || e.managerId === filterManager)
-    .filter(e => !search || (e.keyword ?? '').includes(search) || (e.opinionTitle ?? '').includes(search) || e.managerName.includes(search) || e.clientName.includes(search) || (e.link ?? '').includes(search));
+    .filter(e => !search ||
+      (e.keyword ?? '').includes(search) || (e.opinionTitle ?? '').includes(search) ||
+      e.managerName.includes(search) || e.clientName.includes(search) || (e.link ?? '').includes(search));
 
   const handleSave = (entry: ScheduleEntry) => {
-    setEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [...prev, entry]);
+    setEntries(prev => {
+      if (prev.some(e => e.id === entry.id)) return prev.map(e => e.id === entry.id ? entry : e);
+      return [entry, ...prev]; // newest at top
+    });
     setModal({ open: false });
   };
   const handleDelete = (id: string) => { if (confirm('삭제하시겠습니까?')) setEntries(prev => prev.filter(e => e.id !== id)); };
 
   const displayDate = new Date(date + 'T00:00:00').toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
-  const allDayCount = entries.filter(e => e.date === date).length;
 
   return (
     <Layout>
@@ -61,7 +79,7 @@ export default function DailySchedulePage() {
               <span className="text-gray-600 font-medium text-sm hidden md:block">{displayDate}</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">{dayEntries.length}/{allDayCount}건</span>
+              <span className="text-sm text-gray-500">{dayEntries.length}/{allDayEntries.length}건</span>
               <button onClick={() => setShowFilters(v => !v)}
                 className={`flex items-center gap-1.5 px-3 py-2 border rounded-xl text-sm transition-colors ${showFilters ? 'border-blue-500 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                 <Filter size={14} /> 필터
@@ -73,7 +91,6 @@ export default function DailySchedulePage() {
             </div>
           </div>
 
-          {/* Search */}
           <div className="relative">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input type="text" value={search} onChange={e => setSearch(e.target.value)}
@@ -81,7 +98,6 @@ export default function DailySchedulePage() {
               className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
 
-          {/* Filters */}
           {showFilters && (
             <div className="pt-3 border-t border-gray-100 grid grid-cols-2 md:grid-cols-4 gap-3">
               <div>
@@ -125,9 +141,9 @@ export default function DailySchedulePage() {
         {/* Status Summary */}
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: '완료', count: dayEntries.filter(e => e.status === 'completed').length, color: 'text-green-600', bg: 'bg-green-50' },
-            { label: '진행중', count: dayEntries.filter(e => e.status === 'in-progress').length, color: 'text-blue-600', bg: 'bg-blue-50' },
-            { label: '대기중', count: dayEntries.filter(e => e.status === 'pending').length, color: 'text-amber-600', bg: 'bg-amber-50' },
+            { label: '완료', count: allDayEntries.filter(e => e.status === 'completed').length, color: 'text-green-600', bg: 'bg-green-50' },
+            { label: '진행중', count: allDayEntries.filter(e => e.status === 'in-progress').length, color: 'text-blue-600', bg: 'bg-blue-50' },
+            { label: '대기중', count: allDayEntries.filter(e => e.status === 'pending').length, color: 'text-amber-600', bg: 'bg-amber-50' },
           ].map(s => (
             <div key={s.label} className={`${s.bg} rounded-xl p-3 flex items-center gap-2`}>
               <span className={`text-2xl font-bold ${s.color}`}>{s.count}</span>
@@ -170,16 +186,21 @@ export default function DailySchedulePage() {
                       </td>
                       <td className="px-4 py-3 max-w-[200px]">
                         {entry.category === '네이버 여론작업' ? (
-                          <span className="text-xs text-gray-500 line-clamp-2">{entry.opinionContent?.slice(0, 60) ?? '-'}…</span>
+                          <span className="text-xs text-gray-500 line-clamp-2">{(entry.opinionContent ?? '-').slice(0, 60)}…</span>
                         ) : (
                           <div className="flex items-center gap-1">
                             <a href={entry.link} target="_blank" rel="noopener noreferrer"
                               className="table-link link-cell" title={entry.link}>{entry.link}</a>
                             <div className="flex gap-0.5 shrink-0">
                               <a href={entry.link} target="_blank" rel="noopener noreferrer"
-                                className="p-1 text-gray-300 hover:text-blue-500 transition-colors"><ExternalLink size={12} /></a>
-                              <button onClick={() => navigator.clipboard.writeText(entry.link ?? '')}
-                                className="p-1 text-gray-300 hover:text-gray-600 transition-colors"><Copy size={12} /></button>
+                                className="p-1 text-gray-300 hover:text-blue-500 transition-colors" title="새 탭으로 열기">
+                                <ExternalLink size={12} />
+                              </a>
+                              <button
+                                onClick={() => copy(entry.link ?? '')}
+                                className="p-1 text-gray-300 hover:text-gray-700 transition-colors" title="링크 복사">
+                                <Copy size={12} />
+                              </button>
                             </div>
                           </div>
                         )}
@@ -224,6 +245,13 @@ export default function DailySchedulePage() {
       {previewImg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setPreviewImg(null)}>
           <img src={previewImg} alt="캡처본" className="max-w-full max-h-full rounded-xl shadow-2xl" />
+        </div>
+      )}
+
+      {/* Copy Toast */}
+      {showToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-sm font-medium px-5 py-2.5 rounded-xl shadow-xl">
+          링크가 복사되었습니다.
         </div>
       )}
     </Layout>

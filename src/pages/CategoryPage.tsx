@@ -6,7 +6,7 @@ import Header from '../components/Header';
 import StatusBadge from '../components/StatusBadge';
 import ScheduleModal from '../components/ScheduleModal';
 import type { ScheduleEntry, Category } from '../types';
-import { SCHEDULE_ENTRIES } from '../data/mockData';
+import { useApp } from '../context/AppContext';
 
 const CATEGORY_CONFIG: Record<string, { label: Category; color: string; icon: React.ReactNode; gradient: string }> = {
   sns:            { label: 'SNS',           color: 'text-pink-600',   icon: <Hash size={20} />,          gradient: 'from-pink-500 to-rose-500' },
@@ -29,7 +29,7 @@ const TABS = [
 export default function CategoryPage() {
   const { category = 'sns' } = useParams<{ category: string }>();
   const config = CATEGORY_CONFIG[category] ?? CATEGORY_CONFIG.sns;
-  const [entries, setEntries] = useState<ScheduleEntry[]>(SCHEDULE_ENTRIES);
+  const { entries, setEntries } = useApp();
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const filtered = entries
@@ -37,7 +37,7 @@ export default function CategoryPage() {
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const handleSave = (entry: ScheduleEntry) => {
-    setEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [...prev, entry]);
+    setEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [entry, ...prev]);
     setModal({ open: false });
   };
   const handleDelete = (id: string) => { if (confirm('삭제하시겠습니까?')) setEntries(prev => prev.filter(e => e.id !== id)); };

@@ -6,12 +6,15 @@ import CategoryBadge from '../components/CategoryBadge';
 import StatusBadge from '../components/StatusBadge';
 import ScheduleModal from '../components/ScheduleModal';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
-import { SCHEDULE_ENTRIES, CLIENTS, USERS } from '../data/mockData';
+import { CLIENTS, USERS } from '../data/mockData';
+import { useApp } from '../context/AppContext';
+import { useCopyToast } from '../hooks/useCopyToast';
 
 const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
 export default function FullSchedulePage() {
-  const [entries, setEntries] = useState<ScheduleEntry[]>(SCHEDULE_ENTRIES);
+  const { entries, setEntries } = useApp();
+  const { copy, show: showToast } = useCopyToast();
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -36,7 +39,7 @@ export default function FullSchedulePage() {
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const handleSave = (entry: ScheduleEntry) => {
-    setEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [...prev, entry]);
+    setEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [entry, ...prev]);
     setModal({ open: false });
   };
   const handleDelete = (id: string) => { if (confirm('삭제하시겠습니까?')) setEntries(prev => prev.filter(e => e.id !== id)); };
@@ -153,8 +156,8 @@ export default function FullSchedulePage() {
                             <div className="flex gap-0.5 shrink-0">
                               <a href={entry.link} target="_blank" rel="noopener noreferrer"
                                 className="p-1 text-gray-300 hover:text-blue-500 transition-colors"><ExternalLink size={12} /></a>
-                              <button onClick={() => navigator.clipboard.writeText(entry.link ?? '')}
-                                className="p-1 text-gray-300 hover:text-gray-600 transition-colors"><Copy size={12} /></button>
+                              <button onClick={() => copy(entry.link ?? '')}
+                                className="p-1 text-gray-300 hover:text-gray-700 transition-colors" title="링크 복사"><Copy size={12} /></button>
                             </div>
                           </div>
                         )}
@@ -195,6 +198,11 @@ export default function FullSchedulePage() {
       {previewImg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setPreviewImg(null)}>
           <img src={previewImg} alt="캡처본" className="max-w-full max-h-full rounded-xl shadow-2xl" />
+        </div>
+      )}
+      {showToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-sm font-medium px-5 py-2.5 rounded-xl shadow-xl">
+          링크가 복사되었습니다.
         </div>
       )}
     </Layout>

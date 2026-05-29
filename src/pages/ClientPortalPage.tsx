@@ -1,15 +1,17 @@
 import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { CLIENTS, SCHEDULE_ENTRIES, REPORTS } from '../data/mockData';
+import { REPORTS } from '../data/mockData';
+import { useApp } from '../context/AppContext';
 import CategoryBadge from '../components/CategoryBadge';
 import { downloadReportPdf } from '../utils/reportPdf';
 
 export default function ClientPortalPage() {
   const { user, logout } = useAuth();
+  const { entries: allEntries, clients } = useApp();
   const clientId = user?.clientId ?? '';
-  const client = CLIENTS.find(c => c.id === clientId);
+  const client = clients.find(c => c.id === clientId);
   const reports = REPORTS.filter(r => r.clientId === clientId);
-  const entries = SCHEDULE_ENTRIES.filter(e => e.clientId === clientId);
+  const entries = allEntries.filter(e => e.clientId === clientId);
   const TODAY = '2026-05-29';
   const currentMonth = entries.filter(e => e.date.startsWith('2026-05'));
 
@@ -181,7 +183,7 @@ export default function ClientPortalPage() {
                       </div>
                     )}
                     <button
-                      onClick={() => downloadReportPdf(report, client, SCHEDULE_ENTRIES)}
+                      onClick={() => downloadReportPdf(report, client, allEntries)}
                       className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"
                     >
                       <Download size={13} /> PDF 보고서 다운로드

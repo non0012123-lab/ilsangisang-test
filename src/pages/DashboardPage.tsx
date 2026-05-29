@@ -4,12 +4,13 @@ import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
 import StatusBadge from '../components/StatusBadge';
-import { SCHEDULE_ENTRIES, CLIENTS } from '../data/mockData';
+import { useApp } from '../context/AppContext';
 
 const TODAY = '2026-05-29';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const { entries: SCHEDULE_ENTRIES, clients: CLIENTS } = useApp();
   const todayEntries = SCHEDULE_ENTRIES.filter(e => e.date === TODAY);
   const completed = SCHEDULE_ENTRIES.filter(e => e.status === 'completed').length;
   const inProgress = SCHEDULE_ENTRIES.filter(e => e.status === 'in-progress').length;
