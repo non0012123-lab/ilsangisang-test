@@ -1,13 +1,142 @@
-import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare } from 'lucide-react';
+import { useState } from 'react';
+import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare, CalendarRange, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { REPORTS } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import CategoryBadge from '../components/CategoryBadge';
 import { downloadReportPdf } from '../utils/reportPdf';
+import type { ScheduleEntry } from '../types';
+
+type Tab = 'dashboard' | 'timetable' | 'reports';
+
+const CAT_COLOR: Record<string, string> = {
+  'SNS': '#ec4899', '유튜브': '#ef4444', '네이버': '#22c55e',
+  '영상제작': '#a855f7', '디자인제작': '#f97316', '네이버 여론작업': '#0ea5e9', '기타': '#6b7280',
+};
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+function getCalDays(year: number, month: number) {
+  const first = new Date(year, month, 1).getDay();
+  const cnt = new Date(year, month + 1, 0).getDate();
+  const days: (number | null)[] = [];
+  for (let i = 0; i < first; i++) days.push(null);
+  for (let i = 1; i <= cnt; i++) days.push(i);
+  while (days.length % 7 !== 0) days.push(null);
+  return days;
+}
+
+function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
+  const [curDate, setCurDate] = useState(new Date(2026, 4, 1));
+  const [selDay, setSelDay] = useState<number | null>(null);
+
+  const year = curDate.getFullYear();
+  const month = curDate.getMonth();
+  const calDays = getCalDays(year, month);
+  const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const monthEntries = entries.filter(e => e.date.startsWith(prefix));
+
+  const byDay: Record<number, ScheduleEntry[]> = {};
+  monthEntries.forEach(e => {
+    const d = parseInt(e.date.split('-')[2]);
+    (byDay[d] ??= []).push(e);
+  });
+
+  const today = new Date('2026-05-29');
+  const todayDay = (year === today.getFullYear() && month === today.getMonth()) ? today.getDate() : -1;
+  const selEntries = selDay ? (byDay[selDay] ?? []) : [];
+
+  return (
+    <div className="space-y-4">
+      {/* Month nav */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setCurDate(new Date(year, month - 1, 1))} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronLeft size={16} /></button>
+          <span className="text-base font-bold text-gray-900 min-w-[110px] text-center">{year}년 {month + 1}월</span>
+          <button onClick={() => setCurDate(new Date(year, month + 1, 1))} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronRight size={16} /></button>
+        </div>
+        <span className="text-sm text-gray-400">총 {monthEntries.length}건</span>
+      </div>
+
+      <div className="flex gap-4">
+        {/* Calendar grid */}
+        <div className="flex-1 bg-gray-50 rounded-2xl overflow-hidden">
+          <div className="grid grid-cols-7 border-b border-gray-200">
+            {WEEKDAYS.map((d, i) => (
+              <div key={d} className={`py-2.5 text-center text-xs font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-500'}`}>{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7">
+            {calDays.map((day, idx) => {
+              const de = day ? (byDay[day] ?? []) : [];
+              const isToday = day === todayDay;
+              const isSel = day === selDay;
+              const isSun = idx % 7 === 0;
+              const isSat = idx % 7 === 6;
+              return (
+                <div key={idx}
+                  onClick={() => day && setSelDay(day === selDay ? null : day)}
+                  className={`min-h-[80px] p-1.5 border-b border-r border-gray-100 transition-colors ${
+                    !day ? 'bg-gray-50/50' : isSel ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : 'bg-white hover:bg-slate-50 cursor-pointer'
+                  }`}>
+                  {day && (
+                    <>
+                      <span className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-semibold mb-0.5 ${
+                        isToday ? 'bg-blue-600 text-white' : isSun ? 'text-red-500' : isSat ? 'text-blue-500' : 'text-gray-700'
+                      }`}>{day}</span>
+                      <div className="space-y-0.5">
+                        {de.slice(0, 2).map(e => (
+                          <div key={e.id} className="text-xs px-1 py-0.5 rounded truncate text-white font-medium"
+                            style={{ backgroundColor: CAT_COLOR[e.category] ?? '#6b7280' }}
+                            title={e.opinionTitle ?? e.keyword ?? ''}>
+                            {e.opinionTitle ?? e.keyword ?? e.category}
+                          </div>
+                        ))}
+                        {de.length > 2 && <div className="text-xs text-gray-400 px-1">+{de.length - 2}</div>}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Day detail */}
+        {selDay && (
+          <div className="w-56 bg-white border border-gray-100 rounded-2xl p-3 space-y-2">
+            <p className="font-bold text-gray-900 text-sm">{month + 1}월 {selDay}일</p>
+            {selEntries.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-4">일정 없음</p>
+            ) : (
+              selEntries.map(e => (
+                <div key={e.id} className="p-2.5 bg-gray-50 rounded-xl">
+                  <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full text-white" style={{ backgroundColor: CAT_COLOR[e.category] ?? '#6b7280' }}>{e.category}</span>
+                  <p className="text-xs font-semibold text-gray-900 mt-1.5 truncate">{e.opinionTitle ?? e.keyword ?? '-'}</p>
+                  <p className="text-xs text-gray-400">{e.managerName}</p>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-3">
+        {Object.entries(CAT_COLOR).map(([cat, color]) => (
+          <span key={cat} className="flex items-center gap-1.5 text-xs text-gray-500">
+            <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: color }} /> {cat}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function ClientPortalPage() {
   const { user, logout } = useAuth();
   const { entries: allEntries, clients } = useApp();
+  const [tab, setTab] = useState<Tab>('dashboard');
+
   const clientId = user?.clientId ?? '';
   const client = clients.find(c => c.id === clientId);
   const reports = REPORTS.filter(r => r.clientId === clientId);
@@ -76,91 +205,166 @@ export default function ClientPortalPage() {
               <p className="text-white font-medium text-sm">{client.startDate} ~ {client.contractEnd ?? '계속'}</p>
             </div>
           </div>
-          <div className="mt-5 flex gap-2 flex-wrap">
+          <div className="mt-4 flex gap-2 flex-wrap">
             {client.categories.map(c => (
               <span key={c} className="px-3 py-1 bg-white/20 rounded-full text-xs font-semibold text-white">{c}</span>
             ))}
           </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-4">
-          {[
-            { label: '완료', value: completed, icon: <CheckCircle2 size={18} />, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100' },
-            { label: '진행중', value: inProgress, icon: <Clock size={18} />, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
-            { label: '예정', value: pending, icon: <Calendar size={18} />, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
-          ].map(s => (
-            <div key={s.label} className={`bg-white rounded-2xl border ${s.border} p-5`}>
-              <div className={`w-10 h-10 rounded-xl ${s.bg} ${s.color} flex items-center justify-center mb-3`}>{s.icon}</div>
-              <p className="text-3xl font-bold text-gray-900">{s.value}</p>
-              <p className="text-sm text-gray-500 mt-0.5">5월 {s.label}</p>
-            </div>
+        {/* Tabs */}
+        <div className="flex bg-white rounded-2xl shadow-sm border border-gray-100 p-1.5 gap-1">
+          {([
+            { key: 'dashboard', icon: <TrendingUp size={15} />, label: '작업 현황' },
+            { key: 'timetable', icon: <CalendarRange size={15} />, label: '타임테이블' },
+            { key: 'reports', icon: <FileText size={15} />, label: '보고서' },
+          ] as { key: Tab; icon: React.ReactNode; label: string }[]).map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                tab === t.key ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+              }`}>
+              {t.icon} {t.label}
+            </button>
           ))}
         </div>
 
-        <div className="grid lg:grid-cols-5 gap-6">
-          {/* Recent Tasks */}
-          <div className="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-100">
-            <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between">
-              <h3 className="font-bold text-gray-900">최근 작업 현황</h3>
-              <TrendingUp size={16} className="text-gray-400" />
+        {/* Tab: Dashboard */}
+        {tab === 'dashboard' && (
+          <>
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-4">
+              {[
+                { label: '완료', value: completed, icon: <CheckCircle2 size={18} />, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100' },
+                { label: '진행중', value: inProgress, icon: <Clock size={18} />, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
+                { label: '예정', value: pending, icon: <Calendar size={18} />, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
+              ].map(s => (
+                <div key={s.label} className={`bg-white rounded-2xl border ${s.border} p-5`}>
+                  <div className={`w-10 h-10 rounded-xl ${s.bg} ${s.color} flex items-center justify-center mb-3`}>{s.icon}</div>
+                  <p className="text-3xl font-bold text-gray-900">{s.value}</p>
+                  <p className="text-sm text-gray-500 mt-0.5">5월 {s.label}</p>
+                </div>
+              ))}
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-100">
-                    {['날짜', '카테고리', '키워드', '링크', '순위', '상태'].map(h => (
-                      <th key={h} className="text-left text-xs font-semibold text-gray-500 px-4 py-3 whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {recentEntries.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-8 text-gray-400 text-sm">작업 내역이 없습니다.</td></tr>
-                  ) : (
-                    recentEntries.map(entry => (
-                      <tr key={entry.id} className="hover:bg-gray-50/50 transition-colors">
-                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{entry.date}</td>
-                        <td className="px-4 py-3"><CategoryBadge category={entry.category} /></td>
-                        <td className="px-4 py-3 text-gray-800 max-w-[100px]">
-                          <span className="truncate block text-xs" title={entry.keyword}>{entry.keyword}</span>
-                        </td>
-                        <td className="px-4 py-3 max-w-[160px]">
-                          <div className="flex items-center gap-1">
-                            <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
-                              className="table-link link-cell text-xs" title={entry.link ?? ''}>{entry.link ?? '-'}</a>
-                            <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
-                              className="shrink-0 p-0.5 text-gray-300 hover:text-blue-500"><ExternalLink size={11} /></a>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {entry.rank ? <span className="text-blue-700 font-bold text-xs">{entry.rank}위</span> : <span className="text-gray-300 text-xs">-</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                            entry.status === 'completed' ? 'bg-green-50 text-green-700' :
-                            entry.status === 'in-progress' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
-                          }`}>
-                            {entry.status === 'completed' ? '완료' : entry.status === 'in-progress' ? '진행중' : '대기중'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
 
-          {/* Reports */}
-          <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100">
+            {/* Recent Tasks */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
+              <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between">
+                <h3 className="font-bold text-gray-900">최근 작업 현황</h3>
+                <TrendingUp size={16} className="text-gray-400" />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      {['날짜', '카테고리', '키워드', '링크', '순위', '상태'].map(h => (
+                        <th key={h} className="text-left text-xs font-semibold text-gray-500 px-4 py-3 whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {recentEntries.length === 0 ? (
+                      <tr><td colSpan={6} className="text-center py-8 text-gray-400 text-sm">작업 내역이 없습니다.</td></tr>
+                    ) : (
+                      recentEntries.map(entry => (
+                        <tr key={entry.id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{entry.date}</td>
+                          <td className="px-4 py-3"><CategoryBadge category={entry.category} /></td>
+                          <td className="px-4 py-3 text-gray-800 max-w-[100px]">
+                            <span className="truncate block text-xs" title={entry.keyword}>{entry.keyword}</span>
+                          </td>
+                          <td className="px-4 py-3 max-w-[160px]">
+                            <div className="flex items-center gap-1">
+                              <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
+                                className="table-link link-cell text-xs" title={entry.link ?? ''}>{entry.link ?? '-'}</a>
+                              <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
+                                className="shrink-0 p-0.5 text-gray-300 hover:text-blue-500"><ExternalLink size={11} /></a>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {entry.rank ? <span className="text-blue-700 font-bold text-xs">{entry.rank}위</span> : <span className="text-gray-300 text-xs">-</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                              entry.status === 'completed' ? 'bg-green-50 text-green-700' :
+                              entry.status === 'in-progress' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
+                            }`}>
+                              {entry.status === 'completed' ? '완료' : entry.status === 'in-progress' ? '진행중' : '대기중'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Opinion */}
+            {opinionEntries.length > 0 && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
+                <div className="px-6 py-4 border-b border-gray-50 flex items-center gap-2">
+                  <MessageSquare size={16} className="text-sky-600" />
+                  <h3 className="font-bold text-gray-900">네이버 여론작업 현황</h3>
+                  <span className="ml-auto text-xs text-gray-400">{opinionEntries.length}건</span>
+                </div>
+                <div className="p-4 space-y-3">
+                  {opinionEntries.map(entry => (
+                    <div key={entry.id} className="border border-sky-100 rounded-xl p-4 bg-sky-50/50">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <h4 className="text-sm font-bold text-gray-900">{entry.opinionTitle}</h4>
+                          <p className="text-xs text-gray-400 mt-0.5">{entry.date} · {entry.managerName}</p>
+                        </div>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                          entry.status === 'completed' ? 'bg-green-50 text-green-700' :
+                          entry.status === 'in-progress' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
+                        }`}>
+                          {entry.status === 'completed' ? '완료' : entry.status === 'in-progress' ? '진행중' : '대기중'}
+                        </span>
+                      </div>
+                      {entry.opinionContent && <p className="text-sm text-gray-700 leading-relaxed mb-2">{entry.opinionContent}</p>}
+                      {entry.opinionComments && (
+                        <div className="bg-white rounded-lg px-3 py-2 border border-sky-100">
+                          <p className="text-xs font-semibold text-gray-500 mb-1">주요 반응</p>
+                          <p className="text-xs text-gray-600 italic">"{entry.opinionComments}"</p>
+                        </div>
+                      )}
+                      {(entry.metrics?.views || entry.metrics?.comments) && (
+                        <div className="flex gap-3 mt-2">
+                          {entry.metrics.views && <span className="text-xs text-gray-500">👁 {entry.metrics.views.toLocaleString()} 조회</span>}
+                          {entry.metrics.comments && <span className="text-xs text-gray-500">💬 {entry.metrics.comments.toLocaleString()} 댓글</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Tab: Timetable */}
+        {tab === 'timetable' && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <div className="flex items-center gap-2 mb-5">
+              <CalendarRange size={18} className="text-blue-600" />
+              <h3 className="font-bold text-gray-900">월별 타임테이블</h3>
+              <span className="ml-auto text-xs text-gray-400">클릭하면 해당 날짜 일정을 확인할 수 있습니다</span>
+            </div>
+            <ClientCalendar entries={entries} />
+          </div>
+        )}
+
+        {/* Tab: Reports */}
+        {tab === 'reports' && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
             <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between">
               <h3 className="font-bold text-gray-900">보고서</h3>
               <FileText size={16} className="text-gray-400" />
             </div>
-            <div className="p-4 space-y-3">
+            <div className="p-4 grid sm:grid-cols-2 gap-3">
               {reports.length === 0 ? (
-                <p className="text-center py-8 text-gray-400 text-sm">보고서가 없습니다.</p>
+                <p className="col-span-2 text-center py-10 text-gray-400 text-sm">보고서가 없습니다.</p>
               ) : (
                 reports.map(report => (
                   <div key={report.id} className="border border-gray-100 rounded-xl p-4 hover:border-blue-200 transition-colors">
@@ -173,68 +377,19 @@ export default function ClientPortalPage() {
                     <h4 className="text-sm font-semibold text-gray-900 mb-1">{report.title}</h4>
                     <p className="text-xs text-gray-500 mb-2">{report.period}</p>
                     <p className="text-xs text-gray-600 mb-3 line-clamp-2">{report.summary}</p>
-                    {report.highlights && report.highlights.length > 0 && (
-                      <div className="mb-3 space-y-1">
-                        {report.highlights.slice(0, 2).map((h, i) => (
-                          <p key={i} className="text-xs text-gray-500 flex items-center gap-1">
-                            <span className="w-1 h-1 bg-blue-400 rounded-full shrink-0" /> {h}
-                          </p>
-                        ))}
-                      </div>
-                    )}
+                    {report.highlights && report.highlights.slice(0, 2).map((h, i) => (
+                      <p key={i} className="text-xs text-gray-500 flex items-center gap-1 mb-1">
+                        <span className="w-1 h-1 bg-blue-400 rounded-full shrink-0" /> {h}
+                      </p>
+                    ))}
                     <button
                       onClick={() => downloadReportPdf(report, client, allEntries)}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"
-                    >
+                      className="w-full mt-2 flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors">
                       <Download size={13} /> PDF 보고서 다운로드
                     </button>
                   </div>
                 ))
               )}
-            </div>
-          </div>
-        </div>
-
-        {/* 네이버 여론작업 Section */}
-        {opinionEntries.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
-            <div className="px-6 py-4 border-b border-gray-50 flex items-center gap-2">
-              <MessageSquare size={16} className="text-sky-600" />
-              <h3 className="font-bold text-gray-900">네이버 여론작업 현황</h3>
-              <span className="ml-auto text-xs text-gray-400">{opinionEntries.length}건</span>
-            </div>
-            <div className="p-4 space-y-3">
-              {opinionEntries.map(entry => (
-                <div key={entry.id} className="border border-sky-100 rounded-xl p-4 bg-sky-50/50">
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h4 className="text-sm font-bold text-gray-900">{entry.opinionTitle}</h4>
-                      <p className="text-xs text-gray-400 mt-0.5">{entry.date} · {entry.managerName}</p>
-                    </div>
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                      entry.status === 'completed' ? 'bg-green-50 text-green-700' :
-                      entry.status === 'in-progress' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
-                    }`}>
-                      {entry.status === 'completed' ? '완료' : entry.status === 'in-progress' ? '진행중' : '대기중'}
-                    </span>
-                  </div>
-                  {entry.opinionContent && (
-                    <p className="text-sm text-gray-700 leading-relaxed mb-2">{entry.opinionContent}</p>
-                  )}
-                  {entry.opinionComments && (
-                    <div className="bg-white rounded-lg px-3 py-2 border border-sky-100">
-                      <p className="text-xs font-semibold text-gray-500 mb-1">주요 반응</p>
-                      <p className="text-xs text-gray-600 italic">"{entry.opinionComments}"</p>
-                    </div>
-                  )}
-                  {(entry.metrics?.views || entry.metrics?.comments) && (
-                    <div className="flex gap-3 mt-2">
-                      {entry.metrics.views && <span className="text-xs text-gray-500">👁 {entry.metrics.views.toLocaleString()} 조회</span>}
-                      {entry.metrics.comments && <span className="text-xs text-gray-500">💬 {entry.metrics.comments.toLocaleString()} 댓글</span>}
-                    </div>
-                  )}
-                </div>
-              ))}
             </div>
           </div>
         )}

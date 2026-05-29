@@ -26,18 +26,19 @@ const IS_OPINION = (cat: Category) => cat === '네이버 여론작업';
 
 interface Props {
   entry?: ScheduleEntry | null;
+  defaultDate?: string;
   onSave: (entry: ScheduleEntry) => void;
   onClose: () => void;
 }
 
-export default function ScheduleModal({ entry, onSave, onClose }: Props) {
+export default function ScheduleModal({ entry, defaultDate, onSave, onClose }: Props) {
   const { clients } = useApp();
   const activeClients = clients.filter(c => c.status !== 'inactive');
   const defaultClient = activeClients[0];
 
   const [form, setForm] = useState<Partial<ScheduleEntry>>(
     entry ?? {
-      date: new Date().toISOString().split('T')[0],
+      date: defaultDate ?? new Date().toISOString().split('T')[0],
       status: 'pending',
       category: 'SNS',
       clientId: defaultClient?.id ?? '',

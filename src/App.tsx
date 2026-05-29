@@ -8,6 +8,8 @@ import FullSchedulePage from './pages/FullSchedulePage';
 import CategoryPage from './pages/CategoryPage';
 import ClientManagementPage from './pages/ClientManagementPage';
 import ClientPortalPage from './pages/ClientPortalPage';
+import TimetablePage from './pages/TimetablePage';
+import AIPlanningPage from './pages/AIPlanningPage';
 
 function ProtectedRoute({ children, allowClient = false }: { children: React.ReactNode; allowClient?: boolean }) {
   const { user } = useAuth();
@@ -30,6 +32,8 @@ function AppRoutes() {
       <Route path="/schedule/full" element={<ProtectedRoute><FullSchedulePage /></ProtectedRoute>} />
       <Route path="/category/:category" element={<ProtectedRoute><CategoryPage /></ProtectedRoute>} />
       <Route path="/clients" element={<ProtectedRoute><ClientManagementPage /></ProtectedRoute>} />
+      <Route path="/timetable" element={<ProtectedRoute><TimetablePage /></ProtectedRoute>} />
+      <Route path="/ai-planning" element={<ProtectedRoute><AIPlanningPage /></ProtectedRoute>} />
 
       {/* Client portal */}
       <Route path="/client-portal" element={<ProtectedRoute allowClient><ClientPortalPage /></ProtectedRoute>} />

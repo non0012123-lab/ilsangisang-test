@@ -1,0 +1,343 @@
+import { useState } from 'react';
+import { ChevronLeft, ChevronRight, Plus, Sparkles, Calendar, X } from 'lucide-react';
+import Layout from '../components/Layout';
+import Header from '../components/Header';
+import { useApp } from '../context/AppContext';
+import ScheduleModal from '../components/ScheduleModal';
+import type { ScheduleEntry } from '../types';
+
+const CAT_COLOR: Record<string, string> = {
+  'SNS': '#ec4899',
+  '유튜브': '#ef4444',
+  '네이버': '#22c55e',
+  '영상제작': '#a855f7',
+  '디자인제작': '#f97316',
+  '네이버 여론작업': '#0ea5e9',
+  '기타': '#6b7280',
+};
+
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+function getCalendarDays(year: number, month: number) {
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const days: (number | null)[] = [];
+  for (let i = 0; i < firstDay; i++) days.push(null);
+  for (let i = 1; i <= daysInMonth; i++) days.push(i);
+  while (days.length % 7 !== 0) days.push(null);
+  return days;
+}
+
+function padDate(year: number, month: number, day: number) {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+const STATUS_STYLE: Record<string, string> = {
+  completed: 'bg-green-50 text-green-600',
+  'in-progress': 'bg-blue-50 text-blue-600',
+  pending: 'bg-amber-50 text-amber-600',
+};
+const STATUS_LABEL: Record<string, string> = { completed: '완료', 'in-progress': '진행중', pending: '대기' };
+
+export default function TimetablePage() {
+  const { entries, setEntries, clients } = useApp();
+  const [clientId, setClientId] = useState('all');
+  const [curDate, setCurDate] = useState(new Date(2026, 4, 1));
+  const [selectedDay, setSelectedDay] = useState<number | null>(29);
+  const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null; date?: string }>({ open: false });
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const year = curDate.getFullYear();
+  const month = curDate.getMonth();
+  const calDays = getCalendarDays(year, month);
+  const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+
+  const visible = entries.filter(e =>
+    e.date.startsWith(monthPrefix) &&
+    (clientId === 'all' || e.clientId === clientId)
+  );
+
+  const byDay: Record<number, ScheduleEntry[]> = {};
+  visible.forEach(e => {
+    const d = parseInt(e.date.split('-')[2]);
+    (byDay[d] ??= []).push(e);
+  });
+
+  const handleSave = (entry: ScheduleEntry) => {
+    setEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [entry, ...prev]);
+    setModal({ open: false });
+  };
+
+  const openAdd = (day: number) => setModal({ open: true, entry: null, date: padDate(year, month, day) });
+
+  const handleAI = () => {
+    setAiLoading(true);
+    setTimeout(() => {
+      setAiLoading(false);
+      alert('AI 자동 일정 생성 기능은 백엔드 연동 후 사용 가능합니다.\n가이드라인 파일을 바탕으로 최적의 콘텐츠 스케줄을 자동 생성해드릴 예정입니다.');
+    }, 1500);
+  };
+
+  const today = new Date('2026-05-29');
+  const todayDay = (year === today.getFullYear() && month === today.getMonth()) ? today.getDate() : -1;
+  const selectedDayEntries = selectedDay ? (byDay[selectedDay] ?? []) : [];
+
+  const activeClients = clients.filter(c => c.status !== 'inactive');
+
+  return (
+    <Layout>
+      <Header title="타임테이블" subtitle="업체별 콘텐츠 캘린더를 확인하고 관리합니다" />
+      <div className="flex-1 p-6 space-y-4">
+
+        {/* Controls */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <select value={clientId} onChange={e => setClientId(e.target.value)}
+                className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                <option value="all">전체 업체</option>
+                {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setCurDate(new Date(year, month - 1, 1))}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
+                  <ChevronLeft size={18} />
+                </button>
+                <span className="text-base font-bold text-gray-900 min-w-[110px] text-center">
+                  {year}년 {month + 1}월
+                </span>
+                <button onClick={() => setCurDate(new Date(year, month + 1, 1))}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+              <button onClick={() => setCurDate(new Date(2026, 4, 1))}
+                className="px-3 py-1.5 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                이번 달
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={handleAI} disabled={aiLoading}
+                className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-colors ${
+                  aiLoading
+                    ? 'bg-purple-300 text-white cursor-not-allowed'
+                    : 'bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 text-white'
+                }`}>
+                <Sparkles size={15} />
+                {aiLoading ? 'AI 분석 중...' : 'AI 자동 완성'}
+                {!aiLoading && <span className="text-xs bg-white/20 px-1.5 py-0.5 rounded-full">준비 중</span>}
+              </button>
+              <button onClick={() => setModal({ open: true, entry: null, date: padDate(year, month, selectedDay ?? 1) })}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors">
+                <Plus size={16} /> 일정 추가
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-4">
+          {/* Calendar */}
+          <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            {/* Weekday header */}
+            <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50">
+              {WEEKDAYS.map((d, i) => (
+                <div key={d} className={`py-3 text-center text-xs font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-500'}`}>
+                  {d}
+                </div>
+              ))}
+            </div>
+            {/* Days grid */}
+            <div className="grid grid-cols-7">
+              {calDays.map((day, idx) => {
+                const dayEntries = day ? (byDay[day] ?? []) : [];
+                const isToday = day === todayDay;
+                const isSel = day === selectedDay;
+                const isSun = idx % 7 === 0;
+                const isSat = idx % 7 === 6;
+                return (
+                  <div key={idx}
+                    onClick={() => day && setSelectedDay(day === selectedDay ? null : day)}
+                    className={`min-h-[108px] p-1.5 border-b border-r border-gray-50 transition-colors ${
+                      !day ? 'bg-gray-50/50' :
+                      isSel ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' :
+                      'hover:bg-slate-50 cursor-pointer'
+                    }`}>
+                    {day && (
+                      <>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`w-7 h-7 flex items-center justify-center rounded-full text-sm font-semibold ${
+                            isToday ? 'bg-blue-600 text-white' :
+                            isSun ? 'text-red-500' :
+                            isSat ? 'text-blue-500' :
+                            'text-gray-700'
+                          }`}>
+                            {day}
+                          </span>
+                          {isSel && (
+                            <button onClick={e => { e.stopPropagation(); openAdd(day); }}
+                              className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center text-white hover:bg-blue-700">
+                              <Plus size={11} />
+                            </button>
+                          )}
+                        </div>
+                        <div className="space-y-0.5">
+                          {dayEntries.slice(0, 3).map(e => (
+                            <div key={e.id}
+                              className="text-xs px-1.5 py-0.5 rounded truncate text-white font-medium leading-tight"
+                              style={{ backgroundColor: CAT_COLOR[e.category] ?? '#6b7280' }}
+                              title={e.opinionTitle ?? e.keyword ?? e.category}>
+                              {e.opinionTitle ?? e.keyword ?? e.category}
+                            </div>
+                          ))}
+                          {dayEntries.length > 3 && (
+                            <div className="text-xs text-gray-400 px-1.5">+{dayEntries.length - 3}건 더</div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Day Detail Panel */}
+          {selectedDay ? (
+            <div className="w-72 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-gray-900">{month + 1}월 {selectedDay}일</p>
+                  <p className="text-xs text-gray-400">{selectedDayEntries.length}개 일정</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => openAdd(selectedDay)}
+                    className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors">
+                    <Plus size={15} />
+                  </button>
+                  <button onClick={() => setSelectedDay(null)}
+                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
+                    <X size={15} />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {selectedDayEntries.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-gray-400">
+                    <Calendar size={28} className="mb-2 text-gray-200" />
+                    <p className="text-sm text-gray-400">일정이 없습니다</p>
+                    <button onClick={() => openAdd(selectedDay)}
+                      className="mt-2 text-xs text-blue-600 hover:text-blue-700 font-medium">
+                      + 일정 추가하기
+                    </button>
+                  </div>
+                ) : (
+                  selectedDayEntries.map(entry => (
+                    <div key={entry.id}
+                      className="p-3 rounded-xl border border-gray-100 hover:border-gray-200 transition-colors cursor-pointer"
+                      onClick={() => setModal({ open: true, entry })}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full text-white"
+                          style={{ backgroundColor: CAT_COLOR[entry.category] ?? '#6b7280' }}>
+                          {entry.category}
+                        </span>
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${STATUS_STYLE[entry.status]}`}>
+                          {STATUS_LABEL[entry.status]}
+                        </span>
+                      </div>
+                      <p className="text-sm font-semibold text-gray-900 mb-0.5 truncate">
+                        {entry.opinionTitle ?? entry.keyword ?? entry.category}
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">{entry.managerName} · {entry.clientName}</p>
+                      {entry.link && (
+                        <a href={entry.link} target="_blank" rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          className="text-xs text-blue-500 hover:underline mt-1 block truncate">{entry.link}</a>
+                      )}
+                      {entry.metrics && Object.values(entry.metrics).some(v => v) && (
+                        <div className="flex gap-2 mt-1.5 flex-wrap">
+                          {entry.metrics.views && <span className="text-xs text-gray-400">👁{entry.metrics.views.toLocaleString()}</span>}
+                          {entry.metrics.likes && <span className="text-xs text-gray-400">❤️{entry.metrics.likes.toLocaleString()}</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : (
+            /* Mini stats when no day selected */
+            <div className="w-64 space-y-3">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">{month + 1}월 현황</p>
+                <div className="space-y-2">
+                  {[
+                    { label: '전체 일정', count: visible.length, color: 'text-gray-900' },
+                    { label: '완료', count: visible.filter(e => e.status === 'completed').length, color: 'text-green-600' },
+                    { label: '진행중', count: visible.filter(e => e.status === 'in-progress').length, color: 'text-blue-600' },
+                    { label: '대기중', count: visible.filter(e => e.status === 'pending').length, color: 'text-amber-600' },
+                  ].map(s => (
+                    <div key={s.label} className="flex justify-between items-center">
+                      <span className="text-sm text-gray-500">{s.label}</span>
+                      <span className={`text-sm font-bold ${s.color}`}>{s.count}건</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">카테고리별</p>
+                <div className="space-y-1.5">
+                  {Object.entries(CAT_COLOR).map(([cat, color]) => {
+                    const cnt = visible.filter(e => e.category === cat).length;
+                    if (!cnt) return null;
+                    return (
+                      <div key={cat} className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                        <span className="text-xs text-gray-600 flex-1 truncate">{cat}</span>
+                        <span className="text-xs font-semibold text-gray-700">{cnt}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="bg-gradient-to-br from-purple-50 to-violet-50 rounded-2xl border border-purple-100 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles size={14} className="text-purple-500" />
+                  <p className="text-xs font-semibold text-purple-700">AI 자동 완성</p>
+                </div>
+                <p className="text-xs text-purple-600 leading-relaxed mb-3">
+                  가이드라인 파일을 분석해 최적의 콘텐츠 스케줄을 자동으로 생성합니다.
+                </p>
+                <button onClick={handleAI}
+                  className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5">
+                  <Sparkles size={12} /> AI 기획 시작 (준비 중)
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Legend */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-5 py-3">
+          <div className="flex items-center gap-5 flex-wrap">
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">범례</span>
+            {Object.entries(CAT_COLOR).map(([cat, color]) => (
+              <span key={cat} className="flex items-center gap-1.5 text-xs text-gray-600">
+                <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
+                {cat}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {modal.open && (
+        <ScheduleModal
+          entry={modal.entry}
+          defaultDate={modal.date}
+          onSave={handleSave}
+          onClose={() => setModal({ open: false })}
+        />
+      )}
+    </Layout>
+  );
+}
