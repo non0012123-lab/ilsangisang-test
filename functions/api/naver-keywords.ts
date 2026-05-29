@@ -1,13 +1,12 @@
 // ───────────────────────────────────────────────────────────────
 // Cloudflare Pages Function:  POST /api/naver-keywords
-//  • 네이버 "검색광고 API" 키워드도구(/keywordstool)로
-//    PC/모바일 월간 조회수 + 연관키워드를 조회한다.
-//  • HMAC-SHA256 서명 + 비밀키가 필요해 반드시 서버에서 호출.
+//  • 네이버 "검색광고 API" 키워드도구(/keywordstool)
+//  • 두 가지 모드:
+//    - { keywords: string[] }  → 입력한 키워드(최대 50개)들의 지표만 반환
+//      (키워드도구는 호출당 hintKeywords 5개 제한 → 5개씩 나눠 호출)
+//    - { related: string }     → 그 키워드 하나의 연관키워드 목록 반환
 //
-// 환경변수 (Cloudflare Pages → Settings / 로컬 .dev.vars):
-//  • NAVER_AD_API_KEY      액세스 라이선스
-//  • NAVER_AD_SECRET_KEY   비밀키
-//  • NAVER_AD_CUSTOMER_ID  CUSTOMER_ID
+// 환경변수: NAVER_AD_API_KEY / NAVER_AD_SECRET_KEY / NAVER_AD_CUSTOMER_ID
 // ───────────────────────────────────────────────────────────────
 
 interface Env {
@@ -16,10 +15,29 @@ interface Env {
   NAVER_AD_CUSTOMER_ID: string;
 }
 
+interface Row {
+  keyword: string;
+  pc: number | string;
+  mobile: number | string;
+  total: number;
+  pcClick: number | string;
+  mobileClick: number | string;
+  pcCtr: number | string;
+  mobileCtr: number | string;
+  compIdx: string;
+  found: boolean;
+}
+
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
 
-// timestamp.method.path 를 비밀키로 HMAC-SHA256 서명 → base64
+const norm = (s: string) => s.replace(/\s+/g, '').toLowerCase();
+const toNum = (v: unknown): number => {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') { const n = parseInt(v.replace(/[^0-9]/g, ''), 10); return isNaN(n) ? 0 : n; }
+  return 0;
+};
+
 async function sign(timestamp: string, method: string, path: string, secret: string): Promise<string> {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
@@ -30,12 +48,42 @@ async function sign(timestamp: string, method: string, path: string, secret: str
   return btoa(bin);
 }
 
-// "< 10" 같은 문자열도 숫자로 (정렬용). 표시는 원본 문자열 유지.
-function toNum(v: unknown): number {
-  if (typeof v === 'number') return v;
-  if (typeof v === 'string') { const n = parseInt(v.replace(/[^0-9]/g, ''), 10); return isNaN(n) ? 0 : n; }
-  return 0;
+// hintKeywords(콤마구분, 최대 5개) 한 번 호출 → keywordList 행들
+async function callTool(env: Env, hint: string): Promise<Record<string, unknown>[]> {
+  const timestamp = Date.now().toString();
+  const path = '/keywordstool';
+  const signature = await sign(timestamp, 'GET', path, env.NAVER_AD_SECRET_KEY);
+  const url = `https://api.searchad.naver.com${path}?hintKeywords=${encodeURIComponent(hint)}&showDetail=1`;
+  const res = await fetch(url, {
+    headers: {
+      'X-Timestamp': timestamp,
+      'X-API-KEY': env.NAVER_AD_API_KEY,
+      'X-Customer': env.NAVER_AD_CUSTOMER_ID,
+      'X-Signature': signature,
+    },
+  });
+  if (!res.ok) throw new Error(`네이버 API 오류 (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  return Array.isArray(data?.keywordList) ? data.keywordList : [];
 }
+
+function toRow(k: Record<string, unknown>): Row {
+  const pc = k.monthlyPcQcCnt, mobile = k.monthlyMobileQcCnt;
+  return {
+    keyword: k.relKeyword as string,
+    pc: pc as number | string,
+    mobile: mobile as number | string,
+    total: toNum(pc) + toNum(mobile),
+    pcClick: (k.monthlyAvePcClkCnt as number | string) ?? 0,
+    mobileClick: (k.monthlyAveMobileClkCnt as number | string) ?? 0,
+    pcCtr: (k.monthlyAvePcCtr as number | string) ?? 0,
+    mobileCtr: (k.monthlyAveMobileCtr as number | string) ?? 0,
+    compIdx: (k.compIdx as string) ?? '-',
+    found: true,
+  };
+}
+
+const byTotalDesc = (a: Row, b: Row) => b.total - a.total;
 
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
@@ -43,54 +91,39 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     return json({ error: '네이버 검색광고 API 키가 설정되지 않았습니다. 환경변수를 확인하세요.' }, 500);
   }
 
-  let body: { keyword?: string };
+  let body: { keywords?: string[]; related?: string };
   try { body = await request.json(); } catch { return json({ error: '잘못된 요청 본문입니다.' }, 400); }
-  const raw = (body.keyword ?? '').trim();
-  if (!raw) return json({ error: '키워드를 입력하세요.' }, 400);
-  // 키워드도구는 공백 없는 키워드를 권장
-  const hint = raw.replace(/\s+/g, '');
 
-  const timestamp = Date.now().toString();
-  const method = 'GET';
-  const path = '/keywordstool';
-  const signature = await sign(timestamp, method, path, env.NAVER_AD_SECRET_KEY);
-  const url = `https://api.searchad.naver.com${path}?hintKeywords=${encodeURIComponent(hint)}&showDetail=1`;
-
-  let res: Response;
   try {
-    res = await fetch(url, {
-      method,
-      headers: {
-        'X-Timestamp': timestamp,
-        'X-API-KEY': env.NAVER_AD_API_KEY,
-        'X-Customer': env.NAVER_AD_CUSTOMER_ID,
-        'X-Signature': signature,
-      },
-    });
+    // ── 연관키워드 모드 ──
+    if (body.related) {
+      const seed = body.related.trim();
+      if (!seed) return json({ error: '키워드를 입력하세요.' }, 400);
+      const list = await callTool(env, norm(seed));
+      const related = list.map(toRow).filter(r => norm(r.keyword) !== norm(seed)).sort(byTotalDesc).slice(0, 200);
+      return json({ query: seed, related });
+    }
+
+    // ── 입력 키워드 모드 (최대 50개, 5개씩 나눠 호출) ──
+    const typed = Array.from(new Set((body.keywords ?? []).map(k => k.trim()).filter(Boolean))).slice(0, 50);
+    if (typed.length === 0) return json({ error: '키워드를 입력하세요.' }, 400);
+
+    const map = new Map<string, Row>();
+    for (let i = 0; i < typed.length; i += 5) {
+      const chunk = typed.slice(i, i + 5);
+      const list = await callTool(env, chunk.map(norm).join(','));
+      for (const k of list) {
+        const row = toRow(k);
+        map.set(norm(row.keyword), row);
+      }
+    }
+    // 입력한 키워드만, 못 찾으면 빈 행
+    const keywords = typed.map(t => map.get(norm(t)) ?? {
+      keyword: t, pc: '-', mobile: '-', total: 0, pcClick: '-', mobileClick: '-', pcCtr: '-', mobileCtr: '-', compIdx: '-', found: false,
+    } as Row).sort(byTotalDesc);
+
+    return json({ keywords });
   } catch (e) {
-    return json({ error: `네이버 API 요청 실패: ${e instanceof Error ? e.message : '네트워크 오류'}` }, 502);
+    return json({ error: e instanceof Error ? e.message : '조회 중 오류가 발생했습니다.' }, 502);
   }
-
-  if (!res.ok) {
-    const detail = await res.text();
-    return json({ error: `네이버 API 오류 (${res.status})`, detail: detail.slice(0, 400) }, 502);
-  }
-
-  const data = await res.json();
-  const list = Array.isArray(data?.keywordList) ? data.keywordList : [];
-  const keywords = list.map((k: Record<string, unknown>) => {
-    const pc = k.monthlyPcQcCnt;
-    const mobile = k.monthlyMobileQcCnt;
-    return {
-      keyword: k.relKeyword as string,
-      pc, mobile,
-      total: toNum(pc) + toNum(mobile),
-      sortKey: toNum(pc) + toNum(mobile),
-      compIdx: (k.compIdx as string) ?? '-',          // 경쟁정도(높음/중간/낮음)
-      pcCtr: k.monthlyAvePcCtr ?? null,
-      mobileCtr: k.monthlyAveMobileCtr ?? null,
-    };
-  }).sort((a: { sortKey: number }, b: { sortKey: number }) => b.sortKey - a.sortKey);
-
-  return json({ query: raw, keywords });
 };

@@ -1,70 +1,132 @@
 import { useState } from 'react';
-import { Search, AlertTriangle, TrendingUp } from 'lucide-react';
+import { Search, AlertTriangle, TrendingUp, ArrowLeft, Link2 } from 'lucide-react';
 
 interface KeywordRow {
   keyword: string;
   pc: number | string;
   mobile: number | string;
   total: number;
+  pcClick: number | string;
+  mobileClick: number | string;
+  pcCtr: number | string;
+  mobileCtr: number | string;
   compIdx: string;
+  found?: boolean;
 }
 
 const fmt = (v: number | string) => typeof v === 'number' ? v.toLocaleString('ko-KR') : v;
+const fmtCtr = (v: number | string) => typeof v === 'number' ? `${v}%` : v;
 const compColor = (c: string) =>
-  c === '높음' ? 'bg-red-50 text-red-600' : c === '중간' ? 'bg-amber-50 text-amber-600' : c === '낮음' ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-500';
+  c === '높음' ? 'bg-red-50 text-red-600' : c === '중간' ? 'bg-amber-50 text-amber-600' : c === '낮음' ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-400';
+
+// 쉼표/줄바꿈으로 구분, 중복 제거, 최대 50개
+function parseKeywords(input: string): string[] {
+  return Array.from(new Set(input.split(/[\n,]/).map(s => s.trim()).filter(Boolean))).slice(0, 50);
+}
+
+function ResultTable({ rows, onRelated }: { rows: KeywordRow[]; onRelated: (kw: string) => void }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-gray-50 border-b border-gray-100">
+            {['키워드', 'PC 조회', '모바일 조회', '월간 합계', 'PC 클릭', '모바일 클릭', 'PC 클릭률', '모바일 클릭률', '경쟁'].map(h => (
+              <th key={h} className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">{h}</th>
+            ))}
+            <th className="px-3 py-3" />
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-50">
+          {rows.map((r, i) => (
+            <tr key={i} className="hover:bg-gray-50/50">
+              <td className="px-3 py-2.5 font-medium text-gray-900 whitespace-nowrap">{r.keyword}</td>
+              <td className="px-3 py-2.5 text-gray-700 text-right tabular-nums">{fmt(r.pc)}</td>
+              <td className="px-3 py-2.5 text-gray-700 text-right tabular-nums">{fmt(r.mobile)}</td>
+              <td className="px-3 py-2.5 text-gray-900 font-semibold text-right tabular-nums">{r.found === false ? '-' : r.total.toLocaleString('ko-KR')}</td>
+              <td className="px-3 py-2.5 text-gray-600 text-right tabular-nums">{fmt(r.pcClick)}</td>
+              <td className="px-3 py-2.5 text-gray-600 text-right tabular-nums">{fmt(r.mobileClick)}</td>
+              <td className="px-3 py-2.5 text-gray-600 text-right tabular-nums">{fmtCtr(r.pcCtr)}</td>
+              <td className="px-3 py-2.5 text-gray-600 text-right tabular-nums">{fmtCtr(r.mobileCtr)}</td>
+              <td className="px-3 py-2.5"><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${compColor(r.compIdx)}`}>{r.compIdx}</span></td>
+              <td className="px-3 py-2.5 whitespace-nowrap">
+                <button onClick={() => onRelated(r.keyword)}
+                  className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline">
+                  <Link2 size={12} /> 연관
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function KeywordTool() {
-  const [keyword, setKeyword] = useState('');
+  const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
   const [rows, setRows] = useState<KeywordRow[]>([]);
+  const [related, setRelated] = useState<{ seed: string; rows: KeywordRow[] } | null>(null);
+  const [relLoading, setRelLoading] = useState(false);
+
+  const parsed = parseKeywords(input);
 
   const search = async () => {
-    if (!keyword.trim() || loading) return;
-    setLoading(true); setError('');
+    if (parsed.length === 0 || loading) return;
+    setLoading(true); setError(''); setRelated(null);
     try {
       const res = await fetch('/api/naver-keywords', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords: parsed }),
       });
       const ct = res.headers.get('content-type') ?? '';
-      if (!ct.includes('application/json')) {
-        throw new Error('키워드 조회 서버(/api/naver-keywords)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
-      }
+      if (!ct.includes('application/json')) throw new Error('키워드 조회 서버(/api/naver-keywords)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.detail ? `${data.error} — ${data.detail}` : (data.error ?? `요청 실패 (${res.status})`));
-      setQuery(data.query ?? keyword);
       setRows(Array.isArray(data.keywords) ? data.keywords : []);
     } catch (e) {
       setError(e instanceof Error ? e.message : '조회 중 오류가 발생했습니다.');
       setRows([]);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
+  };
+
+  const loadRelated = async (kw: string) => {
+    setRelLoading(true); setError('');
+    setRelated({ seed: kw, rows: [] });
+    try {
+      const res = await fetch('/api/naver-keywords', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ related: kw }),
+      });
+      const ct = res.headers.get('content-type') ?? '';
+      if (!ct.includes('application/json')) throw new Error('키워드 조회 서버에 연결할 수 없습니다. (Cloudflare Pages 환경 필요)');
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
+      setRelated({ seed: kw, rows: Array.isArray(data.related) ? data.related : [] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '연관 키워드 조회 중 오류가 발생했습니다.');
+      setRelated(null);
+    } finally { setRelLoading(false); }
   };
 
   return (
     <div className="space-y-4">
       {/* 검색창 */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <div className="flex gap-2">
-          <div className="flex-1 relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input value={keyword} onChange={e => setKeyword(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && search()}
-              placeholder="키워드를 입력하세요 (예: 스타벅스)"
-              className="w-full border border-gray-200 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <button onClick={search} disabled={loading || !keyword.trim()}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
-              loading || !keyword.trim() ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white'
+        <label className="block text-xs font-semibold text-gray-600 mb-1.5">키워드 (쉼표 또는 줄바꿈으로 구분 · 최대 50개)</label>
+        <textarea value={input} onChange={e => setInput(e.target.value)} rows={3}
+          placeholder="예: 스타벅스, 스타벅스 신메뉴, 아메리카노"
+          className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+        <div className="flex items-center justify-between mt-2">
+          <span className={`text-xs ${parsed.length > 50 ? 'text-red-500' : 'text-gray-400'}`}>{parsed.length}개 입력됨 {parsed.length >= 50 && '(최대 50)'}</span>
+          <button onClick={search} disabled={loading || parsed.length === 0}
+            className={`flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold transition-colors ${
+              loading || parsed.length === 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white'
             }`}>
             {loading ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 조회 중</> : <><Search size={15} /> 조회</>}
           </button>
         </div>
-        <p className="text-xs text-gray-400 mt-2">네이버 검색광고 기준 PC·모바일 월간 검색수와 연관 키워드를 보여줍니다.</p>
       </div>
 
       {error && (
@@ -73,40 +135,34 @@ export default function KeywordTool() {
         </div>
       )}
 
-      {/* 결과 */}
-      {rows.length > 0 && (
+      {/* 연관키워드 뷰 */}
+      {related ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-50 flex items-center gap-2">
+            <button onClick={() => setRelated(null)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
+              <ArrowLeft size={15} /> 내 키워드
+            </button>
+            <span className="text-gray-300">|</span>
+            <Link2 size={16} className="text-blue-600" />
+            <h3 className="font-bold text-gray-900 text-sm">"{related.seed}" 연관 키워드</h3>
+            <span className="ml-auto text-xs text-gray-400">{related.rows.length}개 · 월간 합계 순</span>
+          </div>
+          {relLoading
+            ? <p className="text-center py-10 text-gray-400 text-sm">불러오는 중...</p>
+            : related.rows.length === 0
+              ? <p className="text-center py-10 text-gray-400 text-sm">연관 키워드가 없습니다.</p>
+              : <ResultTable rows={related.rows} onRelated={loadRelated} />}
+        </div>
+      ) : rows.length > 0 ? (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-50 flex items-center gap-2">
             <TrendingUp size={16} className="text-blue-600" />
-            <h3 className="font-bold text-gray-900 text-sm">"{query}" 연관 키워드</h3>
-            <span className="ml-auto text-xs text-gray-400">{rows.length}개 · 월간 검색수 순</span>
+            <h3 className="font-bold text-gray-900 text-sm">내 키워드 조회 결과</h3>
+            <span className="ml-auto text-xs text-gray-400">{rows.length}개 · 월간 합계 순 · "연관"으로 확장</span>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  {['키워드', 'PC 월간', '모바일 월간', '합계', '경쟁정도'].map(h => (
-                    <th key={h} className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3 whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {rows.map((r, i) => (
-                  <tr key={i} className={`hover:bg-gray-50/50 ${i === 0 ? 'bg-blue-50/40' : ''}`}>
-                    <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">{r.keyword}</td>
-                    <td className="px-4 py-2.5 text-gray-700 text-right tabular-nums">{fmt(r.pc)}</td>
-                    <td className="px-4 py-2.5 text-gray-700 text-right tabular-nums">{fmt(r.mobile)}</td>
-                    <td className="px-4 py-2.5 text-gray-900 font-semibold text-right tabular-nums">{r.total.toLocaleString('ko-KR')}</td>
-                    <td className="px-4 py-2.5">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${compColor(r.compIdx)}`}>{r.compIdx}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ResultTable rows={rows} onRelated={loadRelated} />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
