@@ -96,7 +96,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Month Stats */}
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { label: '이번달 완료', value: monthDone, icon: <CheckCircle2 size={18} />, color: 'text-green-600', bg: 'bg-green-50' },
             { label: '진행중', value: monthProg, icon: <Clock size={18} />, color: 'text-blue-600', bg: 'bg-blue-50' },
@@ -139,7 +139,8 @@ export default function DashboardPage() {
                 </button>
               </div>
             ) : (
-              <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
+              <>
+              <div className="hidden md:block bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
@@ -169,6 +170,20 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               </div>
+              {/* 모바일 카드 */}
+              <div className="md:hidden space-y-2">
+                {todayTasks.map(entry => (
+                  <div key={entry.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-2.5">
+                    <CategoryBadge category={entry.category} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{entry.opinionTitle ?? entry.keyword ?? '-'}</p>
+                      <p className="text-xs text-gray-400 truncate">{entry.clientName}</p>
+                    </div>
+                    <InlineStatus status={entry.status} onChange={s => updateEntry(entry.id, { status: s })} />
+                  </div>
+                ))}
+              </div>
+              </>
             )}
 
             {/* This Week */}

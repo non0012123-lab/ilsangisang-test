@@ -8,6 +8,7 @@ import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
 import InlineLink from '../components/InlineLink';
 import ScheduleModal from '../components/ScheduleModal';
+import ScheduleCardList from '../components/ScheduleCardList';
 import type { ScheduleEntry } from '../types';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
@@ -99,8 +100,8 @@ export default function ClientSchedulePage() {
           </div>
         </div>
 
-        {/* Schedule Table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        {/* Schedule Table (md 이상) */}
+        <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
               <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mb-3"><Building2 size={22} /></div>
@@ -163,6 +164,11 @@ export default function ClientSchedulePage() {
             </div>
           )}
         </div>
+
+        {/* Cards (모바일) */}
+        <ScheduleCardList entries={filtered} onPatch={updateEntry} onPreview={setPreviewImg}
+          onEdit={e => setModal({ open: true, entry: e })} onDelete={handleDelete} onCopied={notify}
+          emptyText={`${client.name}에 등록된 스케줄이 없습니다`} />
       </div>
 
       {modal.open && (

@@ -7,6 +7,7 @@ import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
 import InlineLink from '../components/InlineLink';
 import ScheduleModal from '../components/ScheduleModal';
+import ScheduleCardList from '../components/ScheduleCardList';
 import type { ScheduleEntry, Category } from '../types';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
@@ -162,7 +163,8 @@ export default function CategoryPage() {
           </div>
         ) : (
           /* Regular Table */
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <>
+          <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             {filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-gray-400">
                 <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mb-3">{config.icon}</div>
@@ -225,6 +227,10 @@ export default function CategoryPage() {
               </div>
             )}
           </div>
+          <ScheduleCardList entries={filtered} onPatch={updateEntry} onPreview={setPreviewImg}
+            onEdit={e => setModal({ open: true, entry: e })} onDelete={handleDelete} onCopied={notify}
+            emptyText={`${config.label} 카테고리에 등록된 스케줄이 없습니다`} />
+          </>
         )}
       </div>
 

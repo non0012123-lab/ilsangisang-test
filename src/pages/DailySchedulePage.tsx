@@ -7,6 +7,7 @@ import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
 import InlineLink from '../components/InlineLink';
 import ScheduleModal from '../components/ScheduleModal';
+import ScheduleCardList from '../components/ScheduleCardList';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
 import { coversDate, isMultiDay, fmtLocal } from '../utils/dateRange';
@@ -157,8 +158,8 @@ export default function DailySchedulePage() {
           ))}
         </div>
 
-        {/* Table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        {/* Table (md 이상) */}
+        <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           {dayEntries.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-gray-400">
               <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
@@ -241,6 +242,11 @@ export default function DailySchedulePage() {
             </div>
           )}
         </div>
+
+        {/* Cards (모바일) */}
+        <ScheduleCardList entries={dayEntries} onPatch={updateEntry} onPreview={setPreviewImg}
+          onEdit={e => setModal({ open: true, entry: e })} onDelete={handleDelete} onCopied={notify}
+          emptyText="조건에 맞는 스케줄이 없습니다." />
       </div>
 
       {modal.open && <ScheduleModal entry={modal.entry} onSave={handleSave} onClose={() => setModal({ open: false })} />}
