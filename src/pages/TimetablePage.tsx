@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 import ScheduleModal from '../components/ScheduleModal';
+import AIScheduleModal from '../components/AIScheduleModal';
 import type { ScheduleEntry } from '../types';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd } from '../utils/dateRange';
 
@@ -46,7 +47,7 @@ export default function TimetablePage() {
   const [curDate, setCurDate] = useState(new Date(2026, 4, 1));
   const [selectedDay, setSelectedDay] = useState<number | null>(29);
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null; date?: string }>({ open: false });
-  const [aiLoading, setAiLoading] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
 
   const year = curDate.getFullYear();
   const month = curDate.getMonth();
@@ -111,12 +112,9 @@ export default function TimetablePage() {
 
   const openAdd = (day: number) => setModal({ open: true, entry: null, date: padDate(year, month, day) });
 
-  const handleAI = () => {
-    setAiLoading(true);
-    setTimeout(() => {
-      setAiLoading(false);
-      alert('AI 자동 일정 생성 기능은 백엔드 연동 후 사용 가능합니다.\n가이드라인 파일을 바탕으로 최적의 콘텐츠 스케줄을 자동 생성해드릴 예정입니다.');
-    }, 1500);
+  const addAiEntries = (newEntries: ScheduleEntry[]) => {
+    setEntries(prev => [...newEntries, ...prev]);
+    setAiOpen(false);
   };
 
   const today = new Date('2026-05-29');
@@ -158,15 +156,9 @@ export default function TimetablePage() {
               </button>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={handleAI} disabled={aiLoading}
-                className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-colors ${
-                  aiLoading
-                    ? 'bg-purple-300 text-white cursor-not-allowed'
-                    : 'bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 text-white'
-                }`}>
-                <Sparkles size={15} />
-                {aiLoading ? 'AI 분석 중...' : 'AI 자동 완성'}
-                {!aiLoading && <span className="text-xs bg-white/20 px-1.5 py-0.5 rounded-full">준비 중</span>}
+              <button onClick={() => setAiOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-colors bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 text-white">
+                <Sparkles size={15} /> AI 자동 완성
               </button>
               <button onClick={() => setModal({ open: true, entry: null, date: padDate(year, month, selectedDay ?? 1) })}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors">
@@ -388,11 +380,11 @@ export default function TimetablePage() {
                   <p className="text-xs font-semibold text-purple-700">AI 자동 완성</p>
                 </div>
                 <p className="text-xs text-purple-600 leading-relaxed mb-3">
-                  가이드라인 파일을 분석해 최적의 콘텐츠 스케줄을 자동으로 생성합니다.
+                  담당자·날짜·업체·종류를 채팅으로 적으면 AI가 일정을 만들어 미리보기로 보여줍니다. 확인 후 등록하세요.
                 </p>
-                <button onClick={handleAI}
+                <button onClick={() => setAiOpen(true)}
                   className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5">
-                  <Sparkles size={12} /> AI 기획 시작 (준비 중)
+                  <Sparkles size={12} /> AI로 일정 만들기
                 </button>
               </div>
             </div>
@@ -420,6 +412,10 @@ export default function TimetablePage() {
           onSave={handleSave}
           onClose={() => setModal({ open: false })}
         />
+      )}
+
+      {aiOpen && (
+        <AIScheduleModal onAdd={addAiEntries} onClose={() => setAiOpen(false)} />
       )}
     </Layout>
   );
