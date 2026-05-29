@@ -93,7 +93,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
           { role: 'user', content: [{ type: 'input_text', text: req.text }] },
         ],
         text: { format: { type: 'json_object' } },
-        reasoning: { effort: 'minimal' }, // 추출 작업 → 빠르게
+        reasoning: { effort: 'none' }, // 추출 작업 → 추론 없이 가장 빠르게
         store: false,
       }),
     });
