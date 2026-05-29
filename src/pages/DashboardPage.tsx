@@ -78,13 +78,13 @@ export default function DashboardPage() {
       <div className="flex-1 p-6 space-y-5">
 
         {/* Welcome */}
-        <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-5 text-white flex items-center justify-between">
-          <div>
+        <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-5 text-white flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <p className="text-blue-200 text-sm mb-1">{greet()},</p>
-            <h2 className="text-2xl font-bold">{user?.name} 님 👋</h2>
-            {user?.department && <p className="text-blue-200 text-sm mt-1">{user.department}</p>}
+            <h2 className="text-xl sm:text-2xl font-bold truncate">{user?.name} 님 👋</h2>
+            {user?.department && <p className="text-blue-200 text-sm mt-1 truncate">{user.department}</p>}
           </div>
-          <div className="text-right">
+          <div className="text-right shrink-0">
             <p className="text-blue-200 text-xs mb-1">오늘의 작업</p>
             <p className="text-4xl font-bold">{todayTasks.length}<span className="text-xl font-normal text-blue-200 ml-1">건</span></p>
             {todayTasks.filter(e => e.status === 'completed').length > 0 && (
@@ -202,11 +202,11 @@ export default function DashboardPage() {
                         {new Date(entry.date + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' })}
                       </span>
                       <CategoryBadge category={entry.category} />
-                      <span className="text-sm text-gray-700 flex-1 truncate flex items-center gap-1.5">
-                        {entry.opinionTitle ?? entry.keyword ?? entry.category}
+                      <span className="text-sm text-gray-700 flex-1 min-w-0 truncate flex items-center gap-1.5">
+                        <span className="truncate">{entry.opinionTitle ?? entry.keyword ?? entry.category}</span>
                         {isMultiDay(entry) && <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full shrink-0">기간</span>}
                       </span>
-                      <span className="text-xs text-gray-400 shrink-0">{entry.clientName}</span>
+                      <span className="text-xs text-gray-400 shrink-0 truncate max-w-[84px] hidden sm:block">{entry.clientName}</span>
                       <InlineStatus status={entry.status} onChange={s => updateEntry(entry.id, { status: s })} />
                     </div>
                   ))}

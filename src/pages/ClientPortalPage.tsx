@@ -95,10 +95,10 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
         <span className="text-sm text-gray-400">총 {monthEntries.length}건</span>
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex flex-col lg:flex-row gap-4">
         {/* Calendar grid */}
-        <div className="flex-1 bg-gray-50 rounded-2xl overflow-hidden">
-          <div className="grid grid-cols-7 border-b border-gray-200">
+        <div className="flex-1 min-w-0 bg-gray-50 rounded-2xl overflow-x-auto">
+          <div className="grid grid-cols-7 border-b border-gray-200 min-w-[640px]">
             {WEEKDAYS.map((d, i) => (
               <div key={d} className={`py-2.5 text-center text-xs font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-500'}`}>{d}</div>
             ))}
@@ -110,7 +110,7 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
               const usedLanes = Math.min(MAX_LANES, placed.reduce((m, p) => Math.max(m, p.lane + 1), 0));
               const weekMinH = Math.max(NUM_AREA + usedLanes * (BAR_H + BAR_GAP) + 8, 72);
               return (
-                <div key={wi} className="relative grid grid-cols-7 border-b border-gray-100 last:border-b-0" style={{ minHeight: weekMinH }}>
+                <div key={wi} className="relative grid grid-cols-7 border-b border-gray-200 last:border-b-0 min-w-[640px]" style={{ minHeight: weekMinH }}>
                   {/* 날짜 셀 */}
                   {week.map((day, ci) => {
                     const isToday = day === todayDay;
@@ -166,7 +166,7 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
 
         {/* Day detail */}
         {selDay && (
-          <div className="w-56 bg-white border border-gray-100 rounded-2xl p-3 space-y-2">
+          <div className="w-full lg:w-56 bg-white border border-gray-100 rounded-2xl p-3 space-y-2">
             <p className="font-bold text-gray-900 text-sm">{month + 1}월 {selDay}일</p>
             {selEntries.length === 0 ? (
               <p className="text-xs text-gray-400 text-center py-4">일정 없음</p>
@@ -239,10 +239,10 @@ export default function ClientPortalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 overflow-x-clip">
       {/* Header */}
       <header className="bg-white border-b border-gray-100 sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
               <BarChart3 size={16} className="text-white" />
@@ -262,7 +262,7 @@ export default function ClientPortalPage() {
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
         {/* Welcome */}
         <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-2xl p-6 text-white">
           <div className="flex items-center justify-between">

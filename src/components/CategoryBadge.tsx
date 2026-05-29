@@ -13,7 +13,7 @@ const CONFIG: Record<Category, { bg: string; text: string; label: string }> = {
 export default function CategoryBadge({ category }: { category: Category }) {
   const { bg, text, label } = CONFIG[category] ?? CONFIG['기타'];
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${bg} ${text}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap shrink-0 ${bg} ${text}`}>
       {label}
     </span>
   );
