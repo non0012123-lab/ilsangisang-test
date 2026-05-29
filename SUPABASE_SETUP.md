@@ -39,16 +39,32 @@ npm run dev
 - `/signup` 에서 직원 가입 → 즉시 로그인되어 대시보드로 이동
 - 가입 계정은 기본 **담당자(manager)** 권한
 
-## 관리자 / 클라이언트 권한 부여
-가입은 직원(manager)만 가능합니다. 권한 변경은 SQL Editor에서:
-```sql
--- 관리자로 승격
-update public.profiles set role = 'admin' where email = 'admin@ilsangisang.com';
+## 가입 승인제 (중요)
+보안을 위해 **신규 가입자는 'pending'(승인 대기) 상태**로 시작하며, 승인 전에는
+내부 화면에 접근할 수 없습니다(승인 대기 화면만 표시). 관리자가 **담당자/클라이언트**로
+승인해야 이용 가능합니다.
 
--- 클라이언트 계정: Authentication에서 사용자 추가 후 연결
-update public.profiles set role = 'client', client_id = 'cl1'
-where email = 'starbucks@client.com';
-```
+### 적용 절차
+1. SQL Editor에 **`supabase/migrations/0002_approval.sql`** 실행
+2. **최초 관리자 지정** (필수 — 안 하면 아무도 승인할 수 없음):
+   ```sql
+   update public.profiles set role = 'admin' where email = '본인이메일@example.com';
+   ```
+3. (권장) 이미 manager로 가입돼 있던 계정들을 다시 승인 대기로 되돌리기:
+   ```sql
+   update public.profiles set role = 'pending'
+   where role = 'manager' and email <> '본인이메일@example.com';
+   ```
+
+### 승인 방법
+관리자로 로그인 → 좌측 **가입 승인** 메뉴 → 대기자를 **담당자로 승인** 또는
+**클라이언트로 승인**(연결 업체 선택). 기존 사용자 역할도 여기서 변경할 수 있습니다.
+
+> SQL로 직접 부여도 가능:
+> ```sql
+> update public.profiles set role = 'client', client_id = 'cl1'
+> where email = 'starbucks@client.com';
+> ```
 
 ## 배포(GitHub Pages / Cloudflare 등)
 빌드 시점에 환경변수가 주입되어야 하므로, CI/배포 환경에도
