@@ -127,9 +127,9 @@ export default function ClientPortalPage() {
                         </td>
                         <td className="px-4 py-3 max-w-[160px]">
                           <div className="flex items-center gap-1">
-                            <a href={entry.link} target="_blank" rel="noopener noreferrer"
-                              className="table-link link-cell text-xs" title={entry.link}>{entry.link}</a>
-                            <a href={entry.link} target="_blank" rel="noopener noreferrer"
+                            <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
+                              className="table-link link-cell text-xs" title={entry.link ?? ''}>{entry.link ?? '-'}</a>
+                            <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
                               className="shrink-0 p-0.5 text-gray-300 hover:text-blue-500"><ExternalLink size={11} /></a>
                           </div>
                         </td>

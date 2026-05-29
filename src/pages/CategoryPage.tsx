@@ -7,6 +7,7 @@ import StatusBadge from '../components/StatusBadge';
 import ScheduleModal from '../components/ScheduleModal';
 import type { ScheduleEntry, Category } from '../types';
 import { useApp } from '../context/AppContext';
+import { useCopyToast } from '../hooks/useCopyToast';
 
 const CATEGORY_CONFIG: Record<string, { label: Category; color: string; icon: React.ReactNode; gradient: string }> = {
   sns:            { label: 'SNS',           color: 'text-pink-600',   icon: <Hash size={20} />,          gradient: 'from-pink-500 to-rose-500' },
@@ -30,6 +31,7 @@ export default function CategoryPage() {
   const { category = 'sns' } = useParams<{ category: string }>();
   const config = CATEGORY_CONFIG[category] ?? CATEGORY_CONFIG.sns;
   const { entries, setEntries } = useApp();
+  const { copy, show: showToast } = useCopyToast();
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const filtered = entries
@@ -175,13 +177,13 @@ export default function CategoryPage() {
                         </td>
                         <td className="px-4 py-3 max-w-[220px]">
                           <div className="flex items-center gap-1">
-                            <a href={entry.link} target="_blank" rel="noopener noreferrer"
-                              className="table-link link-cell" title={entry.link}>{entry.link}</a>
+                            <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
+                              className="table-link link-cell" title={entry.link ?? ''}>{entry.link}</a>
                             <div className="flex gap-0.5 shrink-0">
-                              <a href={entry.link} target="_blank" rel="noopener noreferrer"
+                              <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
                                 className="p-1 text-gray-300 hover:text-blue-500 transition-colors"><ExternalLink size={12} /></a>
-                              <button onClick={() => navigator.clipboard.writeText(entry.link ?? '')}
-                                className="p-1 text-gray-300 hover:text-gray-600 transition-colors"><Copy size={12} /></button>
+                              <button onClick={() => copy(entry.link ?? '')}
+                                className="p-1 text-gray-300 hover:text-gray-700 transition-colors" title="링크 복사"><Copy size={12} /></button>
                             </div>
                           </div>
                         </td>
@@ -218,6 +220,11 @@ export default function CategoryPage() {
       {previewImg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setPreviewImg(null)}>
           <img src={previewImg} alt="캡처본" className="max-w-full max-h-full rounded-xl shadow-2xl" />
+        </div>
+      )}
+      {showToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-sm font-medium px-5 py-2.5 rounded-xl shadow-xl">
+          링크가 복사되었습니다.
         </div>
       )}
     </Layout>

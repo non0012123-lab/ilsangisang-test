@@ -8,14 +8,14 @@ import ScheduleModal from '../components/ScheduleModal';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
-import { USERS, CLIENTS } from '../data/mockData';
+import { USERS } from '../data/mockData';
 
 const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
 function toDateStr(d: Date) { return d.toISOString().split('T')[0]; }
 
 export default function DailySchedulePage() {
-  const { entries, setEntries } = useApp();
+  const { entries, setEntries, clients } = useApp();
   const { copy, show: showToast } = useCopyToast();
 
   const [date, setDate] = useState(toDateStr(new Date('2026-05-29')));
@@ -113,7 +113,7 @@ export default function DailySchedulePage() {
                 <select value={filterClient} onChange={e => setFilterClient(e.target.value)}
                   className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="all">전체</option>
-                  {CLIENTS.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div>
@@ -189,10 +189,10 @@ export default function DailySchedulePage() {
                           <span className="text-xs text-gray-500 line-clamp-2">{(entry.opinionContent ?? '-').slice(0, 60)}…</span>
                         ) : (
                           <div className="flex items-center gap-1">
-                            <a href={entry.link} target="_blank" rel="noopener noreferrer"
-                              className="table-link link-cell" title={entry.link}>{entry.link}</a>
+                            <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
+                              className="table-link link-cell" title={entry.link ?? ''}>{entry.link}</a>
                             <div className="flex gap-0.5 shrink-0">
-                              <a href={entry.link} target="_blank" rel="noopener noreferrer"
+                              <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
                                 className="p-1 text-gray-300 hover:text-blue-500 transition-colors" title="새 탭으로 열기">
                                 <ExternalLink size={12} />
                               </a>

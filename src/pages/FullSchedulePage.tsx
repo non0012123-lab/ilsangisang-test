@@ -6,14 +6,14 @@ import CategoryBadge from '../components/CategoryBadge';
 import StatusBadge from '../components/StatusBadge';
 import ScheduleModal from '../components/ScheduleModal';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
-import { CLIENTS, USERS } from '../data/mockData';
+import { USERS } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
 
 const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
 export default function FullSchedulePage() {
-  const { entries, setEntries } = useApp();
+  const { entries, setEntries, clients } = useApp();
   const { copy, show: showToast } = useCopyToast();
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
@@ -92,7 +92,7 @@ export default function FullSchedulePage() {
                 <select value={filterClient} onChange={e => setFilterClient(e.target.value)}
                   className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="all">전체</option>
-                  {CLIENTS.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div>
@@ -151,10 +151,10 @@ export default function FullSchedulePage() {
                           <span className="text-xs text-gray-500">{entry.opinionContent?.slice(0, 50) ?? '-'}…</span>
                         ) : (
                           <div className="flex items-center gap-1">
-                            <a href={entry.link} target="_blank" rel="noopener noreferrer"
-                              className="table-link link-cell" title={entry.link}>{entry.link}</a>
+                            <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
+                              className="table-link link-cell" title={entry.link ?? ''}>{entry.link}</a>
                             <div className="flex gap-0.5 shrink-0">
-                              <a href={entry.link} target="_blank" rel="noopener noreferrer"
+                              <a href={entry.link ?? '#'} target="_blank" rel="noopener noreferrer"
                                 className="p-1 text-gray-300 hover:text-blue-500 transition-colors"><ExternalLink size={12} /></a>
                               <button onClick={() => copy(entry.link ?? '')}
                                 className="p-1 text-gray-300 hover:text-gray-700 transition-colors" title="링크 복사"><Copy size={12} /></button>

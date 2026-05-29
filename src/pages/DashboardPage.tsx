@@ -81,7 +81,7 @@ export default function DashboardPage() {
                       <td className="px-6 py-3 text-gray-600 whitespace-nowrap">{entry.date}</td>
                       <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{entry.managerName}</td>
                       <td className="px-4 py-3"><CategoryBadge category={entry.category} /></td>
-                      <td className="px-4 py-3 text-gray-700 max-w-[160px] truncate">{entry.keyword}</td>
+                      <td className="px-4 py-3 text-gray-700 max-w-[160px] truncate">{entry.opinionTitle ?? entry.keyword ?? '-'}</td>
                       <td className="px-4 py-3"><StatusBadge status={entry.status} /></td>
                     </tr>
                   ))}
