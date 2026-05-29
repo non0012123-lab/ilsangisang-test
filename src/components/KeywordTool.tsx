@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Search, AlertTriangle, TrendingUp, ArrowLeft, Link2 } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Search, AlertTriangle, TrendingUp, ArrowLeft, Link2, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 
 interface KeywordRow {
   keyword: string;
@@ -19,34 +19,81 @@ const fmtCtr = (v: number | string) => typeof v === 'number' ? `${v}%` : v;
 const compColor = (c: string) =>
   c === '높음' ? 'bg-red-50 text-red-600' : c === '중간' ? 'bg-amber-50 text-amber-600' : c === '낮음' ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-400';
 
+// 정렬용 숫자값 ("< 10"→10, "-"→-1, "0.04"→0.04)
+const sortNum = (v: number | string): number => {
+  if (typeof v === 'number') return v;
+  const s = String(v).trim();
+  if (s === '-' || s === '') return -1;
+  const n = parseFloat(s.replace(/[^0-9.]/g, ''));
+  return isNaN(n) ? -1 : n;
+};
+
 // 쉼표/줄바꿈으로 구분, 중복 제거, 최대 50개
 function parseKeywords(input: string): string[] {
   return Array.from(new Set(input.split(/[\n,]/).map(s => s.trim()).filter(Boolean))).slice(0, 50);
 }
 
+type NumCol = 'pc' | 'mobile' | 'total' | 'pcClick' | 'mobileClick' | 'pcCtr' | 'mobileCtr';
+const COLUMNS: { key: NumCol; label: string }[] = [
+  { key: 'pc', label: 'PC 조회' },
+  { key: 'mobile', label: '모바일 조회' },
+  { key: 'total', label: '월간 합계' },
+  { key: 'pcClick', label: 'PC 클릭' },
+  { key: 'mobileClick', label: '모바일 클릭' },
+  { key: 'pcCtr', label: 'PC 클릭률' },
+  { key: 'mobileCtr', label: '모바일 클릭률' },
+];
+
 function ResultTable({ rows, onRelated }: { rows: KeywordRow[]; onRelated: (kw: string) => void }) {
+  const [sortCol, setSortCol] = useState<NumCol | null>(null);
+  const [dir, setDir] = useState<'desc' | 'asc'>('desc');
+
+  const clickSort = (col: NumCol) => {
+    if (sortCol === col) setDir(d => d === 'desc' ? 'asc' : 'desc');
+    else { setSortCol(col); setDir('desc'); }
+  };
+
+  const sorted = useMemo(() => {
+    if (!sortCol) return rows;
+    const f = dir === 'desc' ? -1 : 1;
+    return [...rows].sort((a, b) => (sortNum(a[sortCol]) - sortNum(b[sortCol])) * f);
+  }, [rows, sortCol, dir]);
+
+  const cell = (v: number | string, isCtr = false, strong = false) =>
+    <td className={`px-3 py-2.5 text-right tabular-nums ${strong ? 'text-gray-900 font-semibold' : 'text-gray-600'}`}>{isCtr ? fmtCtr(v) : fmt(v)}</td>;
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-gray-50 border-b border-gray-100">
-            {['키워드', 'PC 조회', '모바일 조회', '월간 합계', 'PC 클릭', '모바일 클릭', 'PC 클릭률', '모바일 클릭률', '경쟁'].map(h => (
-              <th key={h} className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">{h}</th>
+            <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">키워드</th>
+            {COLUMNS.map(c => (
+              <th key={c.key} onClick={() => clickSort(c.key)}
+                className="px-3 py-3 whitespace-nowrap cursor-pointer select-none hover:bg-gray-100 transition-colors">
+                <span className="flex items-center justify-end gap-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  {c.label}
+                  {sortCol === c.key
+                    ? (dir === 'desc' ? <ChevronDown size={13} className="text-blue-600" /> : <ChevronUp size={13} className="text-blue-600" />)
+                    : <ChevronsUpDown size={13} className="text-gray-300" />}
+                </span>
+              </th>
             ))}
+            <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3 whitespace-nowrap">경쟁</th>
             <th className="px-3 py-3" />
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-50">
-          {rows.map((r, i) => (
+          {sorted.map((r, i) => (
             <tr key={i} className="hover:bg-gray-50/50">
               <td className="px-3 py-2.5 font-medium text-gray-900 whitespace-nowrap">{r.keyword}</td>
-              <td className="px-3 py-2.5 text-gray-700 text-right tabular-nums">{fmt(r.pc)}</td>
-              <td className="px-3 py-2.5 text-gray-700 text-right tabular-nums">{fmt(r.mobile)}</td>
-              <td className="px-3 py-2.5 text-gray-900 font-semibold text-right tabular-nums">{r.found === false ? '-' : r.total.toLocaleString('ko-KR')}</td>
-              <td className="px-3 py-2.5 text-gray-600 text-right tabular-nums">{fmt(r.pcClick)}</td>
-              <td className="px-3 py-2.5 text-gray-600 text-right tabular-nums">{fmt(r.mobileClick)}</td>
-              <td className="px-3 py-2.5 text-gray-600 text-right tabular-nums">{fmtCtr(r.pcCtr)}</td>
-              <td className="px-3 py-2.5 text-gray-600 text-right tabular-nums">{fmtCtr(r.mobileCtr)}</td>
+              {cell(r.pc)}
+              {cell(r.mobile)}
+              {cell(r.found === false ? '-' : r.total, false, true)}
+              {cell(r.pcClick)}
+              {cell(r.mobileClick)}
+              {cell(r.pcCtr, true)}
+              {cell(r.mobileCtr, true)}
               <td className="px-3 py-2.5"><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${compColor(r.compIdx)}`}>{r.compIdx}</span></td>
               <td className="px-3 py-2.5 whitespace-nowrap">
                 <button onClick={() => onRelated(r.keyword)}
@@ -158,7 +205,7 @@ export default function KeywordTool() {
           <div className="px-5 py-3 border-b border-gray-50 flex items-center gap-2">
             <TrendingUp size={16} className="text-blue-600" />
             <h3 className="font-bold text-gray-900 text-sm">내 키워드 조회 결과</h3>
-            <span className="ml-auto text-xs text-gray-400">{rows.length}개 · 월간 합계 순 · "연관"으로 확장</span>
+            <span className="ml-auto text-xs text-gray-400">{rows.length}개 · 헤더 화살표로 정렬 · "연관"으로 확장</span>
           </div>
           <ResultTable rows={rows} onRelated={loadRelated} />
         </div>

@@ -117,10 +117,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
         map.set(norm(row.keyword), row);
       }
     }
-    // 입력한 키워드만, 못 찾으면 빈 행
+    // 입력한 키워드만, 입력 순서 유지(정렬은 화면에서 클릭으로). 못 찾으면 빈 행
     const keywords = typed.map(t => map.get(norm(t)) ?? {
       keyword: t, pc: '-', mobile: '-', total: 0, pcClick: '-', mobileClick: '-', pcCtr: '-', mobileCtr: '-', compIdx: '-', found: false,
-    } as Row).sort(byTotalDesc);
+    } as Row);
 
     return json({ keywords });
   } catch (e) {
