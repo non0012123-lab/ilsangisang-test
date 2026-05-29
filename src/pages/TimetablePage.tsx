@@ -168,7 +168,7 @@ export default function TimetablePage() {
           </div>
         </div>
 
-        <div className="flex flex-col lg:flex-row gap-4">
+        <div className="hidden md:flex flex-col lg:flex-row gap-4">
           {/* Calendar */}
           <div className="flex-1 min-w-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
             {/* Weekday header */}
@@ -389,6 +389,42 @@ export default function TimetablePage() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* 모바일 아젠다 (md 미만) — 날짜별 리스트 */}
+        <div className="md:hidden space-y-4">
+          {(() => {
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const days = Array.from({ length: daysInMonth }, (_, i) => i + 1).filter(d => byDay[d]?.length);
+            if (days.length === 0) {
+              return <div className="bg-white rounded-2xl border border-gray-100 py-10 text-center text-gray-400 text-sm">이번 달 일정이 없습니다.</div>;
+            }
+            return days.map(d => (
+              <div key={d}>
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <span className="text-sm font-bold text-gray-900">{month + 1}월 {d}일</span>
+                  <span className="text-xs text-gray-400">{WEEKDAYS[new Date(year, month, d).getDay()]}</span>
+                  {d === todayDay && <span className="text-xs font-semibold bg-blue-600 text-white px-1.5 py-0.5 rounded-full">오늘</span>}
+                  <span className="ml-auto text-xs text-gray-400">{byDay[d].length}건</span>
+                </div>
+                <div className="space-y-2">
+                  {byDay[d].map(e => (
+                    <button key={e.id} onClick={() => setModal({ open: true, entry: e })}
+                      className="w-full text-left bg-white rounded-xl border border-gray-100 shadow-sm p-3 flex items-center gap-2.5 hover:border-blue-200 transition-colors">
+                      <span className="w-1.5 h-9 rounded-full shrink-0" style={{ backgroundColor: CAT_COLOR[e.category] ?? '#6b7280' }} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{e.opinionTitle ?? e.keyword ?? e.category}</p>
+                        <p className="text-xs text-gray-400 truncate">
+                          {e.category} · {e.managerName} · {e.clientName}{isMultiDay(e) ? ` · ${e.date}~${e.endDate?.slice(5)}` : ''}
+                        </p>
+                      </div>
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full shrink-0 ${STATUS_STYLE[e.status]}`}>{STATUS_LABEL[e.status]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ));
+          })()}
         </div>
 
         {/* Legend */}

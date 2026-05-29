@@ -7,7 +7,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-slate-50">
       <Sidebar mobileOpen={open} onClose={() => setOpen(false)} />
-      <main className="flex-1 lg:ml-60 min-h-screen flex flex-col min-w-0">
+      <main className="flex-1 lg:ml-60 min-h-screen flex flex-col min-w-0 overflow-x-clip">
         {/* 모바일 상단바 (lg 미만에서만 표시) */}
         <div className="lg:hidden sticky top-0 z-30 flex items-center gap-3 bg-slate-900 px-4 py-3">
           <button onClick={() => setOpen(true)} className="text-white p-1 -ml-1" aria-label="메뉴 열기">
