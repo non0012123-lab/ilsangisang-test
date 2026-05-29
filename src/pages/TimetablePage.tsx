@@ -5,7 +5,7 @@ import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 import ScheduleModal from '../components/ScheduleModal';
 import type { ScheduleEntry } from '../types';
-import { enumerateDays, isMultiDay, overlapsRange } from '../utils/dateRange';
+import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd } from '../utils/dateRange';
 
 const CAT_COLOR: Record<string, string> = {
   'SNS': '#ec4899',
@@ -61,7 +61,7 @@ export default function TimetablePage() {
     (clientId === 'all' || e.clientId === clientId)
   );
 
-  // 기간 작업은 걸쳐 있는 모든 날짜 칸에 표시
+  // 기간 작업은 걸쳐 있는 모든 날짜 칸에 표시 (우측 패널/통계용)
   const byDay: Record<number, ScheduleEntry[]> = {};
   visible.forEach(e => {
     enumerateDays(e, monthPrefix).forEach(ds => {
@@ -69,6 +69,40 @@ export default function TimetablePage() {
       (byDay[d] ??= []).push(e);
     });
   });
+
+  // 캘린더를 주(7칸) 단위로 분할
+  const weeks: (number | null)[][] = [];
+  for (let i = 0; i < calDays.length; i += 7) weeks.push(calDays.slice(i, i + 7));
+
+  // 한 주 안에서 각 작업의 시작열/길이/레인(겹침 방지 줄)을 계산
+  //  → 기간 작업이 같은 주에서는 하나의 연속 막대로 그려짐
+  const placeWeek = (week: (number | null)[]) => {
+    const colDate = week.map(d => (d ? padDate(year, month, d) : null));
+    const items = visible
+      .map(e => {
+        let startCol = -1, endCol = -1;
+        for (let c = 0; c < 7; c++) {
+          const ds = colDate[c];
+          if (ds && coversDate(e, ds)) { if (startCol === -1) startCol = c; endCol = c; }
+        }
+        return startCol === -1 ? null : { entry: e, startCol, endCol, span: endCol - startCol + 1, colDate };
+      })
+      .filter(Boolean) as { entry: ScheduleEntry; startCol: number; endCol: number; span: number; colDate: (string | null)[] }[];
+    // 기간이 긴 작업을 먼저 배치(위쪽 레인 고정) → 시작열 순
+    items.sort((a, b) => b.span - a.span || a.startCol - b.startCol);
+    const laneEnds: number[] = []; // 레인별 마지막 점유 열
+    return items.map(it => {
+      let lane = laneEnds.findIndex(end => end < it.startCol);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.endCol); }
+      else laneEnds[lane] = it.endCol;
+      return { ...it, lane };
+    });
+  };
+
+  const MAX_LANES = 4;   // 한 칸에 보여줄 최대 막대 줄 수
+  const BAR_H = 19;      // 막대 높이(px)
+  const BAR_GAP = 3;     // 막대 간격(px)
+  const NUM_AREA = 32;   // 날짜 숫자 영역 높이(px)
 
   const handleSave = (entry: ScheduleEntry) => {
     setEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [entry, ...prev]);
@@ -153,56 +187,89 @@ export default function TimetablePage() {
                 </div>
               ))}
             </div>
-            {/* Days grid */}
-            <div className="grid grid-cols-7">
-              {calDays.map((day, idx) => {
-                const dayEntries = day ? (byDay[day] ?? []) : [];
-                const isToday = day === todayDay;
-                const isSel = day === selectedDay;
-                const isSun = idx % 7 === 0;
-                const isSat = idx % 7 === 6;
+            {/* Days grid - 주 단위, 기간 작업은 한 줄 막대로 연결 */}
+            <div>
+              {weeks.map((week, wi) => {
+                const placed = placeWeek(week);
+                const shown = placed.filter(p => p.lane < MAX_LANES);
+                const usedLanes = Math.min(MAX_LANES, placed.reduce((m, p) => Math.max(m, p.lane + 1), 0));
+                const weekMinH = Math.max(NUM_AREA + usedLanes * (BAR_H + BAR_GAP) + 10, 96);
                 return (
-                  <div key={idx}
-                    onClick={() => day && setSelectedDay(day === selectedDay ? null : day)}
-                    className={`min-h-[108px] p-1.5 border-b border-r border-gray-50 transition-colors ${
-                      !day ? 'bg-gray-50/50' :
-                      isSel ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' :
-                      'hover:bg-slate-50 cursor-pointer'
-                    }`}>
-                    {day && (
-                      <>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className={`w-7 h-7 flex items-center justify-center rounded-full text-sm font-semibold ${
-                            isToday ? 'bg-blue-600 text-white' :
-                            isSun ? 'text-red-500' :
-                            isSat ? 'text-blue-500' :
-                            'text-gray-700'
+                  <div key={wi} className="relative grid grid-cols-7 border-b border-gray-50 last:border-b-0"
+                    style={{ minHeight: weekMinH }}>
+                    {/* 날짜 셀 (배경 · 숫자 · 선택/추가 · 초과 표시) */}
+                    {week.map((day, ci) => {
+                      const isToday = day === todayDay;
+                      const isSel = day === selectedDay;
+                      const isSun = ci === 0;
+                      const isSat = ci === 6;
+                      const total = day ? placed.filter(p => ci >= p.startCol && ci <= p.endCol).length : 0;
+                      const over = day ? total - shown.filter(p => ci >= p.startCol && ci <= p.endCol).length : 0;
+                      return (
+                        <div key={ci}
+                          onClick={() => day && setSelectedDay(day === selectedDay ? null : day)}
+                          className={`relative border-r border-gray-50 last:border-r-0 transition-colors ${
+                            !day ? 'bg-gray-50/50' :
+                            isSel ? 'bg-blue-50/60 ring-1 ring-inset ring-blue-200' :
+                            'hover:bg-slate-50 cursor-pointer'
                           }`}>
-                            {day}
-                          </span>
-                          {isSel && (
-                            <button onClick={e => { e.stopPropagation(); openAdd(day); }}
-                              className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center text-white hover:bg-blue-700">
-                              <Plus size={11} />
-                            </button>
-                          )}
-                        </div>
-                        <div className="space-y-0.5">
-                          {dayEntries.slice(0, 3).map(e => (
-                            <div key={e.id}
-                              className={`text-xs px-1.5 py-0.5 rounded truncate text-white font-medium leading-tight flex items-center gap-1 ${isMultiDay(e) ? 'border-l-2 border-white/60' : ''}`}
-                              style={{ backgroundColor: CAT_COLOR[e.category] ?? '#6b7280' }}
-                              title={`${e.opinionTitle ?? e.keyword ?? e.category}${isMultiDay(e) ? ` (${e.date}~${e.endDate})` : ''}`}>
-                              {isMultiDay(e) && <CalendarRange size={9} className="shrink-0" />}
-                              <span className="truncate">{e.opinionTitle ?? e.keyword ?? e.category}</span>
+                          {day && (
+                            <div className="flex items-center justify-between p-1.5">
+                              <span className={`w-7 h-7 flex items-center justify-center rounded-full text-sm font-semibold ${
+                                isToday ? 'bg-blue-600 text-white' :
+                                isSun ? 'text-red-500' :
+                                isSat ? 'text-blue-500' :
+                                'text-gray-700'
+                              }`}>
+                                {day}
+                              </span>
+                              {isSel && (
+                                <button onClick={e => { e.stopPropagation(); openAdd(day); }}
+                                  className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center text-white hover:bg-blue-700">
+                                  <Plus size={11} />
+                                </button>
+                              )}
                             </div>
-                          ))}
-                          {dayEntries.length > 3 && (
-                            <div className="text-xs text-gray-400 px-1.5">+{dayEntries.length - 3}건 더</div>
+                          )}
+                          {over > 0 && (
+                            <div className="absolute bottom-0.5 left-0 right-0 text-center text-[10px] text-gray-400 font-medium">
+                              +{over}건 더
+                            </div>
                           )}
                         </div>
-                      </>
-                    )}
+                      );
+                    })}
+
+                    {/* 작업 막대 오버레이 (기간 작업은 시작~마감 한 줄로 연결) */}
+                    <div className="absolute inset-0 pointer-events-none">
+                      {shown.map(p => {
+                        const e = p.entry;
+                        const contPrev = e.date < (p.colDate[p.startCol] ?? '');     // 지난 주에서 이어짐
+                        const contNext = entryEnd(e) > (p.colDate[p.endCol] ?? '');  // 다음 주로 이어짐
+                        const padL = contPrev ? 0 : 3;
+                        const padR = contNext ? 0 : 3;
+                        return (
+                          <div key={e.id + '-' + wi}
+                            onClick={ev => { ev.stopPropagation(); setModal({ open: true, entry: e }); }}
+                            title={`${e.opinionTitle ?? e.keyword ?? e.category}${isMultiDay(e) ? ` (${e.date}~${e.endDate})` : ''}`}
+                            className={`pointer-events-auto absolute flex items-center gap-1 px-1.5 text-white text-[11px] font-medium leading-none cursor-pointer hover:brightness-110 transition-all ${
+                              contPrev ? '' : 'rounded-l'
+                            } ${contNext ? '' : 'rounded-r'}`}
+                            style={{
+                              left: `calc(${p.startCol} * 100% / 7 + ${padL}px)`,
+                              width: `calc(${p.span} * 100% / 7 - ${padL + padR}px)`,
+                              top: NUM_AREA + p.lane * (BAR_H + BAR_GAP),
+                              height: BAR_H,
+                              backgroundColor: CAT_COLOR[e.category] ?? '#6b7280',
+                            }}>
+                            {contPrev
+                              ? <span className="shrink-0 opacity-80">↩</span>
+                              : isMultiDay(e) && <CalendarRange size={9} className="shrink-0" />}
+                            <span className="truncate">{e.opinionTitle ?? e.keyword ?? e.category}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
