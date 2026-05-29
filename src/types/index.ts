@@ -38,6 +38,19 @@ export interface TeamMember {
   department?: string;
 }
 
+// AI 기획 결과 (내역으로 보관 — 재생성 없이 다시 보기 위함)
+export interface AiPlanImage { channel: string; url: string }
+export interface AiPlanResult {
+  id: string;
+  createdAt: number;
+  clientName: string;
+  campaignType: string;
+  period: { start: string; end: string };
+  guideline: string;   // 이미지 재생성 시 재사용
+  report: string;
+  images: AiPlanImage[];
+}
+
 export type AccountStatus = 'active' | 'suspended';
 
 // Supabase 인증 + profiles 테이블에서 만들어지는 로그인 사용자

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
-import type { ScheduleEntry, Client, HandoverDoc, TeamMember } from '../types';
+import type { ScheduleEntry, Client, HandoverDoc, TeamMember, AiPlanResult } from '../types';
 import { SCHEDULE_ENTRIES, CLIENTS, HANDOVER_DOCS, USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -13,6 +13,8 @@ interface AppContextType {
   setHandoverDocs: React.Dispatch<React.SetStateAction<HandoverDoc[]>>;
   members: TeamMember[];
   reloadMembers: () => Promise<void>;
+  aiHistory: AiPlanResult[];
+  setAiHistory: React.Dispatch<React.SetStateAction<AiPlanResult[]>>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -28,6 +30,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [clients, setClients] = useState<Client[]>(CLIENTS);
   const [handoverDocs, setHandoverDocs] = useState<HandoverDoc[]>(HANDOVER_DOCS);
   const [members, setMembers] = useState<TeamMember[]>(MOCK_MEMBERS);
+  const [aiHistory, setAiHistory] = useState<AiPlanResult[]>([]);
 
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
@@ -50,7 +53,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => { reloadMembers(); }, [user?.id, reloadMembers]);
 
   return (
-    <AppContext.Provider value={{ entries, setEntries, clients, setClients, handoverDocs, setHandoverDocs, members, reloadMembers }}>
+    <AppContext.Provider value={{ entries, setEntries, clients, setClients, handoverDocs, setHandoverDocs, members, reloadMembers, aiHistory, setAiHistory }}>
       {children}
     </AppContext.Provider>
   );
