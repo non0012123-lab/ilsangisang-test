@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
-import type { ScheduleEntry, Client, HandoverDoc, TeamMember, AiPlanResult } from '../types';
+import type { ScheduleEntry, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage } from '../types';
 import { SCHEDULE_ENTRIES, CLIENTS, HANDOVER_DOCS, USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
@@ -20,6 +20,10 @@ interface AppContextType {
   // 현재 진행 중이거나 직전에 완료된 분석 결과의 id (페이지 리마운트와 무관하게 결과 화면 복원용)
   activeAiPlanId: string | null;
   clearActiveAiPlan: () => void;
+  // 이미지 시안 생성도 앱 전역에서 실행 → 다른 메뉴로 이동해도 계속 생성되고 결과가 보관됨
+  aiImageRunning: string | null; // 생성 중인 기획 결과 id (없으면 null)
+  aiImageError: string;
+  startAiImageJob: (planId: string, platforms: string[], cols: number) => Promise<void>;
   // 업무 데이터 영구 저장(레코드 단위) — 로컬 상태 갱신 + Supabase 반영
   saveEntry: (entry: ScheduleEntry) => void;
   saveEntries: (entries: ScheduleEntry[]) => void;
@@ -60,11 +64,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [aiPlanRunning, setAiPlanRunning] = useState(false);
   const [aiPlanError, setAiPlanError] = useState('');
   const [activeAiPlanId, setActiveAiPlanId] = useState<string | null>(null);
+  const [aiImageRunning, setAiImageRunning] = useState<string | null>(null);
+  const [aiImageError, setAiImageError] = useState('');
   const uid = user?.id;
 
   // 헬퍼에서 최신 배열을 참조하기 위한 ref (setState 업데이터 내 부수효과 회피)
   const entriesRef = useRef(entries);
   useEffect(() => { entriesRef.current = entries; }, [entries]);
+  // 전역 이미지 작업이 완료 시 최신 기획 결과를 머지하기 위한 ref
+  const aiHistoryRef = useRef(aiHistory);
+  useEffect(() => { aiHistoryRef.current = aiHistory; }, [aiHistory]);
 
   // ── Supabase 영속화 헬퍼 (있으면 비동기로 반영, 실패는 콘솔에만) ──
   const persistOne = (table: string, row: { id: string }) => {
@@ -189,6 +198,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [saveAiPlan]);
 
+  // 이미지 시안 생성을 앱 전역에서 실행 → 다른 메뉴로 이동해도 끝까지 진행되고 결과가 보관됨
+  const startAiImageJob = useCallback(async (planId: string, platforms: string[], cols: number) => {
+    const plan = aiHistoryRef.current.find(p => p.id === planId);
+    if (!plan || platforms.length === 0) return;
+    setAiImageRunning(planId);
+    setAiImageError('');
+    try {
+      const res = await fetch('/api/ai-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientName: plan.clientName, guideline: plan.guideline, platforms, cols }),
+      });
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('AI 서버(/api/ai-image)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
+      }
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
+      const imgs: AiPlanImage[] = Array.isArray(data.images) ? data.images : [];
+      // 최신 상태를 ref 로 다시 읽어, 이미 "저장"한 시안은 유지하고 새 작업본을 덧붙인다
+      const latest = aiHistoryRef.current.find(p => p.id === planId) ?? plan;
+      const kept = latest.images.filter(i => i.saved);
+      saveAiPlan({ ...latest, images: [...kept, ...imgs] });
+    } catch (e) {
+      setAiImageError(e instanceof Error ? e.message : '이미지 생성 중 오류가 발생했습니다.');
+    } finally {
+      setAiImageRunning(null);
+    }
+  }, [saveAiPlan]);
+
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
     if (!supabase) return;
@@ -244,6 +283,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       entries, clients, handoverDocs, members, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
       aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
+      aiImageRunning, aiImageError, startAiImageJob,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, saveHandover, removeHandover,
     }}>
       {children}

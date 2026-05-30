@@ -22,7 +22,7 @@ const IMG_PLATFORMS: { key: string; label: string; ratio: string }[] = [
 const fmtTime = (ts: number) => new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 export default function AIPlanningPage() {
-  const { clients, aiHistory, saveAiPlan, aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan } = useApp();
+  const { clients, aiHistory, saveAiPlan, aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan, aiImageRunning, aiImageError, startAiImageJob } = useApp();
   const { user } = useAuth();
   const [step, setStep] = useState<Step>(1);
   const [file, setFile] = useState<File | null>(null);
@@ -31,8 +31,6 @@ export default function AIPlanningPage() {
   const [campaignType, setCampaignType] = useState('');
   const [goal, setGoal] = useState('');
   const [copied, setCopied] = useState(false);
-  const [imgLoading, setImgLoading] = useState(false);
-  const [imgError, setImgError] = useState('');
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [imgPlatforms, setImgPlatforms] = useState<string[]>(['blog-sns']);
   const [gridCols, setGridCols] = useState<2 | 3>(2);
@@ -44,6 +42,9 @@ export default function AIPlanningPage() {
   const activeClients = clients.filter(c => c.status !== 'inactive');
   const selectedClient = activeClients.find(c => c.id === clientId);
   const viewing = aiHistory.find(h => h.id === viewingId) ?? null;
+  // 이미지 생성은 전역 작업 → 이 기획 결과가 생성 중인지 여부 / 전역 오류
+  const imgLoading = !!viewing && aiImageRunning === viewing.id;
+  const imgError = aiImageError;
 
   // 분석이 진행 중이면 결과 화면(로딩)으로 전환 — 다른 메뉴에 다녀와 리마운트돼도 복원됨.
   // 전역 분석 상태를 로컬 step 에 동기화하는 용도라 effect 에서의 setState 가 의도적이다.
@@ -94,36 +95,10 @@ export default function AIPlanningPage() {
     } catch { /* 클립보드 권한 없음 */ }
   };
 
-  const generateImages = async () => {
-    if (!viewing || imgPlatforms.length === 0) return;
-    setImgLoading(true);
-    setImgError('');
-    try {
-      const res = await fetch('/api/ai-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientName: viewing.clientName,
-          guideline: viewing.guideline,
-          platforms: imgPlatforms,
-          cols: gridCols,
-        }),
-      });
-      const contentType = res.headers.get('content-type') ?? '';
-      if (!contentType.includes('application/json')) {
-        throw new Error('AI 서버(/api/ai-image)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
-      }
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
-      const imgs = Array.isArray(data.images) ? data.images : [];
-      // 이미 "저장"한 시안은 유지하고, 저장 안 한 작업본만 새 결과로 교체
-      const kept = viewing.images.filter(i => i.saved);
-      saveAiPlan({ ...viewing, images: [...kept, ...imgs] });
-    } catch (e) {
-      setImgError(e instanceof Error ? e.message : '이미지 생성 중 오류가 발생했습니다.');
-    } finally {
-      setImgLoading(false);
-    }
+  // 전역 작업으로 실행 → 다른 메뉴로 이동해도 계속 생성되고 결과가 보관됨
+  const generateImages = () => {
+    if (!viewing || imgPlatforms.length === 0 || aiImageRunning) return;
+    startAiImageJob(viewing.id, imgPlatforms, gridCols);
   };
 
   // 시안 "저장" 토글 — 저장한 이미지만 DB에 영속화되어 AI 기획 결과·인수인계에 연동됨
@@ -135,7 +110,7 @@ export default function AIPlanningPage() {
     });
   };
 
-  const openHistory = (id: string) => { setViewingId(id); setImgError(''); setStep(2); };
+  const openHistory = (id: string) => { setViewingId(id); setStep(2); };
   // 새 기획: 진행/완료된 작업 추적을 해제해 effect가 다시 결과로 끌고가지 않도록 한 뒤 폼으로
   const startNew = () => { clearActiveAiPlan(); setViewingId(null); setStep(1); };
 
@@ -416,7 +391,7 @@ export default function AIPlanningPage() {
                   ))}
                   <span className="text-xs text-gray-400 hidden sm:inline">플랫폼당 한 장 · 적을수록 빠르고 토큰 절약</span>
                 </div>
-                <button onClick={generateImages} disabled={imgLoading || imgPlatforms.length === 0}
+                <button onClick={generateImages} disabled={aiImageRunning !== null || imgPlatforms.length === 0}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 disabled:opacity-50 text-white">
                   {imgLoading
                     ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 생성 중... (최대 1~2분)</>
@@ -424,7 +399,14 @@ export default function AIPlanningPage() {
                 </button>
               </div>
 
-              {imgError && (
+              {imgLoading && (
+                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl px-4 py-3 mb-4">
+                  <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                  이미지 시안을 생성 중입니다. 다른 메뉴로 이동해도 계속 진행되며, 완료되면 이 결과에 자동으로 추가됩니다.
+                </div>
+              )}
+
+              {imgError && !imgLoading && (
                 <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3 mb-4">
                   <AlertTriangle size={16} className="shrink-0" /> {imgError}
                 </div>
