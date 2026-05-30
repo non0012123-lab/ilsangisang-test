@@ -8,11 +8,12 @@ import DashboardAssistant from '../components/DashboardAssistant';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { coversDate, overlapsRange, isMultiDay } from '../utils/dateRange';
+import { todayStr, currentMonthStr, monthStartStr, monthEndStr } from '../utils/today';
 
-const TODAY = '2026-05-29';
-const THIS_MONTH = '2026-05';
-const MONTH_START = '2026-05-01';
-const MONTH_END = '2026-05-31';
+const TODAY = todayStr();
+const THIS_MONTH = currentMonthStr();
+const MONTH_START = monthStartStr();
+const MONTH_END = monthEndStr();
 
 // 로컬 날짜 기준 YYYY-MM-DD 포맷 (toISOString의 UTC 변환 오프바이원 방지)
 function fmtLocal(x: Date) {

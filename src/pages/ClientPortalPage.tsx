@@ -7,6 +7,7 @@ import CategoryBadge from '../components/CategoryBadge';
 import KeywordTool from '../components/KeywordTool';
 import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd } from '../utils/dateRange';
+import { todayStr, currentMonthStr } from '../utils/today';
 import type { ScheduleEntry } from '../types';
 
 type Tab = 'dashboard' | 'timetable' | 'reports' | 'keywords';
@@ -32,7 +33,7 @@ function padDate(year: number, month: number, day: number) {
 }
 
 function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
-  const [curDate, setCurDate] = useState(new Date(2026, 4, 1));
+  const [curDate, setCurDate] = useState(new Date());
   const [selDay, setSelDay] = useState<number | null>(null);
 
   const year = curDate.getFullYear();
@@ -79,7 +80,7 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
 
   const MAX_LANES = 3, BAR_H = 16, BAR_GAP = 2, NUM_AREA = 26;
 
-  const today = new Date('2026-05-29');
+  const today = new Date();
   const todayDay = (year === today.getFullYear() && month === today.getMonth()) ? today.getDate() : -1;
   const selEntries = selDay ? (byDay[selDay] ?? []) : [];
 
@@ -211,8 +212,8 @@ export default function ClientPortalPage() {
   const client = clients.find(c => c.id === clientId);
   const reports = REPORTS.filter(r => r.clientId === clientId);
   const entries = allEntries.filter(e => e.clientId === clientId);
-  const TODAY = '2026-05-29';
-  const currentMonth = entries.filter(e => e.date.startsWith('2026-05'));
+  const TODAY = todayStr();
+  const currentMonth = entries.filter(e => e.date.startsWith(currentMonthStr()));
 
   const completed = currentMonth.filter(e => e.status === 'completed').length;
   const inProgress = currentMonth.filter(e => e.status === 'in-progress').length;

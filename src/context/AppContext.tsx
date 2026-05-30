@@ -1,8 +1,11 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
-import type { ScheduleEntry, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage } from '../types';
 import { SCHEDULE_ENTRIES, CLIENTS, HANDOVER_DOCS, USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
+import { todayStr } from '../utils/today';
 import { useAuth } from './AuthContext';
+
+const ASSISTANT_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
 interface AppContextType {
   entries: ScheduleEntry[];
@@ -24,6 +27,11 @@ interface AppContextType {
   aiImageRunning: string | null; // 생성 중인 기획 결과 id (없으면 null)
   aiImageError: string;
   startAiImageJob: (planId: string, platforms: string[], cols: number) => Promise<void>;
+  // 대시보드 AI 어시스턴트 (전역 → 다른 메뉴로 이동해도 대화·진행이 유지됨)
+  assistantMessages: AssistantMessage[];
+  assistantLoading: boolean;
+  runAssistant: (text: string) => Promise<void>;
+  applyAssistantProposal: (index: number) => void;
   // 업무 데이터 영구 저장(레코드 단위) — 로컬 상태 갱신 + Supabase 반영
   saveEntry: (entry: ScheduleEntry) => void;
   saveEntries: (entries: ScheduleEntry[]) => void;
@@ -66,6 +74,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeAiPlanId, setActiveAiPlanId] = useState<string | null>(null);
   const [aiImageRunning, setAiImageRunning] = useState<string | null>(null);
   const [aiImageError, setAiImageError] = useState('');
+  const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
+  const [assistantLoading, setAssistantLoading] = useState(false);
   const uid = user?.id;
 
   // 헬퍼에서 최신 배열을 참조하기 위한 ref (setState 업데이터 내 부수효과 회피)
@@ -74,6 +84,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // 전역 이미지 작업이 완료 시 최신 기획 결과를 머지하기 위한 ref
   const aiHistoryRef = useRef(aiHistory);
   useEffect(() => { aiHistoryRef.current = aiHistory; }, [aiHistory]);
+  // 어시스턴트가 전역(언마운트 무관)으로 최신 데이터를 참조하기 위한 ref 들
+  const membersRef = useRef(members);
+  useEffect(() => { membersRef.current = members; }, [members]);
+  const clientsRef = useRef(clients);
+  useEffect(() => { clientsRef.current = clients; }, [clients]);
+  const handoverDocsRef = useRef(handoverDocs);
+  useEffect(() => { handoverDocsRef.current = handoverDocs; }, [handoverDocs]);
+  const assistantMessagesRef = useRef(assistantMessages);
+  useEffect(() => { assistantMessagesRef.current = assistantMessages; }, [assistantMessages]);
+  const assistantLoadingRef = useRef(assistantLoading);
+  useEffect(() => { assistantLoadingRef.current = assistantLoading; }, [assistantLoading]);
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
 
   // ── Supabase 영속화 헬퍼 (있으면 비동기로 반영, 실패는 콘솔에만) ──
   const persistOne = (table: string, row: { id: string }) => {
@@ -228,6 +251,143 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [saveAiPlan]);
 
+  // ── 대시보드 AI 어시스턴트 (전역 실행 → 다른 메뉴로 이동해도 대화·진행 유지) ──
+  const runAssistant = useCallback(async (text: string) => {
+    const message = text.trim();
+    if (!message || assistantLoadingRef.current) return;
+    const u = userRef.current;
+    const isAdmin = u?.role === 'admin';
+    const allEntries = entriesRef.current;
+    const scoped = isAdmin ? allEntries : allEntries.filter(e => e.managerId === u?.id);
+    const activeClients = clientsRef.current.filter(c => c.status !== 'inactive');
+    const history = assistantMessagesRef.current.map(m => ({ role: m.role, text: m.text }));
+    setAssistantMessages(prev => [...prev, { role: 'user', text: message }]);
+    setAssistantLoading(true);
+    try {
+      const res = await fetch('/api/ai-assistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message, history, today: todayStr(),
+          managers: membersRef.current.map(m => m.name),
+          clients: activeClients.map(c => c.name),
+          categories: ASSISTANT_CATEGORIES,
+          entries: scoped.map(e => ({
+            id: e.id, date: e.date, endDate: e.endDate ?? null,
+            managerName: e.managerName, clientName: e.clientName,
+            category: e.category, keyword: e.keyword, status: e.status,
+          })),
+        }),
+      });
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('AI 서버(/api/ai-assistant)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
+      }
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
+      setAssistantMessages(prev => [...prev, {
+        role: 'assistant',
+        text: data.reply || '(응답이 비어 있습니다)',
+        entries: Array.isArray(data.entries) ? data.entries : [],
+        updates: Array.isArray(data.updates) ? data.updates : [],
+        clients: Array.isArray(data.clients) ? data.clients : [],
+        handovers: Array.isArray(data.handovers) ? data.handovers : [],
+      }]);
+    } catch (e) {
+      setAssistantMessages(prev => [...prev, { role: 'assistant', text: `⚠️ ${e instanceof Error ? e.message : '오류가 발생했습니다.'}` }]);
+    } finally {
+      setAssistantLoading(false);
+    }
+  }, []);
+
+  // 어시스턴트 제안을 실제 시스템에 반영 (업체 신규등록 → 인수인계 → 일정 생성/변경 순)
+  const applyAssistantProposal = useCallback((index: number) => {
+    const msg = assistantMessagesRef.current[index];
+    if (!msg || msg.applied != null) return;
+    const u = userRef.current;
+    const mem = membersRef.current;
+    const selfId = u?.id && mem.some(m => m.id === u.id) ? u.id : '';
+    let count = 0;
+
+    const matchManager = (name?: string) => {
+      if (!name) return '';
+      const ex = mem.find(m => m.name === name);
+      if (ex) return ex.id;
+      return mem.find(m => name.includes(m.name) || m.name.includes(name))?.id ?? '';
+    };
+
+    // 1) 신규 업체 등록
+    const created: { name: string; id: string }[] = [];
+    (msg.clients ?? []).forEach((c, i) => {
+      if (!c.name) return;
+      const ex = clientsRef.current.find(x => x.name === c.name);
+      if (ex) { created.push({ name: c.name, id: ex.id }); return; }
+      const id = `cl-${Date.now()}-${i}`;
+      const cats = (Array.isArray(c.categories) ? c.categories : []).filter(x => (ASSISTANT_CATEGORIES as string[]).includes(x)) as Category[];
+      saveClient({ id, name: c.name, industry: c.industry || '', contactPerson: c.contactPerson || '', email: c.email || '', phone: c.phone || '', startDate: todayStr(), categories: cats, status: 'active', description: '' });
+      created.push({ name: c.name, id });
+      count += 1;
+    });
+    const resolveClient = (name?: string): string => {
+      if (!name) return '';
+      const cr = created.find(x => x.name === name || name.includes(x.name) || x.name.includes(name));
+      if (cr) return cr.id;
+      const exact = clientsRef.current.find(x => x.name === name);
+      if (exact) return exact.id;
+      return clientsRef.current.find(x => name.includes(x.name) || x.name.includes(name))?.id ?? '';
+    };
+    const clientNameOf = (id: string) => clientsRef.current.find(c => c.id === id)?.name ?? created.find(c => c.id === id)?.name ?? '';
+
+    // 2) 인수인계 문서 신규 등록
+    (msg.handovers ?? []).forEach((h, i) => {
+      if (!h.clientName) return;
+      const cid = resolveClient(h.clientName);
+      if (!cid || handoverDocsRef.current.find(d => d.clientId === cid)) return;
+      saveHandover({
+        id: `ho-${Date.now()}-${i}`, clientId: cid, clientName: clientNameOf(cid) || h.clientName,
+        authorId: u?.id ?? '', authorName: u?.name ?? '', updatedAt: todayStr(),
+        overview: h.overview || '', keyContacts: [], importantLinks: [],
+        guidelines: '', tone: '', dontDo: '', specialNotes: '', managerMemo: '',
+      });
+      count += 1;
+    });
+
+    // 3) 신규 일정 생성
+    const newEntries: ScheduleEntry[] = [];
+    (msg.entries ?? []).forEach((e, i) => {
+      const managerId = matchManager(e.managerName) || selfId;
+      const clientId = resolveClient(e.clientName);
+      if (!e.date || !managerId || !clientId) return;
+      const category = ((ASSISTANT_CATEGORIES as string[]).includes(e.category ?? '') ? e.category : (ASSISTANT_CATEGORIES.find(c => e.category?.includes(c)) ?? '기타')) as Category;
+      const endDate = e.endDate && e.endDate !== 'null' && e.endDate > e.date ? e.endDate : undefined;
+      newEntries.push({
+        id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+        date: e.date, endDate, managerId, managerName: mem.find(m => m.id === managerId)?.name ?? '',
+        category, keyword: e.keyword || undefined, clientId, clientName: clientNameOf(clientId),
+        status: (['pending', 'in-progress', 'completed'].includes(e.status ?? '') ? e.status : 'pending') as ScheduleStatus,
+      });
+    });
+    if (newEntries.length) { saveEntries(newEntries); count += newEntries.length; }
+
+    // 4) 기존 일정 변경 (배분/재배치)
+    (msg.updates ?? []).forEach(up => {
+      if (!up.id) return;
+      const cur = entriesRef.current.find(en => en.id === up.id);
+      if (!cur) return;
+      const patch: Partial<ScheduleEntry> = {};
+      if (up.date && up.date !== 'null') patch.date = up.date;
+      if (up.endDate && up.endDate !== 'null') patch.endDate = up.endDate;
+      if (up.managerName && up.managerName !== 'null') {
+        const mid = matchManager(up.managerName);
+        if (mid) { patch.managerId = mid; patch.managerName = mem.find(m => m.id === mid)?.name ?? cur.managerName; }
+      }
+      if (up.status && ['pending', 'in-progress', 'completed'].includes(up.status)) patch.status = up.status as ScheduleStatus;
+      if (Object.keys(patch).length) { patchEntry(up.id, patch); count += 1; }
+    });
+
+    setAssistantMessages(prev => prev.map((m, i) => i === index ? { ...m, applied: count } : m));
+  }, [saveClient, saveHandover, saveEntries, patchEntry]);
+
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
     if (!supabase) return;
@@ -284,6 +444,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       entries, clients, handoverDocs, members, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
       aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
       aiImageRunning, aiImageError, startAiImageJob,
+      assistantMessages, assistantLoading, runAssistant, applyAssistantProposal,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, saveHandover, removeHandover,
     }}>
       {children}

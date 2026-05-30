@@ -6,6 +6,7 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import CategoryBadge from '../components/CategoryBadge';
 import { openAiPlanPrint } from '../utils/aiPlanPdf';
+import { todayStr } from '../utils/today';
 import type { HandoverDoc, KeyContact, ImportantLink } from '../types';
 
 type DocTab = 'overview' | 'history' | 'contacts' | 'guidelines' | 'memo' | 'prompt' | 'ai';
@@ -116,7 +117,7 @@ export default function HandoverPage() {
 
   const saveEdit = () => {
     if (!draft) return;
-    saveHandover({ ...draft, updatedAt: '2026-05-29', authorId: user?.id ?? draft.authorId, authorName: user?.name ?? draft.authorName });
+    saveHandover({ ...draft, updatedAt: todayStr(), authorId: user?.id ?? draft.authorId, authorName: user?.name ?? draft.authorName });
     setEditing(false);
     setDraft(null);
   };
@@ -135,7 +136,7 @@ export default function HandoverPage() {
       clientName: client.name,
       authorId: user?.id ?? '',
       authorName: user?.name ?? '',
-      updatedAt: '2026-05-29',
+      updatedAt: todayStr(),
       overview: '',
       keyContacts: [],
       importantLinks: [],

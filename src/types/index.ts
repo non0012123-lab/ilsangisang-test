@@ -61,6 +61,22 @@ export interface AiPlanResult {
   images: AiPlanImage[]; // 세션 한정(공유 저장 안 됨)
 }
 
+// ── 대시보드 AI 어시스턴트 ──
+// 어시스턴트가 제안하는 액션들 (사용자가 "적용" 해야 반영됨)
+export interface AssistantProposalEntry { date?: string; endDate?: string | null; managerName?: string; clientName?: string; category?: string; keyword?: string; status?: string }
+export interface AssistantProposalUpdate { id?: string; date?: string | null; endDate?: string | null; managerName?: string | null; status?: string | null }
+export interface AssistantProposalClient { name?: string; industry?: string; categories?: string[]; contactPerson?: string; phone?: string; email?: string }
+export interface AssistantProposalHandover { clientName?: string; overview?: string }
+export interface AssistantMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  entries?: AssistantProposalEntry[];
+  updates?: AssistantProposalUpdate[];
+  clients?: AssistantProposalClient[];
+  handovers?: AssistantProposalHandover[];
+  applied?: number; // 적용한 건수(적용 후 표시)
+}
+
 export type AccountStatus = 'active' | 'suspended';
 
 // Supabase 인증 + profiles 테이블에서 만들어지는 로그인 사용자

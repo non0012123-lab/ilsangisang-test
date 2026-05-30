@@ -83,17 +83,21 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '{',
     '  "reply": "사용자에게 보여줄 자연스러운 한국어 답변",',
     '  "entries": [ { "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "managerName":"", "clientName":"", "category":"", "keyword":"", "status":"pending|in-progress|completed" } ],',
-    '  "updates": [ { "id":"기존 일정 id", "date":"YYYY-MM-DD 또는 null", "endDate":"YYYY-MM-DD 또는 null", "managerName":"문자열 또는 null", "status":"상태 또는 null" } ]',
+    '  "updates": [ { "id":"기존 일정 id", "date":"YYYY-MM-DD 또는 null", "endDate":"YYYY-MM-DD 또는 null", "managerName":"문자열 또는 null", "status":"상태 또는 null" } ],',
+    '  "clients": [ { "name":"", "industry":"", "categories":[], "contactPerson":"", "phone":"", "email":"" } ],',
+    '  "handovers": [ { "clientName":"", "overview":"" } ]',
     '}',
     '',
     '판단 규칙:',
     `- 오늘 날짜는 ${today}. "오늘/내일/이번주/다음주 월요일/0월 0일" 등 상대·축약 표현은 이 날짜 기준 절대 날짜(YYYY-MM-DD)로 변환.`,
     '- 사용자가 새 일정을 말하면("오늘 스케줄은 ~~~ 있어" 등) 해당 일정을 entries 배열에 담는다. 한 문장에 여러 건이면 모두.',
-    '- 단순 질문·조언("시간 분배 어떻게 효율적일까?" 등)이면 entries·updates 는 빈 배열로 두고 reply 에만 구체적이고 실용적으로 답한다. 현재 일정 목록을 근거로 답할 것.',
+    '- 단순 질문·조언("시간 분배 어떻게 효율적일까?" 등)이면 모든 액션 배열은 비우고 reply 에만 구체적이고 실용적으로 답한다. 현재 일정 목록을 근거로 답할 것.',
     '- "배분/재배치/나눠줘" 요청이면, 아래 현재 일정을 참고해 날짜·담당자를 합리적으로 분산한다. 기존 일정을 옮기는 것은 updates(그 일정의 id 사용), 새로 만드는 것은 entries 에 담는다. 변경하지 않는 필드는 null.',
-    '- managerName 은 아래 "담당자 목록" 중 가장 가까운 값, clientName 은 "업체 목록" 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
+    '- 신규 업체(클라이언트) 등록: 사용자가 새 업체 등록을 원하거나, 일정/인수인계를 만들려는 업체가 아래 "업체 목록"에 없으면 clients 에 그 업체를 담아 먼저 등록을 제안한다. 그리고 그 업체명을 entries/handovers 의 clientName 에 그대로 사용한다(적용 시 신규 업체가 먼저 생성된 뒤 연결됨). 아는 정보만 채우고 모르면 빈 문자열.',
+    '- 인수인계 문서 신규 등록: 사용자가 특정 업체의 인수인계 문서를 만들어 달라고 하면 handovers 에 담는다(overview 에 간단 요약 가능).',
+    '- managerName 은 아래 "담당자 목록" 중 가장 가까운 값, clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
     '- 기간 작업이 아니면 endDate 는 null. status 미지정이면 "pending".',
-    '- entries 나 updates 를 제안할 때 reply 에는 무엇을 제안하는지 요약하고, 사용자가 "적용" 버튼을 눌러야 실제 반영된다는 뉘앙스로 안내한다.',
+    '- 액션(entries/updates/clients/handovers)을 제안할 때 reply 에는 무엇을 제안하는지 요약하고, 사용자가 "적용" 버튼을 눌러야 실제 반영된다는 뉘앙스로 안내한다.',
     '- 확실하지 않은 정보를 지어내지 말 것. 모르면 reply 에서 추가 정보를 요청.',
     '',
     `담당자 목록: ${managers.join(', ') || '(없음)'}`,
@@ -140,7 +144,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const data = await aiRes.json();
   const content = extractText(data);
-  let parsed: { reply?: string; entries?: unknown; updates?: unknown };
+  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown };
   try {
     parsed = JSON.parse(content);
   } catch {
@@ -151,5 +155,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     reply: typeof parsed?.reply === 'string' ? parsed.reply : '',
     entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
     updates: Array.isArray(parsed?.updates) ? parsed.updates : [],
+    clients: Array.isArray(parsed?.clients) ? parsed.clients : [],
+    handovers: Array.isArray(parsed?.handovers) ? parsed.handovers : [],
   });
 };

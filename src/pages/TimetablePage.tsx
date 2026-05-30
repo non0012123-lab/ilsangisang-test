@@ -44,8 +44,8 @@ const STATUS_LABEL: Record<string, string> = { completed: '완료', 'in-progress
 export default function TimetablePage() {
   const { entries, saveEntry, saveEntries, clients } = useApp();
   const [clientId, setClientId] = useState('all');
-  const [curDate, setCurDate] = useState(new Date(2026, 4, 1));
-  const [selectedDay, setSelectedDay] = useState<number | null>(29);
+  const [curDate, setCurDate] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState<number | null>(new Date().getDate());
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null; date?: string }>({ open: false });
   const [aiOpen, setAiOpen] = useState(false);
 
@@ -117,7 +117,7 @@ export default function TimetablePage() {
     setAiOpen(false);
   };
 
-  const today = new Date('2026-05-29');
+  const today = new Date();
   const todayDay = (year === today.getFullYear() && month === today.getMonth()) ? today.getDate() : -1;
   const selectedDayEntries = selectedDay ? (byDay[selectedDay] ?? []) : [];
 
@@ -150,7 +150,7 @@ export default function TimetablePage() {
                   <ChevronRight size={18} />
                 </button>
               </div>
-              <button onClick={() => setCurDate(new Date(2026, 4, 1))}
+              <button onClick={() => setCurDate(new Date())}
                 className="px-3 py-1.5 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
                 이번 달
               </button>

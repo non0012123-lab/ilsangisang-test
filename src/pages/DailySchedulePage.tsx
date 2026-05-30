@@ -22,7 +22,7 @@ export default function DailySchedulePage() {
   const { entries, saveEntry, removeEntry, patchEntry, clients } = useApp();
   const { notify, show: showToast } = useCopyToast();
 
-  const [date, setDate] = useState(toDateStr(new Date('2026-05-29')));
+  const [date, setDate] = useState(toDateStr(new Date()));
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const [search, setSearch] = useState('');
