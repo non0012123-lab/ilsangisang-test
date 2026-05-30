@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Save, Copy, Sparkles, Users, Link2, FileText, AlertTriangle, MessageSquare, BookOpen, ChevronDown, ChevronUp, Pencil, Trash2, X, Check } from 'lucide-react';
+import { Plus, Save, Copy, Sparkles, Users, Link2, FileText, AlertTriangle, MessageSquare, BookOpen, ChevronDown, ChevronUp, Pencil, Trash2, X, Check, ImageIcon, Download } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -528,21 +528,49 @@ export default function HandoverPage() {
                       <p className="text-gray-400 text-sm text-center py-8 bg-white border border-gray-100 rounded-2xl">
                         연계된 AI 기획 결과가 없습니다. (AI 기획 메뉴에서 이 업체로 생성하면 자동 표시됩니다)
                       </p>
-                    ) : linked.map(p => (
-                      <div key={p.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center text-white shrink-0">
-                          <FileText size={16} />
+                    ) : linked.map(p => {
+                      const saved = p.images.filter(i => i.saved);
+                      return (
+                      <div key={p.id} className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center text-white shrink-0">
+                            <FileText size={16} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-gray-900 text-sm truncate flex items-center gap-1.5">
+                              {p.campaignType} · {p.period.start} ~ {p.period.end}
+                              {saved.length > 0 && (
+                                <span className="inline-flex items-center gap-0.5 text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded-full text-xs shrink-0">
+                                  <ImageIcon size={9} /> {saved.length}
+                                </span>
+                              )}
+                            </p>
+                            <p className="text-xs text-gray-400">{new Date(p.createdAt).toLocaleString('ko-KR')}{p.authorName ? ` · ${p.authorName}` : ''}</p>
+                          </div>
+                          <button onClick={() => openAiPlanPrint(p)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white transition-colors whitespace-nowrap shrink-0">
+                            <FileText size={12} /> PDF 보기
+                          </button>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-gray-900 text-sm truncate">{p.campaignType} · {p.period.start} ~ {p.period.end}</p>
-                          <p className="text-xs text-gray-400">{new Date(p.createdAt).toLocaleString('ko-KR')}{p.authorName ? ` · ${p.authorName}` : ''}</p>
-                        </div>
-                        <button onClick={() => openAiPlanPrint(p)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white transition-colors whitespace-nowrap">
-                          <FileText size={12} /> PDF 보기
-                        </button>
+                        {saved.length > 0 && (
+                          <div className="grid grid-cols-2 gap-2">
+                            {saved.map(img => (
+                              <div key={img.id} className="border border-gray-100 rounded-lg overflow-hidden">
+                                <div className="flex items-center justify-between px-2 py-1 bg-gray-50 gap-1">
+                                  <span className="text-[11px] font-semibold text-gray-600 truncate">{img.channel}</span>
+                                  <a href={img.url} download={`${img.channel}_시안.png`}
+                                    className="flex items-center gap-0.5 text-[11px] text-gray-500 hover:text-purple-600 transition-colors shrink-0">
+                                    <Download size={10} />
+                                  </a>
+                                </div>
+                                <img src={img.url} alt={`${img.channel} 시안`} className="w-full object-contain bg-gray-50" />
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    ));
+                      );
+                    });
                   })()}
                 </div>
               )}

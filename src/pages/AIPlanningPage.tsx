@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Upload, Sparkles, FileSpreadsheet, X, CheckCircle2, AlertTriangle, Copy, Check, ImageIcon, Download, History, Clock, FileText } from 'lucide-react';
+import { Upload, Sparkles, FileSpreadsheet, X, CheckCircle2, AlertTriangle, Copy, Check, ImageIcon, Download, History, Clock, FileText, Save, LayoutGrid } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import ReportDocument from '../components/ReportDocument';
@@ -10,6 +10,17 @@ import { openAiPlanPrint } from '../utils/aiPlanPdf';
 type Step = 1 | 2;
 
 const CAMPAIGN_TYPES = ['브랜드 인지도', '신제품 출시', '시즌 프로모션', '이벤트/캠페인', '커뮤니티 활성화', '위기 관리', '기타'];
+
+// 이미지 시안 생성 대상 플랫폼 (가이드라인 진행 채널에 맞게 다중 선택)
+// 비율·지침은 「플랫폼별 고효율 클릭 유도 이미지 연구 보고서」 기반. 키는 /api/ai-image 와 일치.
+const IMG_PLATFORMS: { key: string; label: string; ratio: string }[] = [
+  { key: 'naver-blog', label: '네이버 블로그', ratio: '1:1 정방형' },
+  { key: 'sns-feed',   label: 'SNS 피드(인스타/페북)', ratio: '4:5 세로' },
+  { key: 'sns-story',  label: '스토리/릴스', ratio: '9:16 세로' },
+  { key: 'youtube',    label: '유튜브 썸네일', ratio: '16:9 가로' },
+  { key: 'gfa',        label: '네이버 GFA / 디스플레이', ratio: '1:1 정방형' },
+  { key: 'banner',     label: '웹/앱 배너', ratio: '가로형' },
+];
 
 const fmtTime = (ts: number) => new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
@@ -26,7 +37,12 @@ export default function AIPlanningPage() {
   const [imgLoading, setImgLoading] = useState(false);
   const [imgError, setImgError] = useState('');
   const [viewingId, setViewingId] = useState<string | null>(null);
+  const [imgPlatforms, setImgPlatforms] = useState<string[]>(['naver-blog', 'sns-feed']);
+  const [gridCols, setGridCols] = useState<2 | 3>(2);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const togglePlatform = (key: string) =>
+    setImgPlatforms(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
 
   const activeClients = clients.filter(c => c.status !== 'inactive');
   const selectedClient = activeClients.find(c => c.id === clientId);
@@ -82,14 +98,19 @@ export default function AIPlanningPage() {
   };
 
   const generateImages = async () => {
-    if (!viewing) return;
+    if (!viewing || imgPlatforms.length === 0) return;
     setImgLoading(true);
     setImgError('');
     try {
       const res = await fetch('/api/ai-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientName: viewing.clientName, guideline: viewing.guideline }),
+        body: JSON.stringify({
+          clientName: viewing.clientName,
+          guideline: viewing.guideline,
+          platforms: imgPlatforms,
+          cols: gridCols,
+        }),
       });
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.includes('application/json')) {
@@ -98,12 +119,23 @@ export default function AIPlanningPage() {
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
       const imgs = Array.isArray(data.images) ? data.images : [];
-      saveAiPlan({ ...viewing, images: imgs });
+      // 이미 "저장"한 시안은 유지하고, 저장 안 한 작업본만 새 결과로 교체
+      const kept = viewing.images.filter(i => i.saved);
+      saveAiPlan({ ...viewing, images: [...kept, ...imgs] });
     } catch (e) {
       setImgError(e instanceof Error ? e.message : '이미지 생성 중 오류가 발생했습니다.');
     } finally {
       setImgLoading(false);
     }
+  };
+
+  // 시안 "저장" 토글 — 저장한 이미지만 DB에 영속화되어 AI 기획 결과·인수인계에 연동됨
+  const toggleSaveImage = (imgId: string) => {
+    if (!viewing) return;
+    saveAiPlan({
+      ...viewing,
+      images: viewing.images.map(i => i.id === imgId ? { ...i, saved: !i.saved } : i),
+    });
   };
 
   const openHistory = (id: string) => { setViewingId(id); setImgError(''); setStep(2); };
@@ -344,17 +376,54 @@ export default function AIPlanningPage() {
 
             {/* 이미지 시안 */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <ImageIcon size={18} className="text-purple-500" />
-                  <h3 className="font-bold text-gray-900">이미지 시안</h3>
-                  <span className="text-xs text-gray-400">블로그·SNS 각 2개</span>
+              <div className="flex items-center gap-2 mb-3">
+                <ImageIcon size={18} className="text-purple-500" />
+                <h3 className="font-bold text-gray-900">이미지 시안</h3>
+                <span className="text-xs text-gray-400">진행 플랫폼을 골라 한 장의 그리드 시안으로 생성합니다</span>
+              </div>
+
+              {/* 플랫폼 선택 (다중) */}
+              <div className="mb-3">
+                <p className="text-xs font-semibold text-gray-600 mb-1.5">플랫폼 (다중 선택)</p>
+                <div className="flex flex-wrap gap-2">
+                  {IMG_PLATFORMS.map(p => {
+                    const on = imgPlatforms.includes(p.key);
+                    return (
+                      <button key={p.key} onClick={() => togglePlatform(p.key)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                          on ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'
+                        }`}>
+                        <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${on ? 'bg-white/20 border-white/40' : 'border-gray-300'}`}>
+                          {on && <Check size={10} />}
+                        </span>
+                        {p.label}
+                        <span className={`${on ? 'text-purple-200' : 'text-gray-400'}`}>{p.ratio}</span>
+                      </button>
+                    );
+                  })}
                 </div>
-                <button onClick={generateImages} disabled={imgLoading}
+              </div>
+
+              {/* 그리드 밀도 + 생성 버튼 */}
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <LayoutGrid size={14} className="text-gray-400" />
+                  <span className="text-xs font-semibold text-gray-600">시안 수</span>
+                  {([2, 3] as const).map(c => (
+                    <button key={c} onClick={() => setGridCols(c)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                        gridCols === c ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                      }`}>
+                      {c}×{c} ({c * c}안)
+                    </button>
+                  ))}
+                  <span className="text-xs text-gray-400 hidden sm:inline">플랫폼당 한 장 · 적을수록 빠르고 토큰 절약</span>
+                </div>
+                <button onClick={generateImages} disabled={imgLoading || imgPlatforms.length === 0}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 disabled:opacity-50 text-white">
                   {imgLoading
                     ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 생성 중... (최대 1~2분)</>
-                    : <><Sparkles size={14} /> {viewing.images.length ? '다시 생성' : '이미지 시안 생성'}</>}
+                    : <><Sparkles size={14} /> {viewing.images.some(i => !i.saved) ? '다시 생성' : '이미지 시안 생성'}</>}
                 </button>
               </div>
 
@@ -366,24 +435,37 @@ export default function AIPlanningPage() {
 
               {viewing.images.length === 0 && !imgLoading && !imgError ? (
                 <p className="text-sm text-gray-400 py-6 text-center">
-                  가이드라인을 바탕으로 블로그·SNS 광고 이미지 초안을 생성합니다. 위 버튼을 눌러주세요.
+                  가이드라인의 톤앤매너를 반영해 선택한 플랫폼별 광고 시안 그리드를 생성합니다. 위 버튼을 눌러주세요.
                 </p>
               ) : (
                 <div className="grid sm:grid-cols-2 gap-4">
-                  {viewing.images.map((img, i) => (
-                    <div key={i} className="border border-gray-100 rounded-xl overflow-hidden">
-                      <div className="flex items-center justify-between px-3 py-2 bg-gray-50">
-                        <span className="text-xs font-semibold text-gray-600">{img.channel} 시안 #{(i % 2) + 1}</span>
-                        <a href={img.url} download={`${img.channel}_시안_${(i % 2) + 1}.png`}
-                          className="flex items-center gap-1 text-xs text-gray-500 hover:text-purple-600 transition-colors">
-                          <Download size={12} /> 저장
-                        </a>
+                  {viewing.images.map(img => (
+                    <div key={img.id} className={`border rounded-xl overflow-hidden ${img.saved ? 'border-purple-300 ring-1 ring-purple-200' : 'border-gray-100'}`}>
+                      <div className="flex items-center justify-between px-3 py-2 bg-gray-50 gap-2">
+                        <span className="text-xs font-semibold text-gray-600 truncate">
+                          {img.channel} · {img.cols}×{img.cols} 시안
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <a href={img.url} download={`${img.channel}_시안.png`}
+                            className="flex items-center gap-1 text-xs text-gray-500 hover:text-purple-600 transition-colors">
+                            <Download size={12} /> 다운로드
+                          </a>
+                          <button onClick={() => toggleSaveImage(img.id)}
+                            className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg transition-colors ${
+                              img.saved ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}>
+                            {img.saved ? <><Check size={11} /> 저장됨</> : <><Save size={11} /> 저장</>}
+                          </button>
+                        </div>
                       </div>
-                      <img src={img.url} alt={`${img.channel} 시안 ${i + 1}`} className="w-full object-cover" />
+                      <img src={img.url} alt={`${img.channel} 시안`} className="w-full object-contain bg-gray-50" />
                     </div>
                   ))}
                 </div>
               )}
+              <p className="text-xs text-gray-400 mt-3">
+                <Save size={11} className="inline -mt-0.5" /> "저장"한 시안만 <strong>AI 기획 결과</strong>와 <strong>인수인계</strong>(해당 업체)에 영구 보관됩니다. 저장하지 않은 시안은 새로고침 시 사라집니다.
+              </p>
             </div>
             </>
             )}

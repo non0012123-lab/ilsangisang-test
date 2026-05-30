@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileText, Clock, ArrowLeft, Copy, Check, Trash2, Sparkles, Building2 } from 'lucide-react';
+import { FileText, Clock, ArrowLeft, Copy, Check, Trash2, Sparkles, Building2, ImageIcon, Download } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import ReportDocument from '../components/ReportDocument';
@@ -19,6 +19,9 @@ export default function AIResultsPage() {
 
   const selected = aiHistory.find(p => p.id === selectedId) ?? null;
   const list = aiHistory.filter(p => filterClient === 'all' || p.clientId === filterClient);
+  // 같은 세션 메모리에는 미저장 시안도 있으므로, 보관/연동 화면에서는 "저장"한 시안만 표시
+  const savedImages = selected ? selected.images.filter(i => i.saved) : [];
+  const savedCount = (p: typeof aiHistory[number]) => p.images.filter(i => i.saved).length;
 
   const copy = async () => {
     if (!selected) return;
@@ -57,6 +60,30 @@ export default function AIResultsPage() {
             </div>
 
             <ReportDocument text={selected.report} />
+
+            {savedImages.length > 0 && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <ImageIcon size={18} className="text-purple-500" />
+                  <h3 className="font-bold text-gray-900">저장된 이미지 시안</h3>
+                  <span className="text-xs text-gray-400">{savedImages.length}개</span>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {savedImages.map(img => (
+                    <div key={img.id} className="border border-gray-100 rounded-xl overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2 bg-gray-50 gap-2">
+                        <span className="text-xs font-semibold text-gray-600 truncate">{img.channel} · {img.cols}×{img.cols} 시안</span>
+                        <a href={img.url} download={`${img.channel}_시안.png`}
+                          className="flex items-center gap-1 text-xs text-gray-500 hover:text-purple-600 transition-colors shrink-0">
+                          <Download size={12} /> 다운로드
+                        </a>
+                      </div>
+                      <img src={img.url} alt={`${img.channel} 시안`} className="w-full object-contain bg-gray-50" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           /* ── 목록 ── */
@@ -89,7 +116,14 @@ export default function AIResultsPage() {
                         </div>
                         <div>
                           <p className="font-bold text-gray-900 group-hover:text-purple-600 transition-colors leading-tight">{p.clientName}</p>
-                          <p className="text-xs text-gray-400">{p.campaignType}</p>
+                          <p className="text-xs text-gray-400 flex items-center gap-1.5">
+                            {p.campaignType}
+                            {savedCount(p) > 0 && (
+                              <span className="inline-flex items-center gap-0.5 text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded-full">
+                                <ImageIcon size={9} /> {savedCount(p)}
+                              </span>
+                            )}
+                          </p>
                         </div>
                       </div>
                       {isAdmin && (

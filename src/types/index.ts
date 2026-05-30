@@ -39,7 +39,15 @@ export interface TeamMember {
 }
 
 // AI 기획 결과 (내역으로 보관 — 재생성 없이 다시 보기 위함)
-export interface AiPlanImage { channel: string; url: string }
+// 이미지는 플랫폼별 "그리드 시안"(2×2=4안 / 3×3=9안) 한 장으로 생성된다.
+export interface AiPlanImage {
+  id: string;
+  platform: string;   // 플랫폼 키 (naver-blog, sns-feed 등)
+  channel: string;    // 표시용 라벨 (네이버 블로그 등)
+  url: string;        // base64 data URL
+  cols: number;       // 그리드 열 수 (2 또는 3)
+  saved?: boolean;    // 사용자가 "저장"한 시안만 DB에 영속화됨
+}
 export interface AiPlanResult {
   id: string;
   createdAt: number;

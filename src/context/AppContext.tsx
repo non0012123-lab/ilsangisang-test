@@ -129,7 +129,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ── AI 기획 결과 (이미지는 용량 때문에 DB 저장 제외; 로컬 세션에만 유지) ──
   const saveAiPlan = useCallback((plan: AiPlanResult) => {
     setAiHistory(prev => prev.some(p => p.id === plan.id) ? prev.map(p => p.id === plan.id ? plan : p) : [plan, ...prev]);
-    const persisted: AiPlanResult = { ...plan, images: [] }; // 이미지는 DB에 저장 안 함(용량)
+    // 이미지는 용량이 크므로, 사용자가 "저장"한 시안만 DB에 영속화한다(나머지는 세션 한정).
+    const persisted: AiPlanResult = { ...plan, images: plan.images.filter(i => i.saved) };
     persistOne('ai_plans', persisted);
   }, []);
   const removeAiPlan = useCallback((id: string) => {
