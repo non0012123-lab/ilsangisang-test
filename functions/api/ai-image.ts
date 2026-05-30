@@ -36,26 +36,13 @@ interface Platform {
 }
 
 const PLATFORMS: Record<string, Platform> = {
-  'naver-blog': {
-    key: 'naver-blog', label: '네이버 블로그', ratio: '1:1 정방형', size: '1024x1024',
+  // 네이버 블로그 & SNS 피드 — 스토리/릴스 스타일의 강렬한 세로형 결과값으로 통합
+  'blog-sns': {
+    key: 'blog-sns', label: '네이버 블로그 & SNS 피드', ratio: '세로형', size: '1024x1536',
     guidance: [
-      '네이버 블로그 "홍보카드". 클릭을 부르는 정방형 홍보카드 디자인으로,',
-      '굵고 큰 한국어 후킹 헤드라인 + 핵심 혜택/이유 카피를 잘 보이게 넣고, 시선을 끄는 메인 비주얼(인물/상황/제품)을 크게 배치.',
-      '카피와 핵심은 정방형 중앙 안전영역 안에 모으고, 브랜드 톤·색감을 일관되게.',
-    ].join(' '),
-  },
-  'sns-feed': {
-    key: 'sns-feed', label: 'SNS 피드(인스타/페북)', ratio: '4:5 세로', size: '1024x1536',
-    guidance: [
-      '인스타그램/페이스북 피드 광고. 스크롤을 멈추게 하는 강한 후킹 헤드라인을 크고 굵게 넣은 4:5 세로 광고 시안.',
-      '핵심 카피와 비주얼은 중앙 80% 안쪽에 모으고, 한눈에 메시지가 꽂히도록 강한 대비와 임팩트 있는 구도로.',
-    ].join(' '),
-  },
-  'sns-story': {
-    key: 'sns-story', label: '스토리/릴스', ratio: '9:16 세로', size: '1024x1536',
-    guidance: [
-      '인스타/페북 스토리·릴스용 9:16 풀세로 광고. 큰 후킹 카피를 화면 중앙에 강렬하게 배치.',
-      '단, 상단 약 14%·하단 약 20% 영역은 플랫폼 UI가 가리므로 핵심 카피/요소는 그 바깥 안전영역에 둘 것. 풀블리드 비주얼 + 굵은 헤드라인.',
+      '네이버 블로그 홍보카드 & 인스타/페북 SNS 피드에 함께 쓰는 세로형 광고 시안.',
+      '스토리/릴스처럼 강렬한 풀세로(풀블리드) 비주얼 + 크고 굵은 한국어 후킹 헤드라인 + 핵심 혜택/이유 카피를 결합한다.',
+      '스크롤·검색에서 시선을 멈추게 하도록 강한 색 대비와 임팩트 있는 구도로. 핵심 카피와 요소는 중앙 안전영역 안에 모으고 브랜드 톤·색감을 일관되게.',
     ].join(' '),
   },
   'youtube': {
@@ -66,18 +53,13 @@ const PLATFORMS: Record<string, Platform> = {
       '밋밋한 스톡 사진이 아니라 "썸네일 장인"이 만든 듯한 임팩트 있는 디자인으로.',
     ].join(' '),
   },
-  'gfa': {
-    key: 'gfa', label: '네이버 GFA / 디스플레이', ratio: '1:1 정방형', size: '1024x1024',
+  // 네이버 GFA / 디스플레이 / 웹·앱 배너 — 배너 스타일의 가로형 결과값으로 통합
+  'gfa-banner': {
+    key: 'gfa-banner', label: '네이버 GFA / 디스플레이 / 배너', ratio: '가로형', size: '1536x1024',
     guidance: [
-      '네이버 GFA / 디스플레이 광고. 제품·서비스(또는 핵심 상황) 히어로 비주얼을 크게 두고,',
-      '간결하고 강한 혜택형 후킹 헤드라인 1줄을 또렷하게 결합. 깔끔한 고대비 레이아웃, 브랜드 톤 유지.',
-    ].join(' '),
-  },
-  'banner': {
-    key: 'banner', label: '웹/앱 배너', ratio: '가로형(약 1.9:1)', size: '1536x1024',
-    guidance: [
-      '웹·앱 디스플레이 배너(가로형). 굵은 후킹 헤드라인 1줄 + 짧은 혜택/행동 유도 카피 + 핵심 비주얼을 가로 레이아웃에 명료하게 배치.',
-      '한눈에 메시지가 전달되도록 군더더기 없이. 가짜 시스템 알림·가짜 입력창처럼 사용자를 속이는 요소는 금지.',
+      '네이버 GFA·디스플레이·웹/앱 배너에 함께 쓰는 가로형 광고 시안.',
+      '굵은 후킹 헤드라인 1줄 + 짧은 혜택/행동 유도 카피 + 제품·서비스(또는 핵심 상황) 히어로 비주얼을 가로 레이아웃에 명료하게 배치.',
+      '한눈에 메시지가 전달되도록 군더더기 없이 깔끔한 고대비로. 브랜드 톤을 유지하고, 가짜 시스템 알림·가짜 입력창처럼 사용자를 속이는 요소는 금지.',
     ].join(' '),
   },
 };
@@ -174,7 +156,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const cols = req.cols === 3 ? 3 : 2; // 2×2(기본) 또는 3×3
   const keys = (Array.isArray(req.platforms) ? req.platforms : [])
     .filter(k => k in PLATFORMS);
-  const targets = (keys.length > 0 ? keys : ['naver-blog', 'sns-feed']).map(k => PLATFORMS[k]);
+  const targets = (keys.length > 0 ? keys : ['blog-sns']).map(k => PLATFORMS[k]);
 
   try {
     const results = await Promise.all(targets.map(p => generate(env, p, cols, clientName, guideline)));
