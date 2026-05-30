@@ -17,6 +17,9 @@ interface AppContextType {
   aiPlanRunning: boolean;
   aiPlanError: string;
   startAiPlanJob: (input: AiPlanJobInput) => Promise<string | null>;
+  // 현재 진행 중이거나 직전에 완료된 분석 결과의 id (페이지 리마운트와 무관하게 결과 화면 복원용)
+  activeAiPlanId: string | null;
+  clearActiveAiPlan: () => void;
   // 업무 데이터 영구 저장(레코드 단위) — 로컬 상태 갱신 + Supabase 반영
   saveEntry: (entry: ScheduleEntry) => void;
   saveEntries: (entries: ScheduleEntry[]) => void;
@@ -56,6 +59,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [aiHistory, setAiHistory] = useState<AiPlanResult[]>([]);
   const [aiPlanRunning, setAiPlanRunning] = useState(false);
   const [aiPlanError, setAiPlanError] = useState('');
+  const [activeAiPlanId, setActiveAiPlanId] = useState<string | null>(null);
   const uid = user?.id;
 
   // 헬퍼에서 최신 배열을 참조하기 위한 ref (setState 업데이터 내 부수효과 회피)
@@ -134,9 +138,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // AI 기획 분석을 전역에서 실행 (페이지 언마운트와 무관하게 끝까지 진행 → 결과 보관)
+  const clearActiveAiPlan = useCallback(() => setActiveAiPlanId(null), []);
   const startAiPlanJob = useCallback(async (input: AiPlanJobInput): Promise<string | null> => {
     setAiPlanRunning(true);
     setAiPlanError('');
+    setActiveAiPlanId(null);
     try {
       const res = await fetch('/api/ai-plan', {
         method: 'POST',
@@ -172,6 +178,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         images: [],
       };
       saveAiPlan(result);
+      setActiveAiPlanId(result.id);
       return result.id;
     } catch (e) {
       setAiPlanError(e instanceof Error ? e.message : 'AI 분석 중 오류가 발생했습니다.');
@@ -235,7 +242,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       entries, clients, handoverDocs, members, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
-      aiPlanRunning, aiPlanError, startAiPlanJob,
+      aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, saveHandover, removeHandover,
     }}>
       {children}

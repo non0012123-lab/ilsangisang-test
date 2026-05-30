@@ -113,7 +113,7 @@ export default function DashboardPage() {
 
         <div className="grid lg:grid-cols-5 gap-5">
           {/* Today's Tasks */}
-          <div className="lg:col-span-3 space-y-3">
+          <div className="lg:col-span-3 min-w-0 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-gray-900 flex items-center gap-2">
                 <Flame size={16} className="text-orange-500" />
@@ -141,11 +141,16 @@ export default function DashboardPage() {
             ) : (
               <>
               <div className="hidden md:block bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm table-fixed">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
-                      {['카테고리', '클라이언트', '키워드/제목', '상태'].map(h => (
-                        <th key={h} className="text-left text-xs font-semibold text-gray-500 px-4 py-2.5 whitespace-nowrap">{h}</th>
+                      {[
+                        { h: '카테고리', w: 'w-[116px]' },
+                        { h: '클라이언트', w: 'w-auto' },
+                        { h: '키워드/제목', w: 'w-auto' },
+                        { h: '상태', w: 'w-[120px]' },
+                      ].map(c => (
+                        <th key={c.h} className={`text-left text-xs font-semibold text-gray-500 px-4 py-2.5 whitespace-nowrap ${c.w}`}>{c.h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -153,8 +158,10 @@ export default function DashboardPage() {
                     {todayTasks.map(entry => (
                       <tr key={entry.id} className="hover:bg-gray-50/50 transition-colors">
                         <td className="px-4 py-3"><CategoryBadge category={entry.category} /></td>
-                        <td className="px-4 py-3 text-gray-600 text-xs whitespace-nowrap">{entry.clientName}</td>
-                        <td className="px-4 py-3 text-gray-800 max-w-[160px]">
+                        <td className="px-4 py-3 text-gray-600 text-xs">
+                          <span className="truncate block" title={entry.clientName}>{entry.clientName}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-800">
                           <span className="truncate block text-xs" title={entry.opinionTitle ?? entry.keyword}>
                             {entry.opinionTitle ?? entry.keyword ?? '-'}
                           </span>
@@ -216,7 +223,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Right panel */}
-          <div className="lg:col-span-2 space-y-4">
+          <div className="lg:col-span-2 min-w-0 space-y-4">
             {/* Upcoming */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
