@@ -31,8 +31,8 @@ const categoryNav: NavItem[] = [
 ];
 
 export default function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
-  const [catOpen, setCatOpen] = useState(true);
-  const [cliOpen, setCliOpen] = useState(true);
+  const [catOpen, setCatOpen] = useState(false);
+  const [cliOpen, setCliOpen] = useState(false);
   const { user, logout } = useAuth();
   const { clients } = useApp();
   // 활성 클라이언트는 등록 즉시 자동으로 이 목록에 표시·연동됨

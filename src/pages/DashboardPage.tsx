@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
+import DashboardAssistant from '../components/DashboardAssistant';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { coversDate, overlapsRange, isMultiDay } from '../utils/dateRange';
@@ -110,6 +111,9 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+
+        {/* AI 어시스턴트 */}
+        <DashboardAssistant />
 
         <div className="grid lg:grid-cols-5 gap-5">
           {/* Today's Tasks */}
