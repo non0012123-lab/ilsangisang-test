@@ -45,14 +45,6 @@ export default function LoginPage() {
         <div className="relative space-y-6">
           <h1 className="text-4xl font-bold text-white leading-tight">마케팅 성과를<br />한눈에 관리하세요</h1>
           <p className="text-blue-200 text-lg leading-relaxed">SNS, 유튜브, 네이버까지<br />모든 채널의 일정을 체계적으로 관리합니다.</p>
-          <div className="flex gap-6">
-            {[{ label: '관리 클라이언트', value: '5+' }, { label: '월 평균 콘텐츠', value: '120+' }, { label: '담당 채널', value: '15+' }].map(s => (
-              <div key={s.label}>
-                <p className="text-3xl font-bold text-white">{s.value}</p>
-                <p className="text-blue-300 text-sm">{s.label}</p>
-              </div>
-            ))}
-          </div>
         </div>
         <p className="relative text-slate-500 text-sm">© 2026 일상이상커뮤니케이션</p>
       </div>

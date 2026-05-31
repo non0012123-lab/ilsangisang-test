@@ -49,8 +49,8 @@ export default function SignupPage() {
           </div>
         </div>
         <div className="relative space-y-6">
-          <h1 className="text-4xl font-bold text-white leading-tight">직원 계정을<br />만들어보세요</h1>
-          <p className="text-blue-200 text-lg leading-relaxed">가입하면 '담당자' 권한으로 시작합니다.<br />관리자 권한은 가입 후 관리자가 부여합니다.</p>
+          <h1 className="text-4xl font-bold text-white leading-tight">계정을<br />만들어보세요</h1>
+          <p className="text-blue-200 text-lg leading-relaxed">직원과 클라이언트 모두 가입할 수 있습니다.<br />가입 후 관리자 승인을 거쳐 담당자 또는 클라이언트로 이용하실 수 있습니다.</p>
         </div>
         <p className="relative text-slate-500 text-sm">© 2026 일상이상커뮤니케이션</p>
       </div>
@@ -69,7 +69,7 @@ export default function SignupPage() {
             <UserPlus size={22} className="text-blue-600" />
             <h2 className="text-2xl font-bold text-gray-900">회원가입</h2>
           </div>
-          <p className="text-gray-500 mb-8">직원 계정을 생성합니다. (기본 권한: 담당자)</p>
+          <p className="text-gray-500 mb-8">계정을 생성합니다. 가입 후 관리자 승인을 거쳐 담당자(직원) 또는 클라이언트로 이용하실 수 있습니다.</p>
 
           {!configured && (
             <div className="mb-6 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
@@ -93,7 +93,7 @@ export default function SignupPage() {
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1.5">이메일 *</label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@ilsangisang.com"
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com"
                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
             </div>
             <div>
