@@ -38,6 +38,7 @@ interface AppContextType {
   patchEntry: (id: string, patch: Partial<ScheduleEntry>) => void;
   removeEntry: (id: string) => void;
   saveClient: (client: Client) => void;
+  removeClient: (id: string) => void;
   saveHandover: (doc: HandoverDoc) => void;
   removeHandover: (id: string) => void;
 }
@@ -146,6 +147,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const saveClient = useCallback((client: Client) => {
     setClients(prev => prev.some(c => c.id === client.id) ? prev.map(c => c.id === client.id ? client : c) : [...prev, client]);
     persistOne('clients', client);
+  }, []);
+  // 클라이언트 삭제(관리자 전용). 연결된 인수인계 문서도 함께 삭제하고, 스케줄(작업 이력)은 보존한다.
+  const removeClient = useCallback((id: string) => {
+    setClients(prev => prev.filter(c => c.id !== id));
+    persistDelete('clients', id);
+    const docs = handoverDocsRef.current.filter(d => d.clientId === id);
+    if (docs.length) {
+      setHandoverDocs(prev => prev.filter(d => d.clientId !== id));
+      docs.forEach(d => persistDelete('handover_docs', d.id));
+    }
   }, []);
 
   // ── 인계문서 ──
@@ -464,7 +475,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
       aiImageRunning, aiImageError, startAiImageJob,
       assistantMessages, assistantLoading, runAssistant, applyAssistantProposal,
-      saveEntry, saveEntries, patchEntry, removeEntry, saveClient, saveHandover, removeHandover,
+      saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
     }}>
       {children}
     </AppContext.Provider>

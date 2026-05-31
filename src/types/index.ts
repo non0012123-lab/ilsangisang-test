@@ -111,6 +111,14 @@ export interface ScheduleEntry {
   notes?: string;
 }
 
+// 월 예산 내 상품(서비스)별 배분 항목. amount 는 "만원" 단위 숫자.
+export interface BudgetItem {
+  id: string;
+  product: string;   // 예: 네이버 블로그 관리, 자동완성, 여론작업, 영상제작, 유튜브
+  amount: number;    // 만원 단위
+  notes?: string;
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -124,6 +132,7 @@ export interface Client {
   status: 'active' | 'inactive' | 'pending';
   description?: string;
   monthlyBudget?: string;
+  budgetItems?: BudgetItem[];
 }
 
 export interface Report {

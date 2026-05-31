@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   Plus, Mail, Calendar, X, Pencil, Users, Phone, Save, Check, Copy, Sparkles,
   Link2, FileText, AlertTriangle, MessageSquare, BookOpen, ChevronDown, ChevronUp,
-  Trash2, ImageIcon, Download,
+  Trash2, ImageIcon, Download, Wallet, Wand2, Loader2,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
@@ -11,21 +11,35 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { openAiPlanPrint } from '../utils/aiPlanPdf';
 import { todayStr } from '../utils/today';
-import type { Client, Category, HandoverDoc, KeyContact, ImportantLink } from '../types';
+import type { Client, Category, HandoverDoc, KeyContact, ImportantLink, BudgetItem } from '../types';
 
 const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업'];
 const STATUS_ORDER: Record<string, number> = { active: 0, pending: 1, inactive: 2 };
 
 const EMPTY_CLIENT: Omit<Client, 'id'> = {
   name: '', industry: '', contactPerson: '', email: '', phone: '',
-  startDate: '', categories: [], status: 'active', description: '', monthlyBudget: '',
+  startDate: '', categories: [], status: 'active', description: '', monthlyBudget: '', budgetItems: [],
 };
 
-type DetailTab = 'overview' | 'schedule' | 'contacts' | 'guidelines' | 'memo' | 'ai' | 'prompt';
+// /api/ai-handover 응답(인수인계 자동 정리 결과)
+interface AiHandoverResult {
+  summary: string;
+  overview: string;
+  guidelines: string;
+  tone: string;
+  dontDo: string;
+  specialNotes: string;
+  managerMemo: string;
+  keyContacts: KeyContact[];
+  importantLinks: ImportantLink[];
+}
+
+type DetailTab = 'overview' | 'schedule' | 'budget' | 'contacts' | 'guidelines' | 'memo' | 'ai' | 'prompt';
 
 const TAB_CONFIG = [
   { key: 'overview',   icon: <BookOpen size={14} />,      label: '개요' },
   { key: 'schedule',   icon: <Calendar size={14} />,      label: '스케줄' },
+  { key: 'budget',     icon: <Wallet size={14} />,        label: '예산' },
   { key: 'contacts',   icon: <Users size={14} />,         label: '연락처' },
   { key: 'guidelines', icon: <AlertTriangle size={14} />, label: '가이드라인' },
   { key: 'memo',       icon: <MessageSquare size={14} />, label: '인수인계 메모' },
@@ -35,6 +49,27 @@ const TAB_CONFIG = [
 
 // 인수인계 내용을 인라인 편집할 수 있는 탭들
 const HANDOVER_EDIT_TABS = new Set<DetailTab>(['overview', 'contacts', 'guidelines', 'memo']);
+
+// 예산 상품 프리셋(직접 추가도 가능)
+const BUDGET_PRESETS = ['네이버 블로그 관리', '네이버 자동완성', '네이버 여론작업', '영상제작', '유튜브', 'SNS 관리', '디자인제작', '광고 운영'];
+
+// "500만원", "5,000,000원", "1억", "1억 5000만원" → 만원 단위 숫자로 변환(베스트에포트)
+function parseManwon(s?: string): number {
+  if (!s) return 0;
+  const t = s.replace(/[\s,]/g, '');
+  let total = 0; let matched = false;
+  const eok = t.match(/(\d+(?:\.\d+)?)억/);
+  if (eok) { total += parseFloat(eok[1]) * 10000; matched = true; }
+  const man = t.match(/(\d+(?:\.\d+)?)만/);
+  if (man) { total += parseFloat(man[1]); matched = true; }
+  if (matched) return total;
+  const num = parseFloat(t.replace(/[^\d.]/g, ''));
+  if (isNaN(num)) return 0;
+  // "원" 단위로 보이는 큰 숫자는 만원으로 환산, 그 외는 만원으로 간주
+  if (/원/.test(t) && num >= 10000) return Math.round(num / 10000);
+  return num;
+}
+const fmtManwon = (n: number) => `${n.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}만원`;
 
 function generatePrompt(doc: HandoverDoc, entries: ReturnType<typeof useApp>['entries']): string {
   const clientEntries = entries
@@ -120,8 +155,9 @@ function StatusDot({ status }: { status: Client['status'] }) {
 }
 
 export default function ClientManagementPage() {
-  const { entries, clients, saveClient, handoverDocs, saveHandover, aiHistory } = useApp();
+  const { entries, clients, saveClient, removeClient, handoverDocs, saveHandover, aiHistory } = useApp();
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const [selected, setSelected] = useState<Client | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -135,12 +171,36 @@ export default function ClientManagementPage() {
   const [hoDraft, setHoDraft] = useState<HandoverDoc | null>(null);
   const [promptCopied, setPromptCopied] = useState(false);
 
+  // 예산 편집 상태
+  const [budgetEditing, setBudgetEditing] = useState(false);
+  const [budgetDraft, setBudgetDraft] = useState<BudgetItem[]>([]);
+
+  // AI 인수인계 자동 채우기 모달 상태
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiText, setAiText] = useState('');
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiResult, setAiResult] = useState<AiHandoverResult | null>(null);
+
   // Sort: active → pending → inactive
   const sorted = [...clients].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
   const filtered = sorted.filter(c => filterStatus === 'all' || c.status === filterStatus);
 
-  const openClient = (c: Client) => { setSelected(c); setTab('overview'); setHoEditing(false); setHoDraft(null); };
-  const closeClient = () => { setSelected(null); setHoEditing(false); setHoDraft(null); };
+  const resetSubStates = () => {
+    setHoEditing(false); setHoDraft(null);
+    setBudgetEditing(false); setBudgetDraft([]);
+    setAiOpen(false); setAiText(''); setAiInstruction(''); setAiError(''); setAiResult(null); setAiLoading(false);
+  };
+  const openClient = (c: Client) => { setSelected(c); setTab('overview'); resetSubStates(); };
+  const closeClient = () => { setSelected(null); resetSubStates(); };
+
+  const handleDeleteClient = () => {
+    if (!selected || !isAdmin) return;
+    if (!window.confirm(`'${selected.name}' 클라이언트를 삭제할까요?\n\n• 업체 정보와 인수인계 문서가 삭제됩니다.\n• 과거 스케줄(작업 이력)은 보존됩니다.\n• 되돌릴 수 없습니다.`)) return;
+    removeClient(selected.id);
+    closeClient();
+  };
 
   const openAdd = () => { setForm(EMPTY_CLIENT); setEditClient(null); setShowForm(true); };
   const openEdit = (c: Client) => { setForm({ ...c }); setEditClient(c); setShowForm(true); };
@@ -213,6 +273,97 @@ export default function ClientManagementPage() {
   const removeLink = (id: string) => setHoDraft(d => d ? { ...d, importantLinks: d.importantLinks.filter(l => l.id !== id) } : d);
   const updateLink = (id: string, patch: Partial<ImportantLink>) => setHoDraft(d => d ? { ...d, importantLinks: d.importantLinks.map(l => l.id === id ? { ...l, ...patch } : l) } : d);
 
+  // ── 예산 항목 ──
+  const budgetItems = selected?.budgetItems ?? [];
+  const budgetView = budgetEditing ? budgetDraft : budgetItems;
+  const allocatedTotal = budgetView.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+  const monthlyTotal = parseManwon(selected?.monthlyBudget);
+
+  const startBudgetEdit = () => { setBudgetDraft(budgetItems.map(b => ({ ...b }))); setBudgetEditing(true); };
+  const cancelBudgetEdit = () => { setBudgetEditing(false); setBudgetDraft([]); };
+  const saveBudgetEdit = () => {
+    if (!selected) return;
+    const cleaned = budgetDraft.filter(b => b.product.trim() || b.amount);
+    const updated = { ...selected, budgetItems: cleaned };
+    saveClient(updated);
+    setSelected(updated);
+    setBudgetEditing(false);
+    setBudgetDraft([]);
+  };
+  const addBudgetItem = (product = '') => setBudgetDraft(d => [...d, { id: Date.now().toString() + Math.random().toString(36).slice(2, 5), product, amount: 0, notes: '' }]);
+  const removeBudgetItem = (id: string) => setBudgetDraft(d => d.filter(b => b.id !== id));
+  const updateBudgetItem = (id: string, patch: Partial<BudgetItem>) => setBudgetDraft(d => d.map(b => b.id === id ? { ...b, ...patch } : b));
+
+  // ── AI 인수인계 자동 채우기 ──
+  const runAiHandover = async () => {
+    if (!selected || (!aiText.trim() && !aiInstruction.trim())) return;
+    setAiLoading(true);
+    setAiError('');
+    setAiResult(null);
+    try {
+      const res = await fetch('/api/ai-handover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientName: selected.name,
+          rawText: aiText,
+          instruction: aiInstruction,
+          existing: {
+            overview: handoverDoc?.overview, guidelines: handoverDoc?.guidelines,
+            tone: handoverDoc?.tone, dontDo: handoverDoc?.dontDo,
+            specialNotes: handoverDoc?.specialNotes, managerMemo: handoverDoc?.managerMemo,
+          },
+        }),
+      });
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('AI 서버(/api/ai-handover)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
+      }
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.detail ? `${data.error} — ${data.detail}` : (data.error ?? `요청 실패 (${res.status})`));
+      setAiResult({
+        summary: data.summary ?? '', overview: data.overview ?? '', guidelines: data.guidelines ?? '',
+        tone: data.tone ?? '', dontDo: data.dontDo ?? '', specialNotes: data.specialNotes ?? '', managerMemo: data.managerMemo ?? '',
+        keyContacts: Array.isArray(data.keyContacts) ? data.keyContacts : [],
+        importantLinks: Array.isArray(data.importantLinks) ? data.importantLinks : [],
+      });
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : 'AI 분석 중 오류가 발생했습니다.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // AI 결과를 인수인계 편집 초안에 병합(빈 항목만 채우거나 덮어쓰기) → 사용자가 검토 후 저장
+  const applyAiHandover = () => {
+    if (!selected || !aiResult) return;
+    const base = handoverDoc
+      ? { ...handoverDoc, keyContacts: handoverDoc.keyContacts.map(c => ({ ...c })), importantLinks: handoverDoc.importantLinks.map(l => ({ ...l })) }
+      : emptyHandover(selected);
+    const merge = (cur: string, next: string) => next.trim() ? (cur.trim() ? `${cur}\n\n${next}` : next) : cur;
+    const newContacts: KeyContact[] = aiResult.keyContacts
+      .filter(c => c.name || c.role)
+      .map((c, i) => ({ id: `ai-c-${Date.now()}-${i}`, name: c.name || '', role: c.role || '', phone: c.phone || '', email: c.email || '', notes: c.notes || '' }));
+    const newLinks: ImportantLink[] = aiResult.importantLinks
+      .filter(l => l.title || l.url)
+      .map((l, i) => ({ id: `ai-l-${Date.now()}-${i}`, title: l.title || '', url: l.url || '', category: l.category || 'SNS', notes: l.notes || '' }));
+    setHoDraft({
+      ...base,
+      overview: merge(base.overview, aiResult.overview),
+      guidelines: merge(base.guidelines, aiResult.guidelines),
+      tone: merge(base.tone, aiResult.tone),
+      dontDo: merge(base.dontDo, aiResult.dontDo),
+      specialNotes: merge(base.specialNotes, aiResult.specialNotes),
+      managerMemo: merge(base.managerMemo, aiResult.managerMemo),
+      keyContacts: [...base.keyContacts, ...newContacts],
+      importantLinks: [...base.importantLinks, ...newLinks],
+    });
+    setHoEditing(true);
+    setAiOpen(false);
+    setAiText(''); setAiInstruction(''); setAiResult(null); setAiError('');
+    setTab('overview');
+  };
+
   const clientEntries = selected ? entries.filter(e => e.clientId === selected.id).sort((a, b) => b.date.localeCompare(a.date)) : [];
   const promptText = selected ? generatePrompt({ ...(handoverDoc ?? emptyHandover(selected)), clientName: selected.name }, entries) : '';
   const copyPrompt = () => {
@@ -264,6 +415,12 @@ export default function ClientManagementPage() {
                     className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition-colors">
                     <Pencil size={14} /> 정보 수정
                   </button>
+                  {isAdmin && (
+                    <button onClick={handleDeleteClient}
+                      className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 rounded-xl text-sm hover:bg-red-50 transition-colors">
+                      <Trash2 size={14} /> 삭제
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -296,9 +453,14 @@ export default function ClientManagementPage() {
                     </button>
                   </div>
                 ) : (
-                  <button onClick={startHoEdit} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors">
-                    <Pencil size={13} /> {handoverDoc ? '인수인계 수정' : '인수인계 작성'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setAiOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-colors">
+                      <Wand2 size={13} /> AI로 채우기
+                    </button>
+                    <button onClick={startHoEdit} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors">
+                      <Pencil size={13} /> {handoverDoc ? '인수인계 수정' : '인수인계 작성'}
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -415,6 +577,97 @@ export default function ClientManagementPage() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* === 예산 === */}
+            {tab === 'budget' && (
+              <div className="max-w-3xl space-y-4">
+                {/* 요약 */}
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 grid grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 mb-1">월 예산</p>
+                    <p className="text-lg font-bold text-gray-900">{selected.monthlyBudget || (monthlyTotal ? fmtManwon(monthlyTotal) : '미설정')}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 mb-1">배분 합계</p>
+                    <p className="text-lg font-bold text-blue-600">{fmtManwon(allocatedTotal)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 mb-1">{monthlyTotal ? '미배분 잔액' : '항목 수'}</p>
+                    <p className={`text-lg font-bold ${monthlyTotal && monthlyTotal - allocatedTotal < 0 ? 'text-red-500' : 'text-gray-900'}`}>
+                      {monthlyTotal ? fmtManwon(monthlyTotal - allocatedTotal) : `${budgetView.length}개`}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 편집 툴바 */}
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <p className="text-xs text-gray-400">상품별 예산 배분을 관리합니다. {monthlyTotal ? '비율은 월 예산 대비입니다.' : '월 예산이 숫자로 인식되면 비율도 표시됩니다.'}</p>
+                  {budgetEditing ? (
+                    <div className="flex items-center gap-2">
+                      <button onClick={cancelBudgetEdit} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors"><X size={13} /> 취소</button>
+                      <button onClick={saveBudgetEdit} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"><Save size={13} /> 예산 저장</button>
+                    </div>
+                  ) : (
+                    <button onClick={startBudgetEdit} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors"><Pencil size={13} /> 예산 편집</button>
+                  )}
+                </div>
+
+                {/* 항목 목록 */}
+                {budgetEditing ? (
+                  <div className="space-y-2">
+                    {budgetDraft.map(item => (
+                      <div key={item.id} className="bg-white border border-gray-100 rounded-xl p-3 flex flex-col sm:flex-row gap-2 sm:items-center">
+                        <input list="budget-presets" value={item.product} onChange={e => updateBudgetItem(item.id, { product: e.target.value })}
+                          placeholder="상품명 (예: 네이버 블로그 관리)" className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input type="number" min={0} value={item.amount || ''} onChange={e => updateBudgetItem(item.id, { amount: parseFloat(e.target.value) || 0 })}
+                            placeholder="0" className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          <span className="text-xs text-gray-500">만원</span>
+                        </div>
+                        <input value={item.notes ?? ''} onChange={e => updateBudgetItem(item.id, { notes: e.target.value })}
+                          placeholder="비고" className="sm:w-40 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        <button onClick={() => removeBudgetItem(item.id)} className="p-1.5 text-gray-400 hover:text-red-500 transition-colors shrink-0 self-end sm:self-center"><Trash2 size={14} /></button>
+                      </div>
+                    ))}
+                    <datalist id="budget-presets">{BUDGET_PRESETS.map(p => <option key={p} value={p} />)}</datalist>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button onClick={() => addBudgetItem()} className="flex items-center gap-1.5 px-3 py-2 border border-dashed border-gray-300 rounded-xl text-xs text-gray-500 hover:border-blue-300 hover:text-blue-500 transition-colors">
+                        <Plus size={12} /> 항목 추가
+                      </button>
+                      {BUDGET_PRESETS.filter(p => !budgetDraft.some(b => b.product === p)).map(p => (
+                        <button key={p} onClick={() => addBudgetItem(p)} className="px-3 py-2 rounded-xl text-xs bg-gray-50 text-gray-600 hover:bg-blue-50 hover:text-blue-600 border border-gray-100 transition-colors">+ {p}</button>
+                      ))}
+                    </div>
+                  </div>
+                ) : budgetView.length === 0 ? (
+                  <p className="text-center text-gray-400 py-10 text-sm bg-white border border-gray-100 rounded-2xl">등록된 예산 항목이 없습니다. '예산 편집'을 눌러 상품별로 추가하세요.</p>
+                ) : (
+                  <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden divide-y divide-gray-50">
+                    {[...budgetView].sort((a, b) => b.amount - a.amount).map(item => {
+                      const denom = monthlyTotal || allocatedTotal;
+                      const pct = denom > 0 ? Math.round((item.amount / denom) * 100) : 0;
+                      return (
+                        <div key={item.id} className="p-4">
+                          <div className="flex items-center justify-between gap-3 mb-2">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-gray-900 text-sm truncate">{item.product || '(이름 없음)'}</p>
+                              {item.notes && <p className="text-xs text-gray-400 truncate">{item.notes}</p>}
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="font-bold text-gray-900 text-sm">{fmtManwon(item.amount)}</p>
+                              <p className="text-xs text-blue-600 font-semibold">{pct}%</p>
+                            </div>
+                          </div>
+                          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -740,6 +993,80 @@ export default function ClientManagementPage() {
               <button onClick={handleSave} className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
                 {editClient ? '수정하기' : '추가하기'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI 인수인계 자동 채우기 모달 */}
+      {aiOpen && selected && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center text-white"><Wand2 size={16} /></div>
+                <div>
+                  <h2 className="text-base font-bold text-gray-900">AI 인수인계 자동 채우기</h2>
+                  <p className="text-xs text-gray-400">{selected.name} · 대화형 설명 또는 기존 파일(엑셀·PPT) 내용 붙여넣기</p>
+                </div>
+              </div>
+              <button onClick={() => setAiOpen(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18} /></button>
+            </div>
+
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">자료 내용 (붙여넣기)</label>
+                <textarea value={aiText} onChange={e => setAiText(e.target.value)} rows={8}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+                  placeholder={'기존 인수인계 엑셀/PPT/문서 내용을 복사해 붙여넣거나, 업체에 대해 아는 내용을 자유롭게 적어주세요.\n예) 담당자 박현수 팀장 010-1234-5678, 컨펌은 오전 중 카톡으로. 경쟁사 언급 금지. 매주 화/목 블로그 2건...'} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">추가 지시 (선택)</label>
+                <input value={aiInstruction} onChange={e => setAiInstruction(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="예: 톤앤매너와 금지사항 위주로 정리해줘" />
+              </div>
+
+              {aiError && <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{aiError}</p>}
+
+              {aiResult && (
+                <div className="border border-purple-100 bg-purple-50/40 rounded-xl p-4 space-y-2">
+                  <p className="text-xs font-bold text-purple-700">정리 결과 미리보기</p>
+                  {aiResult.summary && <p className="text-xs text-gray-600">{aiResult.summary}</p>}
+                  <div className="space-y-1.5 text-xs text-gray-700">
+                    {([
+                      ['개요', aiResult.overview], ['가이드라인', aiResult.guidelines], ['톤앤매너', aiResult.tone],
+                      ['금지', aiResult.dontDo], ['특이사항', aiResult.specialNotes], ['메모', aiResult.managerMemo],
+                    ] as [string, string][]).filter(([, v]) => v.trim()).map(([k, v]) => (
+                      <div key={k}><span className="font-semibold text-gray-500">{k}:</span> <span className="whitespace-pre-wrap">{v.length > 160 ? v.slice(0, 160) + '…' : v}</span></div>
+                    ))}
+                    {aiResult.keyContacts.length > 0 && <div><span className="font-semibold text-gray-500">연락처:</span> {aiResult.keyContacts.map(c => c.name || c.role).filter(Boolean).join(', ')} ({aiResult.keyContacts.length}명)</div>}
+                    {aiResult.importantLinks.length > 0 && <div><span className="font-semibold text-gray-500">링크:</span> {aiResult.importantLinks.length}개</div>}
+                  </div>
+                  <p className="text-[11px] text-gray-400">적용하면 인수인계 편집 모드로 들어가며, 기존 내용에 합쳐집니다. 검토 후 '인수인계 저장'을 눌러야 최종 반영됩니다.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
+              <button onClick={() => setAiOpen(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">닫기</button>
+              {aiResult ? (
+                <>
+                  <button onClick={runAiHandover} disabled={aiLoading}
+                    className="flex items-center gap-1.5 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors">
+                    {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />} 다시 분석
+                  </button>
+                  <button onClick={applyAiHandover}
+                    className="flex items-center gap-1.5 px-5 py-2 text-sm font-semibold text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors">
+                    <Check size={14} /> 적용하기
+                  </button>
+                </>
+              ) : (
+                <button onClick={runAiHandover} disabled={aiLoading || (!aiText.trim() && !aiInstruction.trim())}
+                  className="flex items-center gap-1.5 px-5 py-2 text-sm font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-40 rounded-lg transition-colors">
+                  {aiLoading ? <><Loader2 size={14} className="animate-spin" /> 분석 중...</> : <><Wand2 size={14} /> AI로 정리</>}
+                </button>
+              )}
             </div>
           </div>
         </div>
