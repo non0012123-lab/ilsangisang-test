@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Save, Copy, Sparkles, Users, Link2, FileText, AlertTriangle, MessageSquare, BookOpen, ChevronDown, ChevronUp, Pencil, Trash2, X, Check, ImageIcon, Download } from 'lucide-react';
+import { Plus, Save, Copy, Sparkles, Users, Link2, FileText, AlertTriangle, MessageSquare, BookOpen, ChevronDown, ChevronUp, Pencil, Trash2, X, Check, ImageIcon, Download, ArrowLeft } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -106,6 +106,8 @@ export default function HandoverPage() {
   const [promptCopied, setPromptCopied] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
   const [newClientId, setNewClientId] = useState('');
+  // 모바일: 좌측 목록과 우측 문서를 한 번에 하나만 표시(목록 ↔ 문서 토글). lg 이상에서는 항상 둘 다 표시.
+  const [mobilePane, setMobilePane] = useState<'list' | 'doc'>('list');
 
   const selected = handoverDocs.find(d => d.id === selectedId) ?? null;
 
@@ -152,6 +154,7 @@ export default function HandoverPage() {
     setNewClientId('');
     setDraft({ ...newDoc });
     setEditing(true);
+    setMobilePane('doc');
   };
 
   const addContact = () => {
@@ -203,10 +206,10 @@ export default function HandoverPage() {
   return (
     <Layout>
       <Header title="인수인계" subtitle="클라이언트 담당 변경 시 필요한 모든 정보를 관리합니다" />
-      <div className="flex-1 flex overflow-hidden" style={{ height: 'calc(100vh - 73px)' }}>
+      <div className="flex-1 flex flex-col lg:flex-row lg:overflow-hidden lg:h-[calc(100vh-73px)]">
 
-        {/* Left: Client List */}
-        <div className="w-56 border-r border-gray-100 bg-white flex flex-col shrink-0">
+        {/* Left: Client List (모바일에선 목록 화면일 때만 표시) */}
+        <div className={`${mobilePane === 'list' ? 'flex' : 'hidden'} lg:flex w-full lg:w-56 border-b lg:border-b-0 lg:border-r border-gray-100 bg-white flex-col shrink-0`}>
           <div className="p-3 border-b border-gray-100">
             <button
               onClick={() => setShowNewForm(v => !v)}
@@ -230,7 +233,7 @@ export default function HandoverPage() {
           <nav className="flex-1 overflow-y-auto p-2 space-y-1">
             {handoverDocs.map(doc => (
               <button key={doc.id}
-                onClick={() => { setSelectedId(doc.id); setEditing(false); setDraft(null); setTab('overview'); }}
+                onClick={() => { setSelectedId(doc.id); setEditing(false); setDraft(null); setTab('overview'); setMobilePane('doc'); }}
                 className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors ${
                   selectedId === doc.id ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
                 }`}>
@@ -243,20 +246,25 @@ export default function HandoverPage() {
           </nav>
         </div>
 
-        {/* Right: Document */}
+        {/* Right: Document (모바일에선 문서 화면일 때만 표시) */}
+        <div className={`${mobilePane === 'doc' ? 'flex' : 'hidden'} lg:flex flex-1 min-w-0 flex-col lg:overflow-hidden`}>
         {!selected ? (
-          <div className="flex-1 flex items-center justify-center bg-gray-50">
+          <div className="flex-1 flex items-center justify-center bg-gray-50 py-20 lg:py-0">
             <div className="text-center">
               <BookOpen size={40} className="text-gray-200 mx-auto mb-3" />
               <p className="text-gray-400 font-medium">클라이언트를 선택하세요</p>
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col overflow-hidden bg-gray-50">
+          <div className="flex-1 flex flex-col lg:overflow-hidden bg-gray-50">
             {/* Doc Header */}
-            <div className="bg-white border-b border-gray-100 px-6 py-4">
+            <div className="bg-white border-b border-gray-100 px-4 lg:px-6 py-4">
               <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="flex items-center gap-2 lg:gap-3 flex-1 min-w-0">
+                  <button onClick={() => setMobilePane('list')}
+                    className="lg:hidden p-1.5 -ml-1 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors shrink-0" aria-label="목록으로">
+                    <ArrowLeft size={18} />
+                  </button>
                   <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold shrink-0">
                     {docName(selected)[0]}
                   </div>
@@ -314,7 +322,7 @@ export default function HandoverPage() {
             </div>
 
             {/* Doc Content */}
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 lg:overflow-y-auto p-4 lg:p-6">
 
               {/* 개요 */}
               {tab === 'overview' && (
@@ -608,6 +616,7 @@ export default function HandoverPage() {
             </div>
           </div>
         )}
+        </div>
       </div>
     </Layout>
   );

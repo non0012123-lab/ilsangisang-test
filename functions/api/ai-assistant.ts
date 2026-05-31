@@ -24,6 +24,23 @@ interface CtxEntry {
   status?: string;
 }
 
+interface CtxHandover {
+  clientName?: string;
+  overview?: string;
+  guidelines?: string;
+  tone?: string;
+  dontDo?: string;
+  specialNotes?: string;
+  managerMemo?: string;
+}
+
+interface CtxAiPlan {
+  clientName?: string;
+  campaignType?: string;
+  period?: { start?: string; end?: string };
+  report?: string;
+}
+
 interface AssistantRequest {
   message?: string;
   history?: { role: 'user' | 'assistant'; text: string }[];
@@ -32,6 +49,8 @@ interface AssistantRequest {
   clients?: string[];
   categories?: string[];
   entries?: CtxEntry[];
+  handoverDocs?: CtxHandover[];
+  aiPlans?: CtxAiPlan[];
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -76,6 +95,36 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const clients = req.clients ?? [];
   const categories = req.categories ?? [];
   const entries = (Array.isArray(req.entries) ? req.entries : []).slice(0, 400);
+  const handoverDocs = (Array.isArray(req.handoverDocs) ? req.handoverDocs : []).slice(0, 60);
+  const aiPlans = (Array.isArray(req.aiPlans) ? req.aiPlans : []).slice(0, 20);
+
+  // 업체별 가이드라인 컨텍스트: 인수인계 문서의 운영 규칙·톤·금지사항 등을 정리
+  const guidelineContext = handoverDocs
+    .map(d => {
+      const parts = [
+        d.overview ? `개요: ${d.overview}` : '',
+        d.guidelines ? `운영 가이드라인: ${d.guidelines}` : '',
+        d.tone ? `톤앤매너: ${d.tone}` : '',
+        d.dontDo ? `절대 하지 말 것: ${d.dontDo}` : '',
+        d.specialNotes ? `특이사항: ${d.specialNotes}` : '',
+        d.managerMemo ? `인수인계 메모: ${d.managerMemo}` : '',
+      ].filter(Boolean).join('\n  ');
+      return parts ? `■ ${d.clientName || '(업체명 미상)'}\n  ${parts}` : '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+
+  // AI 기획 결과 컨텍스트: 업체별 캠페인 기획 리포트 요약(가이드라인 보강용)
+  const aiPlanContext = aiPlans
+    .map(p => {
+      const period = p.period?.start ? `${p.period.start} ~ ${p.period?.end ?? ''}` : '';
+      const report = (p.report || '').slice(0, 2000);
+      return report
+        ? `■ ${p.clientName || '(업체명 미상)'}${p.campaignType ? ` · ${p.campaignType}` : ''}${period ? ` · ${period}` : ''}\n  ${report}`
+        : '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
 
   const developer = [
     '너는 한국 마케팅 대행사의 일정 관리 AI 어시스턴트다. 항상 한국어로, 친절하고 간결하게 답한다.',
@@ -95,6 +144,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- "배분/재배치/나눠줘" 요청이면, 아래 현재 일정을 참고해 날짜·담당자를 합리적으로 분산한다. 기존 일정을 옮기는 것은 updates(그 일정의 id 사용), 새로 만드는 것은 entries 에 담는다. 변경하지 않는 필드는 null.',
     '- 신규 업체(클라이언트) 등록: 사용자가 새 업체 등록을 원하거나, 일정/인수인계를 만들려는 업체가 아래 "업체 목록"에 없으면 clients 에 그 업체를 담아 먼저 등록을 제안한다. 그리고 그 업체명을 entries/handovers 의 clientName 에 그대로 사용한다(적용 시 신규 업체가 먼저 생성된 뒤 연결됨). 아는 정보만 채우고 모르면 빈 문자열.',
     '- 인수인계 문서 신규 등록: 사용자가 특정 업체의 인수인계 문서를 만들어 달라고 하면 handovers 에 담는다(overview 에 간단 요약 가능).',
+    '- 업체 가이드라인 질문("○○ 업체 가이드라인 알려줘", "스타벅스 톤앤매너는?", "△△ 운영 규칙/주의사항 뭐야?" 등): 아래 "업체 가이드라인(인수인계)"과 "AI 기획 결과 요약"을 근거로 해당 업체의 운영 가이드라인·톤앤매너·금지사항·특이사항·기획 방향을 정리해 reply 에 답한다. 이때는 모든 액션 배열(entries/updates/clients/handovers)을 비운다(등록이 아니라 조회·요약이므로).',
+    '- 가이드라인을 답할 때는 인수인계 문서의 내용을 우선하고, AI 기획 결과의 캠페인 방향·톤을 보조적으로 덧붙인다. 해당 업체 정보가 아래에 없으면 지어내지 말고 "등록된 인수인계/기획 정보가 없다"고 안내한다.',
     '- managerName 은 아래 "담당자 목록" 중 가장 가까운 값, clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
     '- 기간 작업이 아니면 endDate 는 null. status 미지정이면 "pending".',
     '- 액션(entries/updates/clients/handovers)을 제안할 때 reply 에는 무엇을 제안하는지 요약하고, 사용자가 "적용" 버튼을 눌러야 실제 반영된다는 뉘앙스로 안내한다.',
@@ -106,6 +157,12 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '',
     '현재 등록된 일정(JSON, id 포함 — updates 에 이 id 사용):',
     JSON.stringify(entries),
+    '',
+    '업체 가이드라인(인수인계 문서 — 가이드라인 질문의 1차 근거):',
+    guidelineContext || '(등록된 인수인계 가이드라인 없음)',
+    '',
+    'AI 기획 결과 요약(업체별 캠페인 방향 — 가이드라인 보조 근거):',
+    aiPlanContext || '(등록된 AI 기획 결과 없음)',
   ].join('\n');
 
   // 대화 맥락을 하나의 사용자 메시지(트랜스크립트)로 합쳐 전달

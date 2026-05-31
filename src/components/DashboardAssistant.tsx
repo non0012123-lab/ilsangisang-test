@@ -7,6 +7,7 @@ const STATUS_LABEL: Record<string, string> = { pending: '대기중', 'in-progres
 
 const EXAMPLES = [
   '오늘 스케줄 시간 분배는 어떻게 하는 게 효율적일까?',
+  '스타벅스 코리아 업체 가이드라인 알려줘',
   '내일 스타벅스 SNS 신메뉴 키워드 작업 등록해줘',
   '6월 2일부터 6월 6일까지 네이버 블로그 5건 담당자별로 배분해줘',
   '새 업체 "그린마취통증의학과" 등록하고 인수인계 문서도 만들어줘',
@@ -39,7 +40,7 @@ export default function DashboardAssistant() {
         </div>
         <div className="min-w-0">
           <h3 className="font-bold text-gray-900 text-sm leading-tight">AI 어시스턴트</h3>
-          <p className="text-xs text-gray-400">일정·업체·인수인계 등록과 배분·시간 분배 조언을 대화로 처리합니다</p>
+          <p className="text-xs text-gray-400">일정·업체·인수인계 등록, 배분·시간 분배 조언, 업체 가이드라인 안내를 대화로 처리합니다</p>
         </div>
       </div>
 

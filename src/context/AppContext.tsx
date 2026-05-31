@@ -260,6 +260,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const allEntries = entriesRef.current;
     const scoped = isAdmin ? allEntries : allEntries.filter(e => e.managerId === u?.id);
     const activeClients = clientsRef.current.filter(c => c.status !== 'inactive');
+    // 가이드라인 질문에 답하기 위해 인수인계 문서·AI 기획 결과를 함께 전달
+    const clientNameOf = (id: string, fallback: string) => clientsRef.current.find(c => c.id === id)?.name ?? fallback;
+    const handoverContext = handoverDocsRef.current.map(d => ({
+      clientName: clientNameOf(d.clientId, d.clientName),
+      overview: d.overview,
+      guidelines: d.guidelines,
+      tone: d.tone,
+      dontDo: d.dontDo,
+      specialNotes: d.specialNotes,
+      managerMemo: d.managerMemo,
+    }));
+    const aiPlanContext = aiHistoryRef.current.slice(0, 20).map(p => ({
+      clientName: clientNameOf(p.clientId, p.clientName),
+      campaignType: p.campaignType,
+      period: p.period,
+      report: p.report,
+    }));
     const history = assistantMessagesRef.current.map(m => ({ role: m.role, text: m.text }));
     setAssistantMessages(prev => [...prev, { role: 'user', text: message }]);
     setAssistantLoading(true);
@@ -272,6 +289,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           managers: membersRef.current.map(m => m.name),
           clients: activeClients.map(c => c.name),
           categories: ASSISTANT_CATEGORIES,
+          handoverDocs: handoverContext,
+          aiPlans: aiPlanContext,
           entries: scoped.map(e => ({
             id: e.id, date: e.date, endDate: e.endDate ?? null,
             managerName: e.managerName, clientName: e.clientName,
