@@ -677,11 +677,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (c) setClients(c);
       if (e) setEntries(e);
       if (h) setHandoverDocs(h);
-      // vendors/accounts/site_entries 테이블이 없거나(로드 null) 원격이 비어 있으면 로컬 캐시를 유지.
-      // 테이블이 있고 데이터가 있으면 그쪽(공유본)을 사용.
-      if (v && v.length) setVendors(v);
-      if (acc && acc.length) setAccounts(acc);
-      if (sites && sites.length) setSiteEntries(sites);
+      // vendors/accounts/site_entries: 로컬 캐시 + Supabase 동기화.
+      //  • 로드 null  = 테이블 없음(마이그레이션 미실행) → 로컬 캐시 유지, 업로드 시도 안 함.
+      //  • 원격 데이터 있음 = 공유본 사용.
+      //  • 원격 비어 있음 + 로컬에 데이터 있음 = 테이블을 뒤늦게 만든 경우.
+      //    로컬 캐시를 한 번 올려서(backfill) 다른 기기(모바일 등)와도 공유되게 한다.
+      const syncLocalFirst = <T extends { id: string }>(
+        table: string, remote: T[] | null, local: T[], setLocal: (v: T[]) => void,
+      ) => {
+        if (remote && remote.length) { setLocal(remote); return; }
+        if (remote && remote.length === 0 && local.length) persistMany(table, local);
+        // remote === null(테이블 없음) 또는 원격·로컬 모두 비어 있으면 그대로 둔다.
+      };
+      syncLocalFirst('vendors', v, vendorsRef.current, setVendors);
+      syncLocalFirst('accounts', acc, accountsRef.current, setAccounts);
+      syncLocalFirst('site_entries', sites, siteEntriesRef.current, setSiteEntries);
       if (plans) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
     })();
     return () => { active = false; };

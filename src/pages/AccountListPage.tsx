@@ -148,7 +148,39 @@ export default function AccountListPage() {
             {q ? `'${search}'에 해당하는 계정이 없습니다.` : '등록된 계정이 없습니다. ‘아이디 추가’로 등록하세요.'}
           </div>
         ) : (
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <>
+          {/* 모바일: 카드형 (lg 미만) */}
+          <div className="space-y-3 lg:hidden">
+            {display.map(a => (
+              <div key={a.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-gray-900 truncate">{a.name || a.username || '-'}</h3>
+                    <div className="flex flex-wrap items-center gap-1 mt-1">
+                      {a.platform && <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${platformBadge[a.platform] ?? 'bg-gray-100 text-gray-600'}`}>{a.platform}</span>}
+                      {a.grade && <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${gradeBadge(a.grade)}`}>{a.grade}</span>}
+                      {a.ownership && <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${a.ownership === 'client' ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-700'}`}>{OWNERSHIP_LABEL[a.ownership]}</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => copy(memoFormat(a), `${a.id}:memo`)}
+                      className={`inline-flex items-center justify-center w-8 h-8 rounded-lg border transition-colors ${copiedKey === `${a.id}:memo` ? 'border-green-200 bg-green-50 text-green-600' : 'border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-200'}`}
+                      title="메모장 양식 복사">{copiedKey === `${a.id}:memo` ? <Check size={15} /> : <Copy size={15} />}</button>
+                    <button onClick={() => openEdit(a)} className="p-1.5 text-gray-400 hover:text-blue-600 transition-colors" title="수정"><Pencil size={16} /></button>
+                    <button onClick={() => handleDelete(a)} className="p-1.5 text-gray-400 hover:text-red-500 transition-colors" title="삭제"><Trash2 size={16} /></button>
+                  </div>
+                </div>
+                <div className="space-y-1.5 text-xs border-t border-gray-50 pt-2.5">
+                  <div className="flex items-center gap-2"><span className="text-gray-400 w-14 shrink-0">아이디</span>{copyCell(a.username, `${a.id}:user`)}</div>
+                  <div className="flex items-center gap-2"><span className="text-gray-400 w-14 shrink-0">비밀번호</span>{copyCell(a.password, `${a.id}:pw`)}</div>
+                  {a.category && <div className="flex items-center gap-2"><span className="text-gray-400 w-14 shrink-0">카테고리</span><span className="text-gray-600">{a.category}</span></div>}
+                  {a.ip && <div className="flex items-center gap-2"><span className="text-gray-400 w-14 shrink-0">아이피</span>{copyCell(a.ip, `${a.id}:ip`)}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* PC: 표 (lg 이상) */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden hidden lg:block">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -203,6 +235,7 @@ export default function AccountListPage() {
               </table>
             </div>
           </div>
+          </>
         )}
       </div>
 
