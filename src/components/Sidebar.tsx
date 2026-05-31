@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, CalendarDays, Users, LogOut,
   Hash, PlayCircle, Globe, Video, Paintbrush, ChevronDown, ChevronRight,
-  BarChart3, MessageSquare, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes,
+  BarChart3, MessageSquare, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -19,6 +19,8 @@ const mainNav: NavItem[] = [
   { to: '/ai-planning', icon: <Sparkles size={18} />, label: 'AI 기획' },
   { to: '/ai-results', icon: <FileText size={18} />, label: 'AI 기획 결과' },
   { to: '/keyword-tool', icon: <Search size={18} />, label: '키워드 조회' },
+  { to: '/accounts', icon: <KeyRound size={18} />, label: '아이디 목록' },
+  { to: '/sites', icon: <Globe size={18} />, label: '홈페이지 목록' },
 ];
 
 const categoryNav: NavItem[] = [

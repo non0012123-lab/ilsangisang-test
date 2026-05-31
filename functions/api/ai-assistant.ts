@@ -51,6 +51,9 @@ interface CtxVendor {
   notes?: string;
 }
 
+interface CtxAccount { id?: string; name?: string; username?: string; password?: string; category?: string; ip?: string }
+interface CtxSite { id?: string; name?: string; url?: string; username?: string; password?: string; description?: string }
+
 interface AssistantRequest {
   message?: string;
   history?: { role: 'user' | 'assistant'; text: string }[];
@@ -62,6 +65,8 @@ interface AssistantRequest {
   handoverDocs?: CtxHandover[];
   aiPlans?: CtxAiPlan[];
   vendors?: CtxVendor[];
+  accounts?: CtxAccount[];
+  sites?: CtxSite[];
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -154,6 +159,21 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     .filter(Boolean)
     .join('\n');
 
+  // 아이디 목록 / 홈페이지 목록 (조회·수정·삭제 시 id 사용)
+  // 비밀번호는 컨텍스트에 포함하지 않는다 — 조회는 id 로 식별만 하고 실제 값은 프론트가 표시한다.
+  const accounts = (Array.isArray(req.accounts) ? req.accounts : []).slice(0, 300);
+  const accountContext = accounts
+    .map(a => a.name || a.username
+      ? `■ id=${a.id ?? '?'} | 이름:${a.name ?? '-'} | 아이디:${a.username ?? '-'}${a.category ? ` | 카테고리:${a.category}` : ''}${a.ip ? ` | IP:${a.ip}` : ''}`
+      : '')
+    .filter(Boolean).join('\n');
+  const sites = (Array.isArray(req.sites) ? req.sites : []).slice(0, 300);
+  const siteContext = sites
+    .map(s => s.name
+      ? `■ id=${s.id ?? '?'} | 홈페이지:${s.name}${s.url ? ` | 주소:${s.url}` : ''} | 아이디:${s.username ?? '-'}${s.description ? ` | 용도:${s.description}` : ''}`
+      : '')
+    .filter(Boolean).join('\n');
+
   const developer = [
     '너는 한국 마케팅 대행사의 일정 관리 AI 어시스턴트다. 항상 한국어로, 친절하고 간결하게 답한다.',
     '반드시 아래 JSON 객체로만 응답해(코드펜스·설명문 금지):',
@@ -165,6 +185,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  "clients": [ { "name":"", "industry":"", "categories":[], "contactPerson":"", "phone":"", "email":"" } ],',
     '  "handovers": [ { "clientName":"", "overview":"" } ],',
     '  "vendors": [ { "name":"", "services":"", "contactPerson":"", "phone":"", "email":"", "pricing":"", "notes":"" } ],',
+    '  "accounts": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "username":"", "password":"", "category":"", "ip":"" } ],',
+    '  "sites": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "url":"", "username":"", "password":"", "description":"" } ],',
+    '  "accountLookups": [ "조회 질문일 때 답으로 보여줄 아이디 목록 id" ],',
+    '  "siteLookups": [ "조회 질문일 때 답으로 보여줄 홈페이지 id" ],',
     '  "keywords": [ "조회수를 조회할 키워드" ]',
     '}',
     '',
@@ -182,6 +206,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 외주사 질문("영수증리뷰 어디에 맡겨?", "앱설치 외주 어디 있어?", "○○ 작업 외주사 추천" 등): 아래 "외주사 목록"에서 해당 서비스를 제공하는 외주사를 찾아 업체명·담당자·연락처·단가/메모를 reply 에 정리해 답한다. 여러 곳이면 모두 제시. 이때 모든 액션 배열은 비운다(조회·추천이므로). 맞는 외주사가 없으면 지어내지 말고 "등록된 외주사가 없다"고 안내한다.',
     '- 외주사 등록: 사용자가 새 외주사를 자연어로 등록하려 하면("○○ 외주사 추가해줘. 영수증리뷰·앱설치 가능, 담당 …") vendors 에 담는다. services 는 정해진 코드가 아니라 자유 서술로, 입력에 언급된 서비스를 빠짐없이 담는다. 아는 정보만 채우고 모르면 빈 문자열. reply 에는 무엇을 등록할지 요약하고 "적용"을 안내한다.',
     '- 키워드 조회수 질문("○○ 키워드 조회수 알려줘", "△△ 검색량 얼마야?", "□□ 모바일/PC 조회수"): 실제 수치는 네이버 키워드도구로 따로 조회하므로, 너는 절대 숫자를 지어내지 말고 조회할 키워드만 keywords 배열에 담는다(여러 개면 모두). reply 에는 "조회수를 조회해 아래에 표시할게요" 정도로 짧게 답하고 다른 액션 배열은 비운다.',
+    '- 아이디 목록 조회("○○ 아이디/비번 뭐야?", "△△ 계정 정보 알려줘"): 비밀번호는 컨텍스트에 없고 화면에서 직접 보여주므로, 매칭되는 항목의 id 를 accountLookups 에 담는다(여러 개면 모두). reply 에는 "아래에서 아이디·비번·아이피를 복사하세요" 정도로 짧게 답하고, 비번 값을 지어내지 말 것. 일치 항목이 없으면 빈 배열 + reply 에서 되묻기.',
+    '- 홈페이지 목록 조회("문자발송 사이트 비번?", "○○ 홈페이지 계정"): 매칭 항목 id 를 siteLookups 에 담고 reply 는 짧게. 비번은 화면에서 보여준다.',
+    '- 추가/수정/삭제 요청이면 accounts/sites 에 op(add/update/delete)로 담는다(수정·삭제는 id 사용). 조회만 할 때는 lookups 만 채우고 op 배열은 비운다.',
+    '- accounts/sites 의 추가/수정/삭제를 제안할 때는 reply 에 무엇을 할지 요약하고 "적용"을 안내한다. 조회·답변만 할 때는 모든 액션 배열을 비운다.',
     '- managerName 은 아래 "담당자 목록" 중 가장 가까운 값, clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
     '- 기간 작업이 아니면 endDate 는 null. status 미지정이면 "pending".',
     '- 액션(entries/updates/clients/handovers)을 제안할 때 reply 에는 무엇을 제안하는지 요약하고, 사용자가 "적용" 버튼을 눌러야 실제 반영된다는 뉘앙스로 안내한다.',
@@ -202,6 +230,12 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '',
     '외주사 목록(서비스별 외주 추천의 근거):',
     vendorContext || '(등록된 외주사 없음)',
+    '',
+    '아이디 목록(계정 — 조회/수정/삭제 시 위 id 사용):',
+    accountContext || '(등록된 아이디 없음)',
+    '',
+    '홈페이지 목록(사내 사용 사이트 — 조회/수정/삭제 시 위 id 사용):',
+    siteContext || '(등록된 홈페이지 없음)',
   ].join('\n');
 
   // 대화 맥락을 하나의 사용자 메시지(트랜스크립트)로 합쳐 전달
@@ -240,7 +274,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const data = await aiRes.json();
   const content = extractText(data);
-  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown };
+  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; accountLookups?: unknown; siteLookups?: unknown };
   try {
     parsed = JSON.parse(content);
   } catch {
@@ -254,6 +288,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     clients: Array.isArray(parsed?.clients) ? parsed.clients : [],
     handovers: Array.isArray(parsed?.handovers) ? parsed.handovers : [],
     vendors: Array.isArray(parsed?.vendors) ? parsed.vendors : [],
+    accounts: Array.isArray(parsed?.accounts) ? parsed.accounts : [],
+    sites: Array.isArray(parsed?.sites) ? parsed.sites : [],
+    accountLookups: Array.isArray(parsed?.accountLookups) ? parsed.accountLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
+    siteLookups: Array.isArray(parsed?.siteLookups) ? parsed.siteLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
     keywords: Array.isArray(parsed?.keywords) ? parsed.keywords.filter((k: unknown) => typeof k === 'string' && k.trim()).slice(0, 20) : [],
     deletes: Array.isArray(parsed?.deletes) ? parsed.deletes.filter((d: unknown) => typeof d === 'string' && d.trim()).slice(0, 50) : [],
   });

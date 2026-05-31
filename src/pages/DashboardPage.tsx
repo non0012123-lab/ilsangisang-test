@@ -5,6 +5,7 @@ import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import DashboardAssistant from '../components/DashboardAssistant';
+import DailyReportButton from '../components/DailyReportButton';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { coversDate, overlapsRange, isMultiDay } from '../utils/dateRange';
@@ -112,6 +113,9 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+
+        {/* 일일보고서 보내기 */}
+        <DailyReportButton />
 
         {/* AI 어시스턴트 */}
         <DashboardAssistant />

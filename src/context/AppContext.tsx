@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, Vendor, AssistantUndo } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, Vendor, AssistantUndo, AccountEntry, SiteEntry } from '../types';
 import { SCHEDULE_ENTRIES, CLIENTS, HANDOVER_DOCS, USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
@@ -12,6 +12,8 @@ interface AppContextType {
   clients: Client[];
   handoverDocs: HandoverDoc[];
   vendors: Vendor[];
+  accounts: AccountEntry[];
+  siteEntries: SiteEntry[];
   members: TeamMember[];
   reloadMembers: () => Promise<void>;
   aiHistory: AiPlanResult[];
@@ -45,6 +47,10 @@ interface AppContextType {
   removeHandover: (id: string) => void;
   saveVendor: (vendor: Vendor) => void;
   removeVendor: (id: string) => void;
+  saveAccount: (account: AccountEntry) => void;
+  removeAccount: (id: string) => void;
+  saveSite: (site: SiteEntry) => void;
+  removeSite: (id: string) => void;
 }
 
 export interface AiPlanJobInput {
@@ -60,16 +66,20 @@ export interface AiPlanJobInput {
 
 const nowMs = () => Date.now();
 
-// 외주사 로컬 캐시: Supabase 에 vendors 테이블이 아직 없거나 일시적으로 닿지 않아도
+// 로컬 캐시 헬퍼: Supabase 에 해당 테이블이 아직 없거나 일시적으로 닿지 않아도
 // 브라우저에 데이터가 남도록 한다(테이블이 생기면 Supabase 가 우선·공유 소스가 됨).
-const VENDORS_LS_KEY = 'ilsangisang.vendors.v1';
-const loadLocalVendors = (): Vendor[] => {
-  try { const s = localStorage.getItem(VENDORS_LS_KEY); return s ? (JSON.parse(s) as Vendor[]) : []; }
+const lsLoad = <T,>(key: string): T[] => {
+  try { const s = localStorage.getItem(key); return s ? (JSON.parse(s) as T[]) : []; }
   catch { return []; }
 };
-const saveLocalVendors = (list: Vendor[]) => {
-  try { localStorage.setItem(VENDORS_LS_KEY, JSON.stringify(list)); } catch { /* 용량 초과 등은 무시 */ }
+const lsSave = (key: string, list: unknown) => {
+  try { localStorage.setItem(key, JSON.stringify(list)); } catch { /* 용량 초과 등은 무시 */ }
 };
+const VENDORS_LS_KEY = 'ilsangisang.vendors.v1';
+const ACCOUNTS_LS_KEY = 'ilsangisang.accounts.v1';
+const SITES_LS_KEY = 'ilsangisang.sites.v1';
+const loadLocalVendors = (): Vendor[] => lsLoad<Vendor>(VENDORS_LS_KEY);
+const saveLocalVendors = (list: Vendor[]) => lsSave(VENDORS_LS_KEY, list);
 
 const AppContext = createContext<AppContextType | null>(null);
 
@@ -84,6 +94,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [clients, setClients] = useState<Client[]>(CLIENTS);
   const [handoverDocs, setHandoverDocs] = useState<HandoverDoc[]>(HANDOVER_DOCS);
   const [vendors, setVendors] = useState<Vendor[]>(loadLocalVendors);
+  const [accounts, setAccounts] = useState<AccountEntry[]>(() => lsLoad<AccountEntry>(ACCOUNTS_LS_KEY));
+  const [siteEntries, setSiteEntries] = useState<SiteEntry[]>(() => lsLoad<SiteEntry>(SITES_LS_KEY));
   const [members, setMembers] = useState<TeamMember[]>(MOCK_MEMBERS);
   const [aiHistory, setAiHistory] = useState<AiPlanResult[]>([]);
   const [aiPlanRunning, setAiPlanRunning] = useState(false);
@@ -112,6 +124,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => { vendorsRef.current = vendors; }, [vendors]);
   // 외주사가 바뀔 때마다 로컬 캐시에 보관 → 새로고침·재배포에도 유지
   useEffect(() => { saveLocalVendors(vendors); }, [vendors]);
+  const accountsRef = useRef(accounts);
+  useEffect(() => { accountsRef.current = accounts; }, [accounts]);
+  useEffect(() => { lsSave(ACCOUNTS_LS_KEY, accounts); }, [accounts]);
+  const siteEntriesRef = useRef(siteEntries);
+  useEffect(() => { siteEntriesRef.current = siteEntries; }, [siteEntries]);
+  useEffect(() => { lsSave(SITES_LS_KEY, siteEntries); }, [siteEntries]);
   const assistantMessagesRef = useRef(assistantMessages);
   useEffect(() => { assistantMessagesRef.current = assistantMessages; }, [assistantMessages]);
   const assistantLoadingRef = useRef(assistantLoading);
@@ -197,6 +215,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeVendor = useCallback((id: string) => {
     setVendors(prev => prev.filter(v => v.id !== id));
     persistDelete('vendors', id);
+  }, []);
+
+  // ── 아이디 목록 ──
+  const saveAccount = useCallback((account: AccountEntry) => {
+    setAccounts(prev => prev.some(a => a.id === account.id) ? prev.map(a => a.id === account.id ? account : a) : [...prev, account]);
+    persistOne('accounts', account);
+  }, []);
+  const removeAccount = useCallback((id: string) => {
+    setAccounts(prev => prev.filter(a => a.id !== id));
+    persistDelete('accounts', id);
+  }, []);
+
+  // ── 홈페이지 목록 ──
+  const saveSite = useCallback((site: SiteEntry) => {
+    setSiteEntries(prev => prev.some(s => s.id === site.id) ? prev.map(s => s.id === site.id ? site : s) : [...prev, site]);
+    persistOne('site_entries', site);
+  }, []);
+  const removeSite = useCallback((id: string) => {
+    setSiteEntries(prev => prev.filter(s => s.id !== id));
+    persistDelete('site_entries', id);
   }, []);
 
   // ── AI 기획 결과 (이미지는 용량 때문에 DB 저장 제외; 로컬 세션에만 유지) ──
@@ -323,6 +361,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       name: v.name, services: v.services, contactPerson: v.contactPerson,
       phone: v.phone, email: v.email, pricing: v.pricing, notes: v.notes,
     }));
+    // 아이디 목록 / 홈페이지 목록 (조회·수정·삭제 시 id 사용)
+    // 비밀번호는 AI(OpenAI)로 보내지 않는다 — 조회는 id로 식별 후 프론트가 실제 값을 복사 카드로 보여준다.
+    const accountContext = accountsRef.current.map(a => ({
+      id: a.id, name: a.name, username: a.username, category: a.category, ip: a.ip,
+    }));
+    const siteContext = siteEntriesRef.current.map(s => ({
+      id: s.id, name: s.name, url: s.url, username: s.username, description: s.description,
+    }));
     const history = assistantMessagesRef.current.map(m => ({ role: m.role, text: m.text }));
     setAssistantMessages(prev => [...prev, { role: 'user', text: message }]);
     setAssistantLoading(true);
@@ -338,6 +384,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           handoverDocs: handoverContext,
           aiPlans: aiPlanContext,
           vendors: vendorContext,
+          accounts: accountContext,
+          sites: siteContext,
           entries: scoped.map(e => ({
             id: e.id, date: e.date, endDate: e.endDate ?? null,
             managerName: e.managerName, clientName: e.clientName,
@@ -360,6 +408,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         clients: Array.isArray(data.clients) ? data.clients : [],
         handovers: Array.isArray(data.handovers) ? data.handovers : [],
         vendors: Array.isArray(data.vendors) ? data.vendors : [],
+        accounts: Array.isArray(data.accounts) ? data.accounts : [],
+        sites: Array.isArray(data.sites) ? data.sites : [],
+        accountLookups: Array.isArray(data.accountLookups) ? data.accountLookups.filter((x: unknown) => typeof x === 'string') : [],
+        siteLookups: Array.isArray(data.siteLookups) ? data.siteLookups.filter((x: unknown) => typeof x === 'string') : [],
         deletes: Array.isArray(data.deletes) ? data.deletes.filter((d: unknown) => typeof d === 'string') : [],
         keywords,
       }]);
@@ -399,7 +451,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const selfId = u?.id && mem.some(m => m.id === u.id) ? u.id : '';
     let count = 0;
     // 되돌리기용 스냅샷(생성 id + 삭제/수정 전 원본)
-    const undo: AssistantUndo = { entryIds: [], clientIds: [], vendorIds: [], handoverIds: [], deletedEntries: [], updatedPrev: [] };
+    const undo: AssistantUndo = {
+      entryIds: [], clientIds: [], vendorIds: [], handoverIds: [], deletedEntries: [], updatedPrev: [],
+      accountIds: [], siteIds: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
+    };
 
     const matchManager = (name?: string) => {
       if (!name) return '';
@@ -503,22 +558,75 @@ export function AppProvider({ children }: { children: ReactNode }) {
       count += 1;
     });
 
+    // 6) 아이디 목록 (추가/수정/삭제)
+    (msg.accounts ?? []).forEach((a, i) => {
+      const op = a.op ?? (a.id ? 'update' : 'add');
+      if (op === 'delete') {
+        const cur = accountsRef.current.find(x => x.id === a.id);
+        if (!cur) return;
+        undo.deletedAccounts.push({ ...cur });
+        removeAccount(cur.id);
+        count += 1;
+      } else if (op === 'update' && a.id) {
+        const cur = accountsRef.current.find(x => x.id === a.id);
+        if (!cur) return;
+        undo.updatedAccountsPrev.push({ ...cur });
+        saveAccount({ ...cur, name: a.name ?? cur.name, username: a.username ?? cur.username, password: a.password ?? cur.password, category: a.category ?? cur.category, ip: a.ip ?? cur.ip });
+        count += 1;
+      } else if (a.name || a.username) {
+        const id = `ac-${Date.now()}-${i}`;
+        saveAccount({ id, name: a.name || '', username: a.username || '', password: a.password || '', category: a.category || '', ip: a.ip || '' });
+        undo.accountIds.push(id);
+        count += 1;
+      }
+    });
+
+    // 7) 홈페이지 목록 (추가/수정/삭제)
+    (msg.sites ?? []).forEach((s, i) => {
+      const op = s.op ?? (s.id ? 'update' : 'add');
+      if (op === 'delete') {
+        const cur = siteEntriesRef.current.find(x => x.id === s.id);
+        if (!cur) return;
+        undo.deletedSites.push({ ...cur });
+        removeSite(cur.id);
+        count += 1;
+      } else if (op === 'update' && s.id) {
+        const cur = siteEntriesRef.current.find(x => x.id === s.id);
+        if (!cur) return;
+        undo.updatedSitesPrev.push({ ...cur });
+        saveSite({ ...cur, name: s.name ?? cur.name, url: s.url ?? cur.url, username: s.username ?? cur.username, password: s.password ?? cur.password, description: s.description ?? cur.description });
+        count += 1;
+      } else if (s.name) {
+        const id = `st-${Date.now()}-${i}`;
+        saveSite({ id, name: s.name || '', url: s.url || '', username: s.username || '', password: s.password || '', description: s.description || '' });
+        undo.siteIds.push(id);
+        count += 1;
+      }
+    });
+
     setAssistantMessages(prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
-  }, [saveClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry]);
+  }, [saveClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite]);
 
   // 직전 적용을 되돌린다(생성한 레코드 제거 + 삭제/수정한 일정 복원)
   const undoAssistantProposal = useCallback((index: number) => {
     const msg = assistantMessagesRef.current[index];
     if (!msg || msg.applied == null || msg.undone || !msg.undo) return;
-    const { entryIds, clientIds, vendorIds, handoverIds, deletedEntries, updatedPrev } = msg.undo;
-    entryIds.forEach(id => removeEntry(id));
-    vendorIds.forEach(id => removeVendor(id));
-    handoverIds.forEach(id => removeHandover(id));
-    clientIds.forEach(id => removeClient(id)); // 연결 인수인계도 함께 제거됨
-    deletedEntries.forEach(e => saveEntry(e)); // 삭제했던 일정 복원
-    updatedPrev.forEach(e => saveEntry(e));    // 수정 전 원본 복원
+    const u = msg.undo;
+    u.entryIds.forEach(id => removeEntry(id));
+    u.vendorIds.forEach(id => removeVendor(id));
+    u.handoverIds.forEach(id => removeHandover(id));
+    u.clientIds.forEach(id => removeClient(id)); // 연결 인수인계도 함께 제거됨
+    u.deletedEntries.forEach(e => saveEntry(e)); // 삭제했던 일정 복원
+    u.updatedPrev.forEach(e => saveEntry(e));    // 수정 전 원본 복원
+    // 아이디 목록 / 홈페이지 목록 되돌리기 (이전 버전 메시지엔 필드가 없을 수 있어 ?? [])
+    (u.accountIds ?? []).forEach(id => removeAccount(id));
+    (u.siteIds ?? []).forEach(id => removeSite(id));
+    (u.deletedAccounts ?? []).forEach(a => saveAccount(a));
+    (u.deletedSites ?? []).forEach(s => saveSite(s));
+    (u.updatedAccountsPrev ?? []).forEach(a => saveAccount(a));
+    (u.updatedSitesPrev ?? []).forEach(s => saveSite(s));
     setAssistantMessages(prev => prev.map((m, i) => i === index ? { ...m, undone: true } : m));
-  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry]);
+  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, removeAccount, removeSite, saveAccount, saveSite]);
 
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
@@ -558,6 +666,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       let e = await load<ScheduleEntry>('schedule_entries');
       let h = await load<HandoverDoc>('handover_docs');
       const v = await load<Vendor>('vendors');
+      const acc = await load<AccountEntry>('accounts');
+      const sites = await load<SiteEntry>('site_entries');
       const plans = await load<AiPlanResult>('ai_plans');
       if (!active) return;
       if (c && c.length === 0) { await seed('clients', CLIENTS); c = CLIENTS; }
@@ -567,9 +677,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (c) setClients(c);
       if (e) setEntries(e);
       if (h) setHandoverDocs(h);
-      // vendors 테이블이 없거나(로드 null) 원격이 비어 있으면 로컬 캐시를 유지(덮어쓰지 않음).
+      // vendors/accounts/site_entries 테이블이 없거나(로드 null) 원격이 비어 있으면 로컬 캐시를 유지.
       // 테이블이 있고 데이터가 있으면 그쪽(공유본)을 사용.
       if (v && v.length) setVendors(v);
+      if (acc && acc.length) setAccounts(acc);
+      if (sites && sites.length) setSiteEntries(sites);
       if (plans) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
     })();
     return () => { active = false; };
@@ -577,12 +689,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      entries, clients, handoverDocs, vendors, members, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
+      entries, clients, handoverDocs, vendors, accounts, siteEntries, members, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
       aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
       aiImageRunning, aiImageError, startAiImageJob,
       assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
-      saveVendor, removeVendor,
+      saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite,
     }}>
       {children}
     </AppContext.Provider>

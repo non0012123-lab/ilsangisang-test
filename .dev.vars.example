@@ -9,3 +9,8 @@ OPENAI_API_KEY=sk-XXXXXXXXXXXXXXXXXXXX
 NAVER_AD_API_KEY=01000000xxxxxxxx
 NAVER_AD_SECRET_KEY=AQAAAAxxxxxxxx
 NAVER_AD_CUSTOMER_ID=1234567
+
+# Resend (일일보고서 이메일 발송) — resend.com > API Keys
+RESEND_API_KEY=
+# 발신 주소(인증한 도메인과 일치해야 함). 미설정 시 report@12sang.com
+# RESEND_FROM=report@12sang.com

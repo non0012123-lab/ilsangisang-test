@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw } from 'lucide-react';
+import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { AssistantMessage } from '../types';
 
@@ -11,6 +11,7 @@ const EXAMPLES = [
   '영수증리뷰 어디에 맡겨?',
   '리뷰팩토리 외주사 추가해줘 (영수증리뷰·앱설치·앱후기, 건당 3천원)',
   '강남 피부과 키워드 조회수 알려줘',
+  '우리본병원 블로그 아이디·비번 알려줘',
   '내일 스타벅스 SNS 신메뉴 키워드 작업 등록해줘',
   '6월 2일부터 6월 6일까지 네이버 블로그 5건 담당자별로 배분해줘',
   '6/10 현대자동차 블로그관리 일정 삭제해줘',
@@ -18,9 +19,27 @@ const EXAMPLES = [
 ];
 
 export default function DashboardAssistant() {
-  const { entries, assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal } = useApp();
+  const { entries, accounts, siteEntries, assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal } = useApp();
   const [input, setInput] = useState('');
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const copy = (value: string, key: string) => {
+    if (!value) return;
+    navigator.clipboard.writeText(value);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(c => (c === key ? null : c)), 1500);
+  };
+  // 라벨 + 값 + 복사 버튼
+  const field = (label: string, value: string | undefined, key: string) => value ? (
+    <div className="flex items-center gap-1.5 text-xs">
+      <span className="text-gray-400 w-12 shrink-0">{label}</span>
+      <span className="font-mono text-gray-800 truncate">{value}</span>
+      <button onClick={() => copy(value, key)} className={`shrink-0 p-0.5 rounded transition-colors ${copiedKey === key ? 'text-green-600' : 'text-gray-400 hover:text-blue-600'}`} title="복사">
+        {copiedKey === key ? <Check size={12} /> : <Copy size={12} />}
+      </button>
+    </div>
+  ) : null;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -34,7 +53,9 @@ export default function DashboardAssistant() {
   };
 
   const proposalCount = (m: AssistantMessage) =>
-    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0);
+    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0);
+
+  const opLabel = (op?: string) => op === 'delete' ? '삭제' : op === 'update' ? '수정' : '추가';
 
   const fmtCnt = (v: number | string) => (typeof v === 'number' ? v.toLocaleString('ko-KR') : (v ?? '-'));
 
@@ -46,7 +67,7 @@ export default function DashboardAssistant() {
         </div>
         <div className="min-w-0">
           <h3 className="font-bold text-gray-900 text-sm leading-tight">AI 어시스턴트</h3>
-          <p className="text-xs text-gray-400">일정·업체·인수인계 등록/수정/삭제, 배분·시간 분배, 가이드라인·외주사 안내, 키워드 조회수를 대화로 처리합니다</p>
+          <p className="text-xs text-gray-400">일정·업체·인수인계·외주사·아이디/홈페이지 목록 조회·등록·수정·삭제, 키워드 조회수까지 대화로 처리합니다</p>
         </div>
       </div>
 
@@ -93,6 +114,18 @@ export default function DashboardAssistant() {
                       <div key={`v${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                         <Boxes size={13} className="text-teal-500 shrink-0 mt-0.5" />
                         <span><strong>신규 외주사</strong> {v.name || '외주사?'}{v.services ? ` · ${v.services}` : ''}</span>
+                      </div>
+                    ))}
+                    {(m.accounts ?? []).map((a, i) => (
+                      <div key={`ac${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                        <KeyRound size={13} className="text-indigo-500 shrink-0 mt-0.5" />
+                        <span><strong>아이디 {opLabel(a.op)}</strong> {a.name || a.username || '계정?'}{a.username && a.name ? ` · ${a.username}` : ''}</span>
+                      </div>
+                    ))}
+                    {(m.sites ?? []).map((s, i) => (
+                      <div key={`st${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                        <Globe size={13} className="text-sky-500 shrink-0 mt-0.5" />
+                        <span><strong>홈페이지 {opLabel(s.op)}</strong> {s.name || '홈페이지?'}{s.description ? ` · ${s.description}` : ''}</span>
                       </div>
                     ))}
                     {(m.entries ?? []).map((e, i) => (
@@ -185,6 +218,46 @@ export default function DashboardAssistant() {
                       </table>
                     </div>
                   )
+                )}
+
+                {/* 아이디 목록 조회 결과 (복사 버튼) */}
+                {m.role === 'assistant' && (m.accountLookups?.length ?? 0) > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {m.accountLookups!.map(id => {
+                      const a = accounts.find(x => x.id === id);
+                      if (!a) return null;
+                      return (
+                        <div key={id} className="border border-indigo-100 bg-indigo-50/40 rounded-xl p-3">
+                          <p className="text-xs font-bold text-gray-900 mb-1.5 flex items-center gap-1.5"><KeyRound size={12} className="text-indigo-500" /> {a.name || a.username}</p>
+                          <div className="space-y-1">
+                            {field('아이디', a.username, `${id}:user`)}
+                            {field('비밀번호', a.password, `${id}:pw`)}
+                            {field('아이피', a.ip, `${id}:ip`)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* 홈페이지 목록 조회 결과 (복사 버튼) */}
+                {m.role === 'assistant' && (m.siteLookups?.length ?? 0) > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {m.siteLookups!.map(id => {
+                      const s = siteEntries.find(x => x.id === id);
+                      if (!s) return null;
+                      return (
+                        <div key={id} className="border border-sky-100 bg-sky-50/40 rounded-xl p-3">
+                          <p className="text-xs font-bold text-gray-900 mb-1.5 flex items-center gap-1.5"><Globe size={12} className="text-sky-500" /> {s.name}</p>
+                          <div className="space-y-1">
+                            {field('주소', s.url, `${id}:url`)}
+                            {field('아이디', s.username, `${id}:user`)}
+                            {field('비밀번호', s.password, `${id}:pw`)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             </div>
