@@ -26,7 +26,11 @@ interface HandoverRequest {
   rawText?: string;     // 붙여넣은 파일 내용 또는 대화형 입력
   instruction?: string; // 추가 지시(선택)
   existing?: ExistingDoc; // 기존 인수인계 내용(병합 참고용)
+  createClient?: boolean; // true 면 신규 업체 기본정보(client)도 함께 추출
+  knownClients?: string[]; // 기존 업체명 목록(중복 판단 참고)
 }
+
+const CATEGORIES = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
@@ -69,6 +73,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const instruction = (req.instruction ?? '').trim();
   if (!rawText && !instruction) return json({ error: '분석할 내용(붙여넣기 또는 지시)이 비어 있습니다.' }, 400);
 
+  const createClient = req.createClient === true;
   const clientName = req.clientName || '(업체명 미상)';
   const existing = req.existing ?? {};
 
@@ -77,6 +82,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '반드시 아래 JSON 객체로만 응답해(코드펜스·설명문 금지):',
     '{',
     '  "summary": "무엇을 어떻게 정리했는지 1~3문장 한국어 요약",',
+    createClient ? '  "client": { "name":"업체명", "industry":"업종", "contactPerson":"대표 담당자명", "email":"", "phone":"", "categories":[] },' : '',
     '  "overview": "업체 개요 및 현황",',
     '  "guidelines": "운영 가이드라인(게시 빈도, 컨펌 프로세스, 규칙 등)",',
     '  "tone": "톤앤매너(브랜드 보이스, 말투, 이모지 사용 등)",',
@@ -88,7 +94,12 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '}',
     '',
     '규칙:',
-    `- 대상 업체: ${clientName}.`,
+    createClient
+      ? '- 이 요청은 "신규 업체 등록 + 인수인계"를 한 번에 만드는 것이다. 입력에서 업체명을 반드시 찾아 client.name 에 넣는다(없으면 빈 문자열). industry/contactPerson/email/phone 은 아는 것만 채우고 모르면 빈 문자열.'
+      : `- 대상 업체: ${clientName}.`,
+    createClient ? `- client.categories 는 다음 중에서만 고른다: ${CATEGORIES.join(', ')}. 입력에 언급된 진행 채널에 맞게 0개 이상 선택.` : '',
+    createClient && Array.isArray(req.knownClients) && req.knownClients.length
+      ? `- 이미 등록된 업체명 목록(중복 참고): ${req.knownClients.slice(0, 200).join(', ')}. 같은 업체로 보이면 그 이름을 그대로 사용한다.` : '',
     '- 입력 자료에 근거해 각 항목을 채운다. 해당 정보가 없으면 그 항목은 빈 문자열(배열은 빈 배열)로 둔다. 절대 지어내지 말 것.',
     '- 표·목록 형태(엑셀/PPT)에서 연락처(이름·직함·전화·이메일)와 링크(URL)를 발견하면 keyContacts / importantLinks 로 구조화한다.',
     '- 기존 인수인계 내용이 주어지면, 새 자료에서 보강·추가되는 부분 위주로 정리하되 기존의 유효한 내용을 함부로 삭제하지 말고 통합한다.',
@@ -100,7 +111,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       tone: asString(existing.tone), dontDo: asString(existing.dontDo),
       specialNotes: asString(existing.specialNotes), managerMemo: asString(existing.managerMemo),
     }),
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   const userInput = [
     instruction ? `[추가 지시]\n${instruction}` : '',
@@ -146,8 +157,19 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const contacts = Array.isArray(parsed.keyContacts) ? parsed.keyContacts : [];
   const links = Array.isArray(parsed.importantLinks) ? parsed.importantLinks : [];
+  const rawClient = (parsed.client && typeof parsed.client === 'object') ? parsed.client as Record<string, unknown> : null;
+  const client = createClient && rawClient ? {
+    name: asString(rawClient.name),
+    industry: asString(rawClient.industry),
+    contactPerson: asString(rawClient.contactPerson),
+    email: asString(rawClient.email),
+    phone: asString(rawClient.phone),
+    categories: (Array.isArray(rawClient.categories) ? rawClient.categories : [])
+      .map((c: unknown) => asString(c)).filter((c: string) => CATEGORIES.includes(c)),
+  } : undefined;
 
   return json({
+    ...(client ? { client } : {}),
     summary: asString(parsed.summary),
     overview: asString(parsed.overview),
     guidelines: asString(parsed.guidelines),

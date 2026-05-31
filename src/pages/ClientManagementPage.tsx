@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   Plus, Mail, Calendar, X, Pencil, Users, Phone, Save, Check, Copy, Sparkles,
   Link2, FileText, AlertTriangle, MessageSquare, BookOpen, ChevronDown, ChevronUp,
-  Trash2, ImageIcon, Download, Wallet, Wand2, Loader2,
+  Trash2, ImageIcon, Download, Wallet, Wand2, Loader2, Search,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
@@ -32,6 +32,8 @@ interface AiHandoverResult {
   managerMemo: string;
   keyContacts: KeyContact[];
   importantLinks: ImportantLink[];
+  // 'new' 모드일 때 추출된 신규 업체 기본 정보
+  client?: { name: string; industry: string; contactPerson: string; email: string; phone: string; categories: Category[] };
 }
 
 type DetailTab = 'overview' | 'schedule' | 'budget' | 'contacts' | 'guidelines' | 'memo' | 'ai' | 'prompt';
@@ -164,6 +166,7 @@ export default function ClientManagementPage() {
   const [editClient, setEditClient] = useState<Client | null>(null);
   const [form, setForm] = useState<Omit<Client, 'id'>>(EMPTY_CLIENT);
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [search, setSearch] = useState('');
 
   // 상세 화면 탭 + 인수인계 인라인 편집 상태
   const [tab, setTab] = useState<DetailTab>('overview');
@@ -175,8 +178,9 @@ export default function ClientManagementPage() {
   const [budgetEditing, setBudgetEditing] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState<BudgetItem[]>([]);
 
-  // AI 인수인계 자동 채우기 모달 상태
+  // AI 인수인계 자동 채우기 모달 상태 ('fill'=선택 업체 채우기, 'new'=업체+인수인계 한 번에 생성)
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiMode, setAiMode] = useState<'fill' | 'new'>('fill');
   const [aiText, setAiText] = useState('');
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
@@ -185,7 +189,11 @@ export default function ClientManagementPage() {
 
   // Sort: active → pending → inactive
   const sorted = [...clients].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
-  const filtered = sorted.filter(c => filterStatus === 'all' || c.status === filterStatus);
+  const q = search.trim().toLowerCase();
+  const filtered = sorted.filter(c =>
+    (filterStatus === 'all' || c.status === filterStatus) &&
+    (!q || c.name.toLowerCase().includes(q) || (c.industry ?? '').toLowerCase().includes(q))
+  );
 
   const resetSubStates = () => {
     setHoEditing(false); setHoDraft(null);
@@ -206,7 +214,7 @@ export default function ClientManagementPage() {
   const openEdit = (c: Client) => { setForm({ ...c }); setEditClient(c); setShowForm(true); };
 
   const handleSave = () => {
-    if (!form.name || !form.email) { alert('업체명과 이메일은 필수입니다.'); return; }
+    if (!form.name) { alert('업체명은 필수입니다.'); return; }
     if (editClient) {
       const updated = { ...form, id: editClient.id };
       saveClient(updated);
@@ -294,9 +302,13 @@ export default function ClientManagementPage() {
   const removeBudgetItem = (id: string) => setBudgetDraft(d => d.filter(b => b.id !== id));
   const updateBudgetItem = (id: string, patch: Partial<BudgetItem>) => setBudgetDraft(d => d.map(b => b.id === id ? { ...b, ...patch } : b));
 
-  // ── AI 인수인계 자동 채우기 ──
+  // ── AI 인수인계 자동 채우기 / 업체+인수인계 한 번에 생성 ──
+  const openAiFill = () => { setAiMode('fill'); setAiText(''); setAiInstruction(''); setAiResult(null); setAiError(''); setAiOpen(true); };
+  const openAiNew = () => { setAiMode('new'); setAiText(''); setAiInstruction(''); setAiResult(null); setAiError(''); setAiOpen(true); };
+
   const runAiHandover = async () => {
-    if (!selected || (!aiText.trim() && !aiInstruction.trim())) return;
+    if (aiMode === 'fill' && !selected) return;
+    if (!aiText.trim() && !aiInstruction.trim()) return;
     setAiLoading(true);
     setAiError('');
     setAiResult(null);
@@ -305,14 +317,16 @@ export default function ClientManagementPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          clientName: selected.name,
+          clientName: aiMode === 'fill' ? selected?.name : '',
+          createClient: aiMode === 'new',
+          knownClients: aiMode === 'new' ? clients.map(c => c.name) : undefined,
           rawText: aiText,
           instruction: aiInstruction,
-          existing: {
+          existing: aiMode === 'fill' ? {
             overview: handoverDoc?.overview, guidelines: handoverDoc?.guidelines,
             tone: handoverDoc?.tone, dontDo: handoverDoc?.dontDo,
             specialNotes: handoverDoc?.specialNotes, managerMemo: handoverDoc?.managerMemo,
-          },
+          } : undefined,
         }),
       });
       const contentType = res.headers.get('content-type') ?? '';
@@ -321,11 +335,16 @@ export default function ClientManagementPage() {
       }
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.detail ? `${data.error} — ${data.detail}` : (data.error ?? `요청 실패 (${res.status})`));
+      const cats = Array.isArray(data.client?.categories) ? data.client.categories.filter((x: string) => (ALL_CATEGORIES as string[]).includes(x)) : [];
       setAiResult({
         summary: data.summary ?? '', overview: data.overview ?? '', guidelines: data.guidelines ?? '',
         tone: data.tone ?? '', dontDo: data.dontDo ?? '', specialNotes: data.specialNotes ?? '', managerMemo: data.managerMemo ?? '',
         keyContacts: Array.isArray(data.keyContacts) ? data.keyContacts : [],
         importantLinks: Array.isArray(data.importantLinks) ? data.importantLinks : [],
+        client: aiMode === 'new' && data.client ? {
+          name: data.client.name ?? '', industry: data.client.industry ?? '', contactPerson: data.client.contactPerson ?? '',
+          email: data.client.email ?? '', phone: data.client.phone ?? '', categories: cats as Category[],
+        } : undefined,
       });
     } catch (e) {
       setAiError(e instanceof Error ? e.message : 'AI 분석 중 오류가 발생했습니다.');
@@ -334,33 +353,68 @@ export default function ClientManagementPage() {
     }
   };
 
-  // AI 결과를 인수인계 편집 초안에 병합(빈 항목만 채우거나 덮어쓰기) → 사용자가 검토 후 저장
-  const applyAiHandover = () => {
-    if (!selected || !aiResult) return;
+  // AI 결과를 인수인계 항목으로 합치는 공통 로직
+  const buildHandoverFromAi = (base: HandoverDoc, r: AiHandoverResult): HandoverDoc => {
+    const merge = (cur: string, next: string) => next.trim() ? (cur.trim() ? `${cur}\n\n${next}` : next) : cur;
+    const newContacts: KeyContact[] = r.keyContacts.filter(c => c.name || c.role)
+      .map((c, i) => ({ id: `ai-c-${Date.now()}-${i}`, name: c.name || '', role: c.role || '', phone: c.phone || '', email: c.email || '', notes: c.notes || '' }));
+    const newLinks: ImportantLink[] = r.importantLinks.filter(l => l.title || l.url)
+      .map((l, i) => ({ id: `ai-l-${Date.now()}-${i}`, title: l.title || '', url: l.url || '', category: l.category || 'SNS', notes: l.notes || '' }));
+    return {
+      ...base,
+      overview: merge(base.overview, r.overview),
+      guidelines: merge(base.guidelines, r.guidelines),
+      tone: merge(base.tone, r.tone),
+      dontDo: merge(base.dontDo, r.dontDo),
+      specialNotes: merge(base.specialNotes, r.specialNotes),
+      managerMemo: merge(base.managerMemo, r.managerMemo),
+      keyContacts: [...base.keyContacts, ...newContacts],
+      importantLinks: [...base.importantLinks, ...newLinks],
+    };
+  };
+
+  const closeAi = () => { setAiOpen(false); setAiText(''); setAiInstruction(''); setAiResult(null); setAiError(''); };
+
+  // 'fill': 선택 업체의 인수인계 초안에 병합 → 검토 후 저장
+  // 'new' : 신규 업체 생성 + 인수인계 문서 저장 → 해당 업체 상세로 이동
+  const handleApplyAi = () => {
+    if (!aiResult) return;
+    if (aiMode === 'new') {
+      const name = aiResult.client?.name?.trim();
+      if (!name) { setAiError('업체명을 추출하지 못했습니다. 설명에 업체명을 포함해 다시 시도하세요.'); return; }
+      const existing = clients.find(c => c.name === name);
+      const client: Client = existing
+        ? existing
+        : {
+            id: `cl-${name.replace(/\s+/g, '-')}`,
+            name,
+            industry: aiResult.client?.industry || '',
+            contactPerson: aiResult.client?.contactPerson || '',
+            email: aiResult.client?.email || '',
+            phone: aiResult.client?.phone || '',
+            startDate: todayStr(),
+            categories: aiResult.client?.categories ?? [],
+            status: 'active',
+            description: '',
+            budgetItems: [],
+          };
+      if (!existing) saveClient(client);
+      const doc = buildHandoverFromAi(emptyHandover(client), aiResult);
+      saveHandover({ ...doc, updatedAt: todayStr(), authorId: user?.id ?? '', authorName: user?.name ?? '' });
+      closeAi();
+      setSelected(client);
+      setTab('overview');
+      setHoEditing(false); setHoDraft(null);
+      return;
+    }
+    // fill 모드
+    if (!selected) return;
     const base = handoverDoc
       ? { ...handoverDoc, keyContacts: handoverDoc.keyContacts.map(c => ({ ...c })), importantLinks: handoverDoc.importantLinks.map(l => ({ ...l })) }
       : emptyHandover(selected);
-    const merge = (cur: string, next: string) => next.trim() ? (cur.trim() ? `${cur}\n\n${next}` : next) : cur;
-    const newContacts: KeyContact[] = aiResult.keyContacts
-      .filter(c => c.name || c.role)
-      .map((c, i) => ({ id: `ai-c-${Date.now()}-${i}`, name: c.name || '', role: c.role || '', phone: c.phone || '', email: c.email || '', notes: c.notes || '' }));
-    const newLinks: ImportantLink[] = aiResult.importantLinks
-      .filter(l => l.title || l.url)
-      .map((l, i) => ({ id: `ai-l-${Date.now()}-${i}`, title: l.title || '', url: l.url || '', category: l.category || 'SNS', notes: l.notes || '' }));
-    setHoDraft({
-      ...base,
-      overview: merge(base.overview, aiResult.overview),
-      guidelines: merge(base.guidelines, aiResult.guidelines),
-      tone: merge(base.tone, aiResult.tone),
-      dontDo: merge(base.dontDo, aiResult.dontDo),
-      specialNotes: merge(base.specialNotes, aiResult.specialNotes),
-      managerMemo: merge(base.managerMemo, aiResult.managerMemo),
-      keyContacts: [...base.keyContacts, ...newContacts],
-      importantLinks: [...base.importantLinks, ...newLinks],
-    });
+    setHoDraft(buildHandoverFromAi(base, aiResult));
     setHoEditing(true);
-    setAiOpen(false);
-    setAiText(''); setAiInstruction(''); setAiResult(null); setAiError('');
+    closeAi();
     setTab('overview');
   };
 
@@ -454,7 +508,7 @@ export default function ClientManagementPage() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <button onClick={() => setAiOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-colors">
+                    <button onClick={openAiFill} className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-colors">
                       <Wand2 size={13} /> AI로 채우기
                     </button>
                     <button onClick={startHoEdit} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors">
@@ -869,22 +923,45 @@ export default function ClientManagementPage() {
           /* === Client List === */
           <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex gap-2 flex-wrap">
-                {['all', 'active', 'pending', 'inactive'].map(s => (
-                  <button key={s} onClick={() => setFilterStatus(s)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filterStatus === s ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                    {s === 'all' ? '전체' : s === 'active' ? '활성' : s === 'pending' ? '대기' : '비활성'}
-                    <span className="ml-1.5 text-xs opacity-75">
-                      ({s === 'all' ? clients.length : clients.filter(c => c.status === s).length})
-                    </span>
+              <div className="relative flex-1 min-w-[200px] max-w-sm">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="업체명·업종 검색"
+                  className="w-full border border-gray-200 rounded-xl pl-9 pr-9 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                {search && (
+                  <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600">
+                    <X size={14} />
                   </button>
-                ))}
+                )}
               </div>
-              <button onClick={openAdd}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors">
-                <Plus size={16} /> 클라이언트 추가
-              </button>
+              <div className="flex gap-2 flex-wrap">
+                <button onClick={openAiNew}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-xl transition-colors">
+                  <Wand2 size={16} /> AI로 업체 추가
+                </button>
+                <button onClick={openAdd}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors">
+                  <Plus size={16} /> 클라이언트 추가
+                </button>
+              </div>
             </div>
+
+            <div className="flex gap-2 flex-wrap">
+              {['all', 'active', 'pending', 'inactive'].map(s => (
+                <button key={s} onClick={() => setFilterStatus(s)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filterStatus === s ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                  {s === 'all' ? '전체' : s === 'active' ? '활성' : s === 'pending' ? '대기' : '비활성'}
+                  <span className="ml-1.5 text-xs opacity-75">
+                    ({s === 'all' ? clients.length : clients.filter(c => c.status === s).length})
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {filtered.length === 0 && (
+              <div className="bg-white rounded-2xl border border-gray-100 py-12 text-center text-sm text-gray-400">
+                {q ? `'${search}'에 해당하는 업체가 없습니다.` : '등록된 클라이언트가 없습니다.'}
+              </div>
+            )}
 
             <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {filtered.map(client => {
@@ -941,7 +1018,7 @@ export default function ClientManagementPage() {
                   { label: '업체명 *', key: 'name', placeholder: '스타벅스 코리아' },
                   { label: '업종', key: 'industry', placeholder: '식음료' },
                   { label: '담당자 이름', key: 'contactPerson', placeholder: '홍길동' },
-                  { label: '이메일 *', key: 'email', placeholder: 'contact@company.com' },
+                  { label: '이메일', key: 'email', placeholder: 'contact@company.com' },
                   { label: '연락처', key: 'phone', placeholder: '02-1234-5678' },
                   { label: '계약 시작일', key: 'startDate', type: 'date', placeholder: '' },
                   { label: '계약 종료일', key: 'contractEnd', type: 'date', placeholder: '' },
@@ -998,27 +1075,29 @@ export default function ClientManagementPage() {
         </div>
       )}
 
-      {/* AI 인수인계 자동 채우기 모달 */}
-      {aiOpen && selected && (
+      {/* AI 인수인계 / 업체 자동 생성 모달 */}
+      {aiOpen && (selected || aiMode === 'new') && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center text-white"><Wand2 size={16} /></div>
                 <div>
-                  <h2 className="text-base font-bold text-gray-900">AI 인수인계 자동 채우기</h2>
-                  <p className="text-xs text-gray-400">{selected.name} · 대화형 설명 또는 기존 파일(엑셀·PPT) 내용 붙여넣기</p>
+                  <h2 className="text-base font-bold text-gray-900">{aiMode === 'new' ? 'AI로 업체 + 인수인계 한 번에 추가' : 'AI 인수인계 자동 채우기'}</h2>
+                  <p className="text-xs text-gray-400">{aiMode === 'new' ? '업체 소개와 인수인계 내용을 한 번에 설명하면 업체 등록부터 인수인계까지 만들어집니다' : `${selected?.name} · 대화형 설명 또는 기존 파일(엑셀·PPT) 내용 붙여넣기`}</p>
                 </div>
               </div>
-              <button onClick={() => setAiOpen(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18} /></button>
+              <button onClick={closeAi} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18} /></button>
             </div>
 
             <div className="px-6 py-5 space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">자료 내용 (붙여넣기)</label>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">{aiMode === 'new' ? '업체 + 인수인계 설명 (붙여넣기/대화형)' : '자료 내용 (붙여넣기)'}</label>
                 <textarea value={aiText} onChange={e => setAiText(e.target.value)} rows={8}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
-                  placeholder={'기존 인수인계 엑셀/PPT/문서 내용을 복사해 붙여넣거나, 업체에 대해 아는 내용을 자유롭게 적어주세요.\n예) 담당자 박현수 팀장 010-1234-5678, 컨펌은 오전 중 카톡으로. 경쟁사 언급 금지. 매주 화/목 블로그 2건...'} />
+                  placeholder={aiMode === 'new'
+                    ? '예) 그린마취통증의학과 새로 추가해줘. 통증의학과이고 네이버 블로그·여론작업 진행. 담당자 김원장 010-1234-5678. 컨펌은 오전 중 카톡, 경쟁 병원 언급 금지, 시술 전후 사진은 본인 동의받은 것만 사용...'
+                    : '기존 인수인계 엑셀/PPT/문서 내용을 복사해 붙여넣거나, 업체에 대해 아는 내용을 자유롭게 적어주세요.\n예) 담당자 박현수 팀장 010-1234-5678, 컨펌은 오전 중 카톡으로. 경쟁사 언급 금지. 매주 화/목 블로그 2건...'} />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">추가 지시 (선택)</label>
@@ -1033,6 +1112,14 @@ export default function ClientManagementPage() {
                 <div className="border border-purple-100 bg-purple-50/40 rounded-xl p-4 space-y-2">
                   <p className="text-xs font-bold text-purple-700">정리 결과 미리보기</p>
                   {aiResult.summary && <p className="text-xs text-gray-600">{aiResult.summary}</p>}
+                  {aiMode === 'new' && (
+                    <div className="text-xs text-gray-700 bg-white border border-purple-100 rounded-lg px-3 py-2">
+                      <span className="font-semibold text-purple-700">신규 업체</span>{' '}
+                      {aiResult.client?.name
+                        ? <>{aiResult.client.name}{aiResult.client.industry ? ` · ${aiResult.client.industry}` : ''}{aiResult.client.contactPerson ? ` · 담당 ${aiResult.client.contactPerson}` : ''}{aiResult.client.categories?.length ? ` · ${aiResult.client.categories.join(', ')}` : ''}{clients.some(c => c.name === aiResult.client?.name) ? ' (이미 존재 — 기존 업체에 연결)' : ''}</>
+                        : <span className="text-red-500">업체명을 추출하지 못했습니다. 설명에 업체명을 포함해 주세요.</span>}
+                    </div>
+                  )}
                   <div className="space-y-1.5 text-xs text-gray-700">
                     {([
                       ['개요', aiResult.overview], ['가이드라인', aiResult.guidelines], ['톤앤매너', aiResult.tone],
@@ -1043,20 +1130,24 @@ export default function ClientManagementPage() {
                     {aiResult.keyContacts.length > 0 && <div><span className="font-semibold text-gray-500">연락처:</span> {aiResult.keyContacts.map(c => c.name || c.role).filter(Boolean).join(', ')} ({aiResult.keyContacts.length}명)</div>}
                     {aiResult.importantLinks.length > 0 && <div><span className="font-semibold text-gray-500">링크:</span> {aiResult.importantLinks.length}개</div>}
                   </div>
-                  <p className="text-[11px] text-gray-400">적용하면 인수인계 편집 모드로 들어가며, 기존 내용에 합쳐집니다. 검토 후 '인수인계 저장'을 눌러야 최종 반영됩니다.</p>
+                  <p className="text-[11px] text-gray-400">
+                    {aiMode === 'new'
+                      ? '적용하면 업체가 즉시 등록되고 인수인계 문서가 생성됩니다. 이후 상세에서 수정할 수 있습니다.'
+                      : "적용하면 인수인계 편집 모드로 들어가며, 기존 내용에 합쳐집니다. 검토 후 '인수인계 저장'을 눌러야 최종 반영됩니다."}
+                  </p>
                 </div>
               )}
             </div>
 
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
-              <button onClick={() => setAiOpen(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">닫기</button>
+              <button onClick={closeAi} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">닫기</button>
               {aiResult ? (
                 <>
                   <button onClick={runAiHandover} disabled={aiLoading}
                     className="flex items-center gap-1.5 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors">
                     {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />} 다시 분석
                   </button>
-                  <button onClick={applyAiHandover}
+                  <button onClick={handleApplyAi}
                     className="flex items-center gap-1.5 px-5 py-2 text-sm font-semibold text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors">
                     <Check size={14} /> 적용하기
                   </button>

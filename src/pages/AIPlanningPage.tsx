@@ -114,7 +114,8 @@ export default function AIPlanningPage() {
   // 새 기획: 진행/완료된 작업 추적을 해제해 effect가 다시 결과로 끌고가지 않도록 한 뒤 폼으로
   const startNew = () => { clearActiveAiPlan(); setViewingId(null); setStep(1); };
 
-  const canAnalyze = file && clientId && period.start && period.end && campaignType;
+  // 시작일·종료일은 선택값(미입력 시 기간 미지정으로 진행)
+  const canAnalyze = file && clientId && campaignType;
 
   return (
     <Layout>
@@ -229,12 +230,12 @@ export default function AIPlanningPage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">시작일 *</label>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">시작일 (선택)</label>
                     <input type="date" value={period.start} onChange={e => setPeriod(p => ({ ...p, start: e.target.value }))}
                       className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">종료일 *</label>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">종료일 (선택)</label>
                     <input type="date" value={period.end} onChange={e => setPeriod(p => ({ ...p, end: e.target.value }))}
                       className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
