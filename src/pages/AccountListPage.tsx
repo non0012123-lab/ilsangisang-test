@@ -5,7 +5,14 @@ import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 import type { AccountEntry } from '../types';
 
-const EMPTY: Omit<AccountEntry, 'id'> = { name: '', username: '', password: '', category: '', ip: '' };
+const EMPTY: Omit<AccountEntry, 'id'> = { name: '', platform: '', grade: '', ownership: undefined, username: '', password: '', category: '', ip: '' };
+
+const PLATFORMS = ['블로그', 'SNS', '유튜브', '기타'];
+// 블로그 등급: 준최2~준최6, 최적1~최적4
+const BLOG_GRADES = ['준최2', '준최3', '준최4', '준최5', '준최6', '최적1', '최적2', '최적3', '최적4'];
+const OWNERSHIP_LABEL: Record<string, string> = { client: '업체 소유', inhouse: '사내' };
+const platformBadge: Record<string, string> = { '블로그': 'bg-green-50 text-green-700', 'SNS': 'bg-pink-50 text-pink-700', '유튜브': 'bg-red-50 text-red-700', '기타': 'bg-gray-100 text-gray-600' };
+const gradeBadge = (g: string) => g.startsWith('최적') ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700';
 
 // 프로그램 메모장 양식: 아이디,비밀번호,카테고리,아이피 (4칸 순번 고정)
 // 카테고리가 비어 있어도 3번째 칸에는 '카테고리(생략가능)' 문자가 그대로 들어간다.
@@ -18,6 +25,9 @@ function memoFormat(a: { username?: string; password?: string; category?: string
 export default function AccountListPage() {
   const { accounts, saveAccount, removeAccount } = useApp();
   const [search, setSearch] = useState('');
+  const [filterPlatform, setFilterPlatform] = useState<string>('all');
+  const [filterOwnership, setFilterOwnership] = useState<string>('all');
+  const [filterGrade, setFilterGrade] = useState<string>('all');
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<AccountEntry, 'id'>>(EMPTY);
@@ -32,11 +42,14 @@ export default function AccountListPage() {
 
   const q = search.trim().toLowerCase();
   const filtered = accounts.filter(a =>
-    !q || a.name.toLowerCase().includes(q) || a.username.toLowerCase().includes(q) || (a.category ?? '').toLowerCase().includes(q) || (a.ip ?? '').toLowerCase().includes(q)
+    (filterPlatform === 'all' || (a.platform || '기타') === filterPlatform) &&
+    (filterOwnership === 'all' || (a.ownership ?? '') === filterOwnership) &&
+    (filterGrade === 'all' || (a.grade ?? '') === filterGrade) &&
+    (!q || a.name.toLowerCase().includes(q) || a.username.toLowerCase().includes(q) || (a.category ?? '').toLowerCase().includes(q) || (a.ip ?? '').toLowerCase().includes(q))
   );
 
   const openAdd = () => { setForm(EMPTY); setEditId(null); setShowForm(true); };
-  const openEdit = (a: AccountEntry) => { setForm({ name: a.name, username: a.username, password: a.password, category: a.category ?? '', ip: a.ip ?? '' }); setEditId(a.id); setShowForm(true); };
+  const openEdit = (a: AccountEntry) => { setForm({ name: a.name, platform: a.platform ?? '', grade: a.grade ?? '', ownership: a.ownership, username: a.username, password: a.password, category: a.category ?? '', ip: a.ip ?? '' }); setEditId(a.id); setShowForm(true); };
 
   const handleSave = () => {
     if (!form.name.trim() && !form.username.trim()) { alert('이름 또는 아이디는 입력해야 합니다.'); return; }
@@ -75,6 +88,39 @@ export default function AccountListPage() {
           </button>
         </div>
 
+        {/* 구분/소유 필터 */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex gap-1.5 flex-wrap items-center">
+            <span className="text-xs font-semibold text-gray-400 mr-0.5">구분</span>
+            {['all', ...PLATFORMS].map(p => (
+              <button key={p} onClick={() => setFilterPlatform(p)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${filterPlatform === p ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                {p === 'all' ? '전체' : p}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1.5 flex-wrap items-center">
+            <span className="text-xs font-semibold text-gray-400 mr-0.5">소유</span>
+            {[['all', '전체'], ['client', '업체 소유'], ['inhouse', '사내']].map(([v, label]) => (
+              <button key={v} onClick={() => setFilterOwnership(v)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${filterOwnership === v ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {(filterPlatform === '블로그' || accounts.some(a => a.grade)) && (
+            <div className="flex gap-1.5 flex-wrap items-center">
+              <span className="text-xs font-semibold text-gray-400 mr-0.5">블로그 등급</span>
+              <button onClick={() => setFilterGrade('all')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${filterGrade === 'all' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>전체</button>
+              {BLOG_GRADES.map(g => (
+                <button key={g} onClick={() => setFilterGrade(g)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${filterGrade === g ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{g}</button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <p className="text-xs text-gray-400">메모장 양식은 <strong>아이디,비밀번호,(카테고리),아이피</strong> 순으로 자동 생성됩니다. 셀의 복사 버튼으로 바로 복사하세요.</p>
 
         {filtered.length === 0 ? (
@@ -87,7 +133,7 @@ export default function AccountListPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
-                    {['이름', '아이디', '비밀번호', '카테고리', '아이피', '메모장 양식', ''].map((h, i) => (
+                    {['이름', '구분', '소유', '아이디', '비밀번호', '카테고리', '아이피', '메모장 양식', ''].map((h, i) => (
                       <th key={i} className="text-left text-xs font-semibold text-gray-500 px-4 py-2.5 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -96,17 +142,25 @@ export default function AccountListPage() {
                   {filtered.map(a => (
                     <tr key={a.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{a.name || '-'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          {a.platform ? <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${platformBadge[a.platform] ?? 'bg-gray-100 text-gray-600'}`}>{a.platform}</span> : <span className="text-gray-300 text-xs">-</span>}
+                          {a.grade && <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${gradeBadge(a.grade)}`}>{a.grade}</span>}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {a.ownership ? <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${a.ownership === 'client' ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-700'}`}>{OWNERSHIP_LABEL[a.ownership]}</span> : <span className="text-gray-300 text-xs">-</span>}
+                      </td>
                       <td className="px-4 py-3 whitespace-nowrap">{copyCell(a.username, `${a.id}:user`)}</td>
                       <td className="px-4 py-3 whitespace-nowrap">{copyCell(a.password, `${a.id}:pw`)}</td>
                       <td className="px-4 py-3 text-gray-600 text-xs whitespace-nowrap">{a.category || <span className="text-gray-300">생략</span>}</td>
                       <td className="px-4 py-3 whitespace-nowrap">{copyCell(a.ip, `${a.id}:ip`)}</td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <code className="text-[11px] bg-gray-50 border border-gray-100 rounded px-2 py-1 text-gray-700 whitespace-nowrap">{memoFormat(a)}</code>
-                          <button onClick={() => copy(memoFormat(a), `${a.id}:memo`)} className={`shrink-0 p-1 rounded transition-colors ${copiedKey === `${a.id}:memo` ? 'text-green-600' : 'text-gray-400 hover:text-blue-600'}`} title="메모장 양식 복사">
-                            {copiedKey === `${a.id}:memo` ? <Check size={13} /> : <Copy size={13} />}
-                          </button>
-                        </div>
+                        <button onClick={() => copy(memoFormat(a), `${a.id}:memo`)}
+                          className={`inline-flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${copiedKey === `${a.id}:memo` ? 'border-green-200 bg-green-50 text-green-600' : 'border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-200'}`}
+                          title={`메모장 양식 복사: ${memoFormat(a)}`}>
+                          {copiedKey === `${a.id}:memo` ? <Check size={14} /> : <Copy size={14} />}
+                        </button>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex items-center gap-1">
@@ -136,9 +190,40 @@ export default function AccountListPage() {
             <div className="px-6 py-5 space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">이름</label>
-                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="예: 우리본병원 (블로그/SNS/유튜브 등)"
+                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="예: 우리본병원"
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">구분</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PLATFORMS.map(p => (
+                      <button key={p} type="button" onClick={() => setForm(f => ({ ...f, platform: f.platform === p ? '' : p }))}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${form.platform === p ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'}`}>{p}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">소유</label>
+                  <select value={form.ownership ?? ''} onChange={e => setForm(f => ({ ...f, ownership: (e.target.value || undefined) as AccountEntry['ownership'] }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">선택 안 함</option>
+                    <option value="client">업체 소유</option>
+                    <option value="inhouse">사내</option>
+                  </select>
+                </div>
+              </div>
+              {form.platform === '블로그' && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">블로그 등급</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {BLOG_GRADES.map(g => (
+                      <button key={g} type="button" onClick={() => setForm(f => ({ ...f, grade: f.grade === g ? '' : g }))}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${form.grade === g ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'}`}>{g}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">아이디</label>

@@ -51,7 +51,7 @@ interface CtxVendor {
   notes?: string;
 }
 
-interface CtxAccount { id?: string; name?: string; username?: string; password?: string; category?: string; ip?: string }
+interface CtxAccount { id?: string; name?: string; platform?: string; grade?: string; ownership?: string; username?: string; password?: string; category?: string; ip?: string }
 interface CtxSite { id?: string; name?: string; url?: string; username?: string; password?: string; description?: string }
 
 interface AssistantRequest {
@@ -162,9 +162,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   // 아이디 목록 / 홈페이지 목록 (조회·수정·삭제 시 id 사용)
   // 비밀번호는 컨텍스트에 포함하지 않는다 — 조회는 id 로 식별만 하고 실제 값은 프론트가 표시한다.
   const accounts = (Array.isArray(req.accounts) ? req.accounts : []).slice(0, 300);
+  const ownLabel = (o?: string) => o === 'client' ? '업체소유' : o === 'inhouse' ? '사내' : '';
   const accountContext = accounts
     .map(a => a.name || a.username
-      ? `■ id=${a.id ?? '?'} | 이름:${a.name ?? '-'} | 아이디:${a.username ?? '-'}${a.category ? ` | 카테고리:${a.category}` : ''}${a.ip ? ` | IP:${a.ip}` : ''}`
+      ? `■ id=${a.id ?? '?'} | 이름:${a.name ?? '-'}${a.platform ? ` | 구분:${a.platform}` : ''}${a.grade ? ` | 등급:${a.grade}` : ''}${a.ownership ? ` | 소유:${ownLabel(a.ownership)}` : ''} | 아이디:${a.username ?? '-'}${a.category ? ` | 카테고리:${a.category}` : ''}${a.ip ? ` | IP:${a.ip}` : ''}`
       : '')
     .filter(Boolean).join('\n');
   const sites = (Array.isArray(req.sites) ? req.sites : []).slice(0, 300);
@@ -185,7 +186,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  "clients": [ { "name":"", "industry":"", "categories":[], "contactPerson":"", "phone":"", "email":"" } ],',
     '  "handovers": [ { "clientName":"", "overview":"" } ],',
     '  "vendors": [ { "name":"", "services":"", "contactPerson":"", "phone":"", "email":"", "pricing":"", "notes":"" } ],',
-    '  "accounts": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "username":"", "password":"", "category":"", "ip":"" } ],',
+    '  "accounts": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "platform":"블로그|SNS|유튜브|기타", "grade":"블로그 등급(준최2~준최6/최적1~최적4)", "ownership":"client|inhouse", "username":"", "password":"", "category":"", "ip":"" } ],',
     '  "sites": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "url":"", "username":"", "password":"", "description":"" } ],',
     '  "accountLookups": [ "조회 질문일 때 답으로 보여줄 아이디 목록 id" ],',
     '  "siteLookups": [ "조회 질문일 때 답으로 보여줄 홈페이지 id" ],',
@@ -209,6 +210,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 아이디 목록 조회("○○ 아이디/비번 뭐야?", "△△ 계정 정보 알려줘"): 비밀번호는 컨텍스트에 없고 화면에서 직접 보여주므로, 매칭되는 항목의 id 를 accountLookups 에 담는다(여러 개면 모두). reply 에는 "아래에서 아이디·비번·아이피를 복사하세요" 정도로 짧게 답하고, 비번 값을 지어내지 말 것. 일치 항목이 없으면 빈 배열 + reply 에서 되묻기.',
     '- 홈페이지 목록 조회("문자발송 사이트 비번?", "○○ 홈페이지 계정"): 매칭 항목 id 를 siteLookups 에 담고 reply 는 짧게. 비번은 화면에서 보여준다.',
     '- 추가/수정/삭제 요청이면 accounts/sites 에 op(add/update/delete)로 담는다(수정·삭제는 id 사용). 조회만 할 때는 lookups 만 채우고 op 배열은 비운다.',
+    '- 아이디 목록 항목은 구분(platform: 블로그/SNS/유튜브/기타)과 소유(ownership: client=업체소유, inhouse=사내)를 가진다. 추가/수정 시 사용자 표현에 맞게 채우고, "유튜브 계정 목록", "사내 계정 알려줘" 같은 조회는 이 값으로 필터해 해당 id 들을 accountLookups 에 담는다.',
+    '- 블로그(platform=블로그)는 등급(grade)을 가진다: 준최2/준최3/준최4/준최5/준최6, 최적1/최적2/최적3/최적4. "최적3 블로그 보여줘", "준최 블로그 목록" 같은 조회는 grade 로 필터해 accountLookups 에 담고, 추가/수정 시 grade 를 채운다. 블로그가 아니면 grade 는 비운다.',
     '- accounts/sites 의 추가/수정/삭제를 제안할 때는 reply 에 무엇을 할지 요약하고 "적용"을 안내한다. 조회·답변만 할 때는 모든 액션 배열을 비운다.',
     '- managerName 은 아래 "담당자 목록" 중 가장 가까운 값, clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
     '- 기간 작업이 아니면 endDate 는 null. status 미지정이면 "pending".',

@@ -364,7 +364,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 아이디 목록 / 홈페이지 목록 (조회·수정·삭제 시 id 사용)
     // 비밀번호는 AI(OpenAI)로 보내지 않는다 — 조회는 id로 식별 후 프론트가 실제 값을 복사 카드로 보여준다.
     const accountContext = accountsRef.current.map(a => ({
-      id: a.id, name: a.name, username: a.username, category: a.category, ip: a.ip,
+      id: a.id, name: a.name, platform: a.platform, grade: a.grade, ownership: a.ownership, username: a.username, category: a.category, ip: a.ip,
     }));
     const siteContext = siteEntriesRef.current.map(s => ({
       id: s.id, name: s.name, url: s.url, username: s.username, description: s.description,
@@ -571,11 +571,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const cur = accountsRef.current.find(x => x.id === a.id);
         if (!cur) return;
         undo.updatedAccountsPrev.push({ ...cur });
-        saveAccount({ ...cur, name: a.name ?? cur.name, username: a.username ?? cur.username, password: a.password ?? cur.password, category: a.category ?? cur.category, ip: a.ip ?? cur.ip });
+        saveAccount({ ...cur, name: a.name ?? cur.name, platform: a.platform ?? cur.platform, grade: a.grade ?? cur.grade, ownership: a.ownership ?? cur.ownership, username: a.username ?? cur.username, password: a.password ?? cur.password, category: a.category ?? cur.category, ip: a.ip ?? cur.ip });
         count += 1;
       } else if (a.name || a.username) {
         const id = `ac-${Date.now()}-${i}`;
-        saveAccount({ id, name: a.name || '', username: a.username || '', password: a.password || '', category: a.category || '', ip: a.ip || '' });
+        saveAccount({ id, name: a.name || '', platform: a.platform || '', grade: a.grade || '', ownership: a.ownership, username: a.username || '', password: a.password || '', category: a.category || '', ip: a.ip || '' });
         undo.accountIds.push(id);
         count += 1;
       }

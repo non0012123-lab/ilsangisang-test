@@ -69,7 +69,7 @@ export interface AssistantProposalClient { name?: string; industry?: string; cat
 export interface AssistantProposalHandover { clientName?: string; overview?: string }
 export interface AssistantProposalVendor { name?: string; services?: string; contactPerson?: string; phone?: string; email?: string; pricing?: string; notes?: string }
 // 아이디 목록/홈페이지 목록은 추가·수정·삭제를 op 로 구분
-export interface AssistantAccountOp { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; username?: string; password?: string; category?: string; ip?: string }
+export interface AssistantAccountOp { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; platform?: string; grade?: string; ownership?: 'client' | 'inhouse'; username?: string; password?: string; category?: string; ip?: string }
 export interface AssistantSiteOp { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; url?: string; username?: string; password?: string; description?: string }
 // 키워드 조회수(대시보드 어시스턴트가 네이버 키워드도구로 조회한 결과 — 모바일/PC/총)
 export interface KeywordStat { keyword: string; mobile: number | string; pc: number | string; total: number; found: boolean }
@@ -187,6 +187,9 @@ export interface Vendor {
 export interface AccountEntry {
   id: string;
   name: string;        // 이름 (블로그/SNS/유튜브 등 무엇이든)
+  platform?: string;   // 구분: 블로그 | SNS | 유튜브 | 기타
+  grade?: string;      // 블로그 등급: 준최2~준최6 / 최적1~최적4 (블로그일 때만)
+  ownership?: 'client' | 'inhouse'; // 소유: 업체 소유 | 사내 계정
   username: string;    // 아이디
   password: string;    // 비밀번호
   category?: string;   // 카테고리(없으면 생략)

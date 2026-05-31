@@ -228,7 +228,12 @@ export default function DashboardAssistant() {
                       if (!a) return null;
                       return (
                         <div key={id} className="border border-indigo-100 bg-indigo-50/40 rounded-xl p-3">
-                          <p className="text-xs font-bold text-gray-900 mb-1.5 flex items-center gap-1.5"><KeyRound size={12} className="text-indigo-500" /> {a.name || a.username}</p>
+                          <p className="text-xs font-bold text-gray-900 mb-1.5 flex items-center gap-1.5 flex-wrap">
+                            <KeyRound size={12} className="text-indigo-500" /> {a.name || a.username}
+                            {a.platform && <span className="font-medium text-[11px] bg-white border border-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{a.platform}</span>}
+                            {a.grade && <span className="font-medium text-[11px] bg-white border border-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{a.grade}</span>}
+                            {a.ownership && <span className="font-medium text-[11px] bg-white border border-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{a.ownership === 'client' ? '업체 소유' : '사내'}</span>}
+                          </p>
                           <div className="space-y-1">
                             {field('아이디', a.username, `${id}:user`)}
                             {field('비밀번호', a.password, `${id}:pw`)}
