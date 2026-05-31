@@ -67,6 +67,18 @@ export interface AssistantProposalEntry { date?: string; endDate?: string | null
 export interface AssistantProposalUpdate { id?: string; date?: string | null; endDate?: string | null; managerName?: string | null; status?: string | null }
 export interface AssistantProposalClient { name?: string; industry?: string; categories?: string[]; contactPerson?: string; phone?: string; email?: string }
 export interface AssistantProposalHandover { clientName?: string; overview?: string }
+export interface AssistantProposalVendor { name?: string; services?: string; contactPerson?: string; phone?: string; email?: string; pricing?: string; notes?: string }
+// 키워드 조회수(대시보드 어시스턴트가 네이버 키워드도구로 조회한 결과 — 모바일/PC/총)
+export interface KeywordStat { keyword: string; mobile: number | string; pc: number | string; total: number; found: boolean }
+// 적용을 되돌리기 위해 저장하는 스냅샷(생성된 레코드 id + 삭제/수정 전 원본)
+export interface AssistantUndo {
+  entryIds: string[];
+  clientIds: string[];
+  vendorIds: string[];
+  handoverIds: string[];
+  deletedEntries: ScheduleEntry[]; // 삭제했던 일정(되돌릴 때 복원)
+  updatedPrev: ScheduleEntry[];    // 수정 전 원본(되돌릴 때 복원)
+}
 export interface AssistantMessage {
   role: 'user' | 'assistant';
   text: string;
@@ -74,7 +86,13 @@ export interface AssistantMessage {
   updates?: AssistantProposalUpdate[];
   clients?: AssistantProposalClient[];
   handovers?: AssistantProposalHandover[];
+  vendors?: AssistantProposalVendor[];
+  deletes?: string[];         // 삭제할 기존 일정 id
+  keywords?: string[];        // 조회 요청된 키워드(조회수 질문 시)
+  keywordStats?: KeywordStat[]; // 조회 결과(모바일/PC/총)
   applied?: number; // 적용한 건수(적용 후 표시)
+  undo?: AssistantUndo; // 적용 후 되돌리기용 스냅샷
+  undone?: boolean;   // 되돌리기 완료 표시
 }
 
 export type AccountStatus = 'active' | 'suspended';
@@ -133,6 +151,21 @@ export interface Client {
   description?: string;
   monthlyBudget?: string;
   budgetItems?: BudgetItem[];
+}
+
+// ── 외주사(아웃소싱 파트너) ──────────────────────────
+// 자체 처리 못 하는 작업(영수증리뷰, 앱설치, 앱후기 등)을 맡기는 외부 업체.
+// 서비스는 드롭다운/체크가 아니라 자유 서술(services)로 관리한다.
+export interface Vendor {
+  id: string;
+  name: string;
+  services: string;       // 제공 서비스 자유 서술 (예: "영수증리뷰, 앱설치, 앱후기, 체험단")
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  pricing?: string;       // 단가/정산 메모 (선택)
+  notes?: string;         // 특이사항/메모
+  status: 'active' | 'inactive';
 }
 
 export interface Report {

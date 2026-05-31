@@ -9,6 +9,7 @@ import FullSchedulePage from './pages/FullSchedulePage';
 import CategoryPage from './pages/CategoryPage';
 import ClientSchedulePage from './pages/ClientSchedulePage';
 import ClientManagementPage from './pages/ClientManagementPage';
+import VendorManagementPage from './pages/VendorManagementPage';
 import ClientPortalPage from './pages/ClientPortalPage';
 import TimetablePage from './pages/TimetablePage';
 import AIPlanningPage from './pages/AIPlanningPage';
@@ -84,6 +85,7 @@ function AppRoutes() {
       <Route path="/category/:category" element={<ProtectedRoute><CategoryPage /></ProtectedRoute>} />
       <Route path="/client/:clientId" element={<ProtectedRoute><ClientSchedulePage /></ProtectedRoute>} />
       <Route path="/clients" element={<ProtectedRoute><ClientManagementPage /></ProtectedRoute>} />
+      <Route path="/vendors" element={<ProtectedRoute><VendorManagementPage /></ProtectedRoute>} />
       <Route path="/approvals" element={<ProtectedRoute adminOnly><ApprovalsPage /></ProtectedRoute>} />
       <Route path="/timetable" element={<ProtectedRoute><TimetablePage /></ProtectedRoute>} />
       <Route path="/ai-planning" element={<ProtectedRoute><AIPlanningPage /></ProtectedRoute>} />

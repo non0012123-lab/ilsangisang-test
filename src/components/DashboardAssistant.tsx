@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList } from 'lucide-react';
+import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { AssistantMessage } from '../types';
 
@@ -8,13 +8,17 @@ const STATUS_LABEL: Record<string, string> = { pending: '대기중', 'in-progres
 const EXAMPLES = [
   '오늘 스케줄 시간 분배는 어떻게 하는 게 효율적일까?',
   '스타벅스 코리아 업체 가이드라인 알려줘',
+  '영수증리뷰 어디에 맡겨?',
+  '리뷰팩토리 외주사 추가해줘 (영수증리뷰·앱설치·앱후기, 건당 3천원)',
+  '강남 피부과 키워드 조회수 알려줘',
   '내일 스타벅스 SNS 신메뉴 키워드 작업 등록해줘',
   '6월 2일부터 6월 6일까지 네이버 블로그 5건 담당자별로 배분해줘',
+  '6/10 현대자동차 블로그관리 일정 삭제해줘',
   '새 업체 "그린마취통증의학과" 등록하고 인수인계 문서도 만들어줘',
 ];
 
 export default function DashboardAssistant() {
-  const { entries, assistantMessages, assistantLoading, runAssistant, applyAssistantProposal } = useApp();
+  const { entries, assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal } = useApp();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -30,7 +34,9 @@ export default function DashboardAssistant() {
   };
 
   const proposalCount = (m: AssistantMessage) =>
-    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0);
+    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0);
+
+  const fmtCnt = (v: number | string) => (typeof v === 'number' ? v.toLocaleString('ko-KR') : (v ?? '-'));
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col">
@@ -40,7 +46,7 @@ export default function DashboardAssistant() {
         </div>
         <div className="min-w-0">
           <h3 className="font-bold text-gray-900 text-sm leading-tight">AI 어시스턴트</h3>
-          <p className="text-xs text-gray-400">일정·업체·인수인계 등록, 배분·시간 분배 조언, 업체 가이드라인 안내를 대화로 처리합니다</p>
+          <p className="text-xs text-gray-400">일정·업체·인수인계 등록/수정/삭제, 배분·시간 분배, 가이드라인·외주사 안내, 키워드 조회수를 대화로 처리합니다</p>
         </div>
       </div>
 
@@ -83,6 +89,12 @@ export default function DashboardAssistant() {
                         <span><strong>인수인계 문서</strong> {h.clientName || '업체?'}</span>
                       </div>
                     ))}
+                    {(m.vendors ?? []).map((v, i) => (
+                      <div key={`v${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                        <Boxes size={13} className="text-teal-500 shrink-0 mt-0.5" />
+                        <span><strong>신규 외주사</strong> {v.name || '외주사?'}{v.services ? ` · ${v.services}` : ''}</span>
+                      </div>
+                    ))}
                     {(m.entries ?? []).map((e, i) => (
                       <div key={`e${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                         <CalendarPlus size={13} className="text-purple-500 shrink-0 mt-0.5" />
@@ -105,10 +117,31 @@ export default function DashboardAssistant() {
                         </div>
                       );
                     })}
+                    {(m.deletes ?? []).map((id, i) => {
+                      const cur = entries.find(en => en.id === id);
+                      return (
+                        <div key={`d${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                          <Trash2 size={13} className="text-red-500 shrink-0 mt-0.5" />
+                          <span><strong>일정 삭제</strong> {cur ? `${cur.date} · ${cur.clientName} · ${cur.category}${cur.keyword ? ` (${cur.keyword})` : ''}` : `(이미 없는 일정: ${id})`}</span>
+                        </div>
+                      );
+                    })}
 
                     {m.applied != null ? (
-                      <div className="flex items-center gap-1.5 text-xs font-semibold text-green-600 pt-1">
-                        <Check size={13} /> {m.applied}건 적용됨 — 스케줄·업체·인수인계에 반영되었습니다.
+                      <div className="pt-1 space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-green-600">
+                          <Check size={13} /> {m.applied}건 적용됨 — 스케줄·업체·인수인계에 반영되었습니다.
+                        </div>
+                        {m.undo && (m.undo.entryIds.length + m.undo.clientIds.length + m.undo.vendorIds.length + m.undo.handoverIds.length + m.undo.deletedEntries.length + m.undo.updatedPrev.length) > 0 && (
+                          m.undone ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400"><RotateCcw size={12} /> 되돌림 완료</span>
+                          ) : (
+                            <button onClick={() => undoAssistantProposal(idx)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+                              <RotateCcw size={12} /> 방금 적용 되돌리기
+                            </button>
+                          )
+                        )}
                       </div>
                     ) : (
                       <button onClick={() => applyAssistantProposal(idx)}
@@ -116,8 +149,42 @@ export default function DashboardAssistant() {
                         <Check size={12} /> 적용하기 ({proposalCount(m)}건)
                       </button>
                     )}
-                    <p className="text-[11px] text-gray-400">적용 후 각 화면에서 세부 내용을 수정할 수 있습니다.</p>
+                    <p className="text-[11px] text-gray-400">적용 후 각 화면에서 세부 내용을 수정할 수 있고, ‘되돌리기’로 직전 적용을 취소할 수 있습니다.</p>
                   </div>
+                )}
+
+                {/* 키워드 조회수 (모바일/PC/총) */}
+                {m.role === 'assistant' && (m.keywords?.length ?? 0) > 0 && (
+                  m.keywordStats === undefined ? (
+                    <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-400">
+                      <Search size={12} /> 조회수 조회 중...
+                    </div>
+                  ) : (
+                    <div className="mt-2 border border-gray-100 rounded-xl overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-gray-50 text-gray-500">
+                            <th className="text-left font-semibold px-3 py-1.5">키워드</th>
+                            <th className="text-right font-semibold px-3 py-1.5">모바일</th>
+                            <th className="text-right font-semibold px-3 py-1.5">PC</th>
+                            <th className="text-right font-semibold px-3 py-1.5">총조회수</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {m.keywordStats.length === 0 ? (
+                            <tr><td colSpan={4} className="px-3 py-2 text-center text-gray-400">조회 결과가 없습니다.</td></tr>
+                          ) : m.keywordStats.map((s, i) => (
+                            <tr key={`${s.keyword}-${i}`} className="text-gray-700">
+                              <td className="px-3 py-1.5 font-medium">{s.keyword}</td>
+                              <td className="px-3 py-1.5 text-right">{s.found ? fmtCnt(s.mobile) : '-'}</td>
+                              <td className="px-3 py-1.5 text-right">{s.found ? fmtCnt(s.pc) : '-'}</td>
+                              <td className="px-3 py-1.5 text-right font-bold text-blue-600">{s.found ? fmtCnt(s.total) : '조회불가'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
                 )}
               </div>
             </div>

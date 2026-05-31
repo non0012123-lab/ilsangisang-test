@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, Vendor, AssistantUndo } from '../types';
 import { SCHEDULE_ENTRIES, CLIENTS, HANDOVER_DOCS, USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
@@ -11,6 +11,7 @@ interface AppContextType {
   entries: ScheduleEntry[];
   clients: Client[];
   handoverDocs: HandoverDoc[];
+  vendors: Vendor[];
   members: TeamMember[];
   reloadMembers: () => Promise<void>;
   aiHistory: AiPlanResult[];
@@ -32,6 +33,7 @@ interface AppContextType {
   assistantLoading: boolean;
   runAssistant: (text: string) => Promise<void>;
   applyAssistantProposal: (index: number) => void;
+  undoAssistantProposal: (index: number) => void;
   // 업무 데이터 영구 저장(레코드 단위) — 로컬 상태 갱신 + Supabase 반영
   saveEntry: (entry: ScheduleEntry) => void;
   saveEntries: (entries: ScheduleEntry[]) => void;
@@ -41,6 +43,8 @@ interface AppContextType {
   removeClient: (id: string) => void;
   saveHandover: (doc: HandoverDoc) => void;
   removeHandover: (id: string) => void;
+  saveVendor: (vendor: Vendor) => void;
+  removeVendor: (id: string) => void;
 }
 
 export interface AiPlanJobInput {
@@ -56,6 +60,17 @@ export interface AiPlanJobInput {
 
 const nowMs = () => Date.now();
 
+// 외주사 로컬 캐시: Supabase 에 vendors 테이블이 아직 없거나 일시적으로 닿지 않아도
+// 브라우저에 데이터가 남도록 한다(테이블이 생기면 Supabase 가 우선·공유 소스가 됨).
+const VENDORS_LS_KEY = 'ilsangisang.vendors.v1';
+const loadLocalVendors = (): Vendor[] => {
+  try { const s = localStorage.getItem(VENDORS_LS_KEY); return s ? (JSON.parse(s) as Vendor[]) : []; }
+  catch { return []; }
+};
+const saveLocalVendors = (list: Vendor[]) => {
+  try { localStorage.setItem(VENDORS_LS_KEY, JSON.stringify(list)); } catch { /* 용량 초과 등은 무시 */ }
+};
+
 const AppContext = createContext<AppContextType | null>(null);
 
 // Supabase 미설정 시 사용할 기본 담당자 목록 (mock)
@@ -68,6 +83,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<ScheduleEntry[]>(SCHEDULE_ENTRIES);
   const [clients, setClients] = useState<Client[]>(CLIENTS);
   const [handoverDocs, setHandoverDocs] = useState<HandoverDoc[]>(HANDOVER_DOCS);
+  const [vendors, setVendors] = useState<Vendor[]>(loadLocalVendors);
   const [members, setMembers] = useState<TeamMember[]>(MOCK_MEMBERS);
   const [aiHistory, setAiHistory] = useState<AiPlanResult[]>([]);
   const [aiPlanRunning, setAiPlanRunning] = useState(false);
@@ -92,6 +108,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => { clientsRef.current = clients; }, [clients]);
   const handoverDocsRef = useRef(handoverDocs);
   useEffect(() => { handoverDocsRef.current = handoverDocs; }, [handoverDocs]);
+  const vendorsRef = useRef(vendors);
+  useEffect(() => { vendorsRef.current = vendors; }, [vendors]);
+  // 외주사가 바뀔 때마다 로컬 캐시에 보관 → 새로고침·재배포에도 유지
+  useEffect(() => { saveLocalVendors(vendors); }, [vendors]);
   const assistantMessagesRef = useRef(assistantMessages);
   useEffect(() => { assistantMessagesRef.current = assistantMessages; }, [assistantMessages]);
   const assistantLoadingRef = useRef(assistantLoading);
@@ -167,6 +187,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeHandover = useCallback((id: string) => {
     setHandoverDocs(prev => prev.filter(d => d.id !== id));
     persistDelete('handover_docs', id);
+  }, []);
+
+  // ── 외주사 ──
+  const saveVendor = useCallback((vendor: Vendor) => {
+    setVendors(prev => prev.some(v => v.id === vendor.id) ? prev.map(v => v.id === vendor.id ? vendor : v) : [...prev, vendor]);
+    persistOne('vendors', vendor);
+  }, []);
+  const removeVendor = useCallback((id: string) => {
+    setVendors(prev => prev.filter(v => v.id !== id));
+    persistDelete('vendors', id);
   }, []);
 
   // ── AI 기획 결과 (이미지는 용량 때문에 DB 저장 제외; 로컬 세션에만 유지) ──
@@ -288,6 +318,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       period: p.period,
       report: p.report,
     }));
+    // 외주사 정보: "○○ 작업 어디에 맡겨?" 류 질문에 답하기 위해 전달
+    const vendorContext = vendorsRef.current.filter(v => v.status !== 'inactive').map(v => ({
+      name: v.name, services: v.services, contactPerson: v.contactPerson,
+      phone: v.phone, email: v.email, pricing: v.pricing, notes: v.notes,
+    }));
     const history = assistantMessagesRef.current.map(m => ({ role: m.role, text: m.text }));
     setAssistantMessages(prev => [...prev, { role: 'user', text: message }]);
     setAssistantLoading(true);
@@ -302,6 +337,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           categories: ASSISTANT_CATEGORIES,
           handoverDocs: handoverContext,
           aiPlans: aiPlanContext,
+          vendors: vendorContext,
           entries: scoped.map(e => ({
             id: e.id, date: e.date, endDate: e.endDate ?? null,
             managerName: e.managerName, clientName: e.clientName,
@@ -315,6 +351,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
+      const keywords: string[] = Array.isArray(data.keywords) ? data.keywords.filter((k: unknown) => typeof k === 'string' && k.trim()) : [];
       setAssistantMessages(prev => [...prev, {
         role: 'assistant',
         text: data.reply || '(응답이 비어 있습니다)',
@@ -322,7 +359,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
         updates: Array.isArray(data.updates) ? data.updates : [],
         clients: Array.isArray(data.clients) ? data.clients : [],
         handovers: Array.isArray(data.handovers) ? data.handovers : [],
+        vendors: Array.isArray(data.vendors) ? data.vendors : [],
+        deletes: Array.isArray(data.deletes) ? data.deletes.filter((d: unknown) => typeof d === 'string') : [],
+        keywords,
       }]);
+      // 키워드 조회수 질문이면 네이버 키워드도구로 조회해 마지막 어시스턴트 메시지에 결과(모바일/PC/총)를 붙인다
+      if (keywords.length) {
+        try {
+          const kres = await fetch('/api/naver-keywords', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keywords: keywords.slice(0, 20) }),
+          });
+          const ktype = kres.headers.get('content-type') ?? '';
+          if (!ktype.includes('application/json')) throw new Error('키워드 서버에 연결할 수 없습니다.');
+          const kdata = await kres.json();
+          if (!kres.ok || kdata.error) throw new Error(kdata.error ?? `조회 실패 (${kres.status})`);
+          const stats = (Array.isArray(kdata.keywords) ? kdata.keywords : []).map((r: { keyword: string; mobile: number | string; pc: number | string; total: number; found: boolean }) => ({
+            keyword: r.keyword, mobile: r.mobile, pc: r.pc, total: r.total, found: r.found,
+          }));
+          setAssistantMessages(prev => prev.map((m, i) => i === prev.length - 1 && m.role === 'assistant' ? { ...m, keywordStats: stats } : m));
+        } catch (ke) {
+          setAssistantMessages(prev => prev.map((m, i) => i === prev.length - 1 && m.role === 'assistant'
+            ? { ...m, text: `${m.text}\n\n⚠️ 키워드 조회 실패: ${ke instanceof Error ? ke.message : '오류'}`, keywordStats: [] } : m));
+        }
+      }
     } catch (e) {
       setAssistantMessages(prev => [...prev, { role: 'assistant', text: `⚠️ ${e instanceof Error ? e.message : '오류가 발생했습니다.'}` }]);
     } finally {
@@ -338,6 +398,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const mem = membersRef.current;
     const selfId = u?.id && mem.some(m => m.id === u.id) ? u.id : '';
     let count = 0;
+    // 되돌리기용 스냅샷(생성 id + 삭제/수정 전 원본)
+    const undo: AssistantUndo = { entryIds: [], clientIds: [], vendorIds: [], handoverIds: [], deletedEntries: [], updatedPrev: [] };
 
     const matchManager = (name?: string) => {
       if (!name) return '';
@@ -356,6 +418,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const cats = (Array.isArray(c.categories) ? c.categories : []).filter(x => (ASSISTANT_CATEGORIES as string[]).includes(x)) as Category[];
       saveClient({ id, name: c.name, industry: c.industry || '', contactPerson: c.contactPerson || '', email: c.email || '', phone: c.phone || '', startDate: todayStr(), categories: cats, status: 'active', description: '' });
       created.push({ name: c.name, id });
+      undo.clientIds.push(id);
       count += 1;
     });
     const resolveClient = (name?: string): string => {
@@ -368,17 +431,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     const clientNameOf = (id: string) => clientsRef.current.find(c => c.id === id)?.name ?? created.find(c => c.id === id)?.name ?? '';
 
+    // 1.5) 신규 외주사 등록
+    (msg.vendors ?? []).forEach((v, i) => {
+      if (!v.name) return;
+      if (vendorsRef.current.some(x => x.name === v.name)) return;
+      const vid = `vd-${Date.now()}-${i}`;
+      saveVendor({
+        id: vid, name: v.name, services: v.services || '',
+        contactPerson: v.contactPerson || '', phone: v.phone || '', email: v.email || '',
+        pricing: v.pricing || '', notes: v.notes || '', status: 'active',
+      });
+      undo.vendorIds.push(vid);
+      count += 1;
+    });
+
     // 2) 인수인계 문서 신규 등록
     (msg.handovers ?? []).forEach((h, i) => {
       if (!h.clientName) return;
       const cid = resolveClient(h.clientName);
       if (!cid || handoverDocsRef.current.find(d => d.clientId === cid)) return;
+      const hid = `ho-${Date.now()}-${i}`;
       saveHandover({
-        id: `ho-${Date.now()}-${i}`, clientId: cid, clientName: clientNameOf(cid) || h.clientName,
+        id: hid, clientId: cid, clientName: clientNameOf(cid) || h.clientName,
         authorId: u?.id ?? '', authorName: u?.name ?? '', updatedAt: todayStr(),
         overview: h.overview || '', keyContacts: [], importantLinks: [],
         guidelines: '', tone: '', dontDo: '', specialNotes: '', managerMemo: '',
       });
+      undo.handoverIds.push(hid);
       count += 1;
     });
 
@@ -397,7 +476,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         status: (['pending', 'in-progress', 'completed'].includes(e.status ?? '') ? e.status : 'pending') as ScheduleStatus,
       });
     });
-    if (newEntries.length) { saveEntries(newEntries); count += newEntries.length; }
+    if (newEntries.length) { saveEntries(newEntries); count += newEntries.length; undo.entryIds.push(...newEntries.map(e => e.id)); }
 
     // 4) 기존 일정 변경 (배분/재배치)
     (msg.updates ?? []).forEach(up => {
@@ -412,11 +491,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (mid) { patch.managerId = mid; patch.managerName = mem.find(m => m.id === mid)?.name ?? cur.managerName; }
       }
       if (up.status && ['pending', 'in-progress', 'completed'].includes(up.status)) patch.status = up.status as ScheduleStatus;
-      if (Object.keys(patch).length) { patchEntry(up.id, patch); count += 1; }
+      if (Object.keys(patch).length) { undo.updatedPrev.push({ ...cur }); patchEntry(up.id, patch); count += 1; }
     });
 
-    setAssistantMessages(prev => prev.map((m, i) => i === index ? { ...m, applied: count } : m));
-  }, [saveClient, saveHandover, saveEntries, patchEntry]);
+    // 5) 일정 삭제/취소
+    (msg.deletes ?? []).forEach(id => {
+      const cur = entriesRef.current.find(en => en.id === id);
+      if (!cur) return;
+      undo.deletedEntries.push({ ...cur });
+      removeEntry(id);
+      count += 1;
+    });
+
+    setAssistantMessages(prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
+  }, [saveClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry]);
+
+  // 직전 적용을 되돌린다(생성한 레코드 제거 + 삭제/수정한 일정 복원)
+  const undoAssistantProposal = useCallback((index: number) => {
+    const msg = assistantMessagesRef.current[index];
+    if (!msg || msg.applied == null || msg.undone || !msg.undo) return;
+    const { entryIds, clientIds, vendorIds, handoverIds, deletedEntries, updatedPrev } = msg.undo;
+    entryIds.forEach(id => removeEntry(id));
+    vendorIds.forEach(id => removeVendor(id));
+    handoverIds.forEach(id => removeHandover(id));
+    clientIds.forEach(id => removeClient(id)); // 연결 인수인계도 함께 제거됨
+    deletedEntries.forEach(e => saveEntry(e)); // 삭제했던 일정 복원
+    updatedPrev.forEach(e => saveEntry(e));    // 수정 전 원본 복원
+    setAssistantMessages(prev => prev.map((m, i) => i === index ? { ...m, undone: true } : m));
+  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry]);
 
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
@@ -455,6 +557,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       let c = await load<Client>('clients');
       let e = await load<ScheduleEntry>('schedule_entries');
       let h = await load<HandoverDoc>('handover_docs');
+      const v = await load<Vendor>('vendors');
       const plans = await load<AiPlanResult>('ai_plans');
       if (!active) return;
       if (c && c.length === 0) { await seed('clients', CLIENTS); c = CLIENTS; }
@@ -464,6 +567,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (c) setClients(c);
       if (e) setEntries(e);
       if (h) setHandoverDocs(h);
+      // vendors 테이블이 없거나(로드 null) 원격이 비어 있으면 로컬 캐시를 유지(덮어쓰지 않음).
+      // 테이블이 있고 데이터가 있으면 그쪽(공유본)을 사용.
+      if (v && v.length) setVendors(v);
       if (plans) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
     })();
     return () => { active = false; };
@@ -471,11 +577,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      entries, clients, handoverDocs, members, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
+      entries, clients, handoverDocs, vendors, members, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
       aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
       aiImageRunning, aiImageError, startAiImageJob,
-      assistantMessages, assistantLoading, runAssistant, applyAssistantProposal,
+      assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
+      saveVendor, removeVendor,
     }}>
       {children}
     </AppContext.Provider>

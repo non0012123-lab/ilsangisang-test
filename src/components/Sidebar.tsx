@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, CalendarDays, Users, LogOut,
   Hash, PlayCircle, Globe, Video, Paintbrush, ChevronDown, ChevronRight,
-  BarChart3, MessageSquare, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search,
+  BarChart3, MessageSquare, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -125,6 +125,11 @@ export default function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: 
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
             }
           ><Users size={18} />클라이언트 관리</NavLink>
+          <NavLink to="/vendors" onClick={onClose}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
+            }
+          ><Boxes size={18} />외주사 관리</NavLink>
           {isAdmin && (
             <NavLink to="/approvals" onClick={onClose}
               className={({ isActive }) =>
