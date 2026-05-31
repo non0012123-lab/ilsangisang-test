@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Search, X, Pencil, Trash2, Copy, Check, KeyRound } from 'lucide-react';
+import { Plus, Search, X, Pencil, Trash2, Copy, Check, KeyRound, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -31,6 +31,16 @@ export default function AccountListPage() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<AccountEntry, 'id'>>(EMPTY);
+  const [sortKey, setSortKey] = useState<'name' | 'platform' | 'ownership' | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const toggleSort = (key: 'name' | 'platform' | 'ownership') => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+  };
+  const sortIcon = (key: 'name' | 'platform' | 'ownership') =>
+    sortKey !== key ? <ArrowUpDown size={12} className="text-gray-300" />
+      : sortDir === 'asc' ? <ArrowUp size={12} className="text-blue-600" /> : <ArrowDown size={12} className="text-blue-600" />;
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const copy = (value: string, key: string) => {
@@ -47,6 +57,16 @@ export default function AccountListPage() {
     (filterGrade === 'all' || (a.grade ?? '') === filterGrade) &&
     (!q || a.name.toLowerCase().includes(q) || a.username.toLowerCase().includes(q) || (a.category ?? '').toLowerCase().includes(q) || (a.ip ?? '').toLowerCase().includes(q))
   );
+
+  const platformRank = (p?: string) => { const i = PLATFORMS.indexOf(p || ''); return i === -1 ? 99 : i; };
+  const ownRank = (o?: string) => (o === 'client' ? 0 : o === 'inhouse' ? 1 : 99);
+  const display = sortKey ? [...filtered].sort((a, b) => {
+    let d: number;
+    if (sortKey === 'name') d = (a.name || '').localeCompare(b.name || '', 'ko');
+    else if (sortKey === 'platform') d = platformRank(a.platform) - platformRank(b.platform);
+    else d = ownRank(a.ownership) - ownRank(b.ownership);
+    return sortDir === 'asc' ? d : -d;
+  }) : filtered;
 
   const openAdd = () => { setForm(EMPTY); setEditId(null); setShowForm(true); };
   const openEdit = (a: AccountEntry) => { setForm({ name: a.name, platform: a.platform ?? '', grade: a.grade ?? '', ownership: a.ownership, username: a.username, password: a.password, category: a.category ?? '', ip: a.ip ?? '' }); setEditId(a.id); setShowForm(true); };
@@ -133,13 +153,22 @@ export default function AccountListPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
-                    {['이름', '구분', '소유', '아이디', '비밀번호', '카테고리', '아이피', '메모장 양식', ''].map((h, i) => (
+                    {([
+                      ['이름', 'name'], ['구분', 'platform'], ['소유', 'ownership'],
+                    ] as ['이름' | '구분' | '소유', 'name' | 'platform' | 'ownership'][]).map(([label, key]) => (
+                      <th key={key} className="text-left text-xs font-semibold text-gray-500 px-4 py-2.5 whitespace-nowrap">
+                        <button onClick={() => toggleSort(key)} className="inline-flex items-center gap-1 hover:text-gray-800 transition-colors">
+                          {label} {sortIcon(key)}
+                        </button>
+                      </th>
+                    ))}
+                    {['아이디', '비밀번호', '카테고리', '아이피', '메모장 양식', ''].map((h, i) => (
                       <th key={i} className="text-left text-xs font-semibold text-gray-500 px-4 py-2.5 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filtered.map(a => (
+                  {display.map(a => (
                     <tr key={a.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{a.name || '-'}</td>
                       <td className="px-4 py-3 whitespace-nowrap">

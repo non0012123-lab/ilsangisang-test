@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Search, X, Pencil, Trash2, Globe, ExternalLink } from 'lucide-react';
+import { Plus, Search, X, Pencil, Trash2, Globe, ExternalLink, Copy, Check } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -13,6 +13,14 @@ export default function SiteListPage() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<SiteEntry, 'id'>>(EMPTY);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const copy = (value: string, key: string) => {
+    if (!value) return;
+    navigator.clipboard.writeText(value);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(c => (c === key ? null : c)), 1500);
+  };
 
   const q = search.trim().toLowerCase();
   const filtered = siteEntries.filter(s =>
@@ -72,8 +80,16 @@ export default function SiteListPage() {
                 </div>
                 {s.description && <p className="text-xs text-gray-500 mb-3">{s.description}</p>}
                 <div className="space-y-1.5 text-xs border-t border-gray-50 pt-3 mt-auto">
-                  <div className="flex gap-2"><span className="text-gray-400 w-10 shrink-0">아이디</span><span className="font-mono text-gray-700 truncate">{s.username || '-'}</span></div>
-                  <div className="flex gap-2"><span className="text-gray-400 w-10 shrink-0">비번</span><span className="font-mono text-gray-700 truncate">{s.password || '-'}</span></div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-400 w-10 shrink-0">아이디</span>
+                    <span className="font-mono text-gray-700 truncate">{s.username || '-'}</span>
+                    {s.username && <button onClick={() => copy(s.username!, `${s.id}:user`)} className={`shrink-0 p-0.5 rounded transition-colors ${copiedKey === `${s.id}:user` ? 'text-green-600' : 'text-gray-300 hover:text-blue-600'}`} title="아이디 복사">{copiedKey === `${s.id}:user` ? <Check size={12} /> : <Copy size={12} />}</button>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-400 w-10 shrink-0">비번</span>
+                    <span className="font-mono text-gray-700 truncate">{s.password || '-'}</span>
+                    {s.password && <button onClick={() => copy(s.password!, `${s.id}:pw`)} className={`shrink-0 p-0.5 rounded transition-colors ${copiedKey === `${s.id}:pw` ? 'text-green-600' : 'text-gray-300 hover:text-blue-600'}`} title="비밀번호 복사">{copiedKey === `${s.id}:pw` ? <Check size={12} /> : <Copy size={12} />}</button>}
+                  </div>
                 </div>
               </div>
             ))}
