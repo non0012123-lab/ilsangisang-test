@@ -1,7 +1,16 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy } from 'lucide-react';
+import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { AssistantMessage } from '../types';
+
+const relTime = (ts: number): string => {
+  const min = Math.floor((Date.now() - ts) / 60000);
+  if (min < 1) return '방금';
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}시간 전`;
+  return new Date(ts).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });
+};
 
 const STATUS_LABEL: Record<string, string> = { pending: '대기중', 'in-progress': '진행중', completed: '완료' };
 
@@ -19,7 +28,10 @@ const EXAMPLES = [
 ];
 
 export default function DashboardAssistant() {
-  const { entries, accounts, siteEntries, assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal } = useApp();
+  const {
+    entries, accounts, siteEntries, assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
+    conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
+  } = useApp();
   const [input, setInput] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -71,6 +83,42 @@ export default function DashboardAssistant() {
         </div>
       </div>
 
+      <div className="flex">
+        {/* 대화목록 + 새 채팅 */}
+        <aside className="w-40 sm:w-52 shrink-0 border-r border-gray-50 flex flex-col" style={{ maxHeight: '30rem' }}>
+          <button onClick={newConversation}
+            className="m-2 flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl text-xs font-semibold bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors">
+            <Plus size={13} /> 새 채팅
+          </button>
+          <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1">
+            {conversations.length === 0 ? (
+              <p className="text-[11px] text-gray-400 text-center px-2 py-4 leading-relaxed">대화를 시작하면<br />여기에 기록됩니다</p>
+            ) : (
+              conversations.map(c => (
+                <div key={c.id}
+                  onClick={() => selectConversation(c.id)}
+                  className={`group/conv flex items-center gap-1 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${
+                    c.id === activeConversationId ? 'bg-purple-100 text-purple-800' : 'hover:bg-gray-50 text-gray-700'
+                  }`}>
+                  <MessageSquare size={12} className="shrink-0 opacity-60" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium truncate leading-tight">{c.title}</p>
+                    <p className="text-[10px] text-gray-400 leading-tight">{relTime(c.updatedAt)}</p>
+                  </div>
+                  <button
+                    onClick={e => { e.stopPropagation(); if (confirm('이 대화를 삭제할까요?')) deleteConversation(c.id); }}
+                    title="대화 삭제"
+                    className="shrink-0 p-0.5 rounded text-gray-300 hover:text-red-500 opacity-0 group-hover/conv:opacity-100 transition-opacity">
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
+
+        {/* 채팅 영역 */}
+        <div className="flex-1 min-w-0 flex flex-col">
       {/* 대화 영역 */}
       <div ref={scrollRef} className="px-4 py-4 space-y-3 overflow-y-auto" style={{ maxHeight: '24rem', minHeight: '8rem' }}>
         {assistantMessages.length === 0 ? (
@@ -87,7 +135,7 @@ export default function DashboardAssistant() {
           </div>
         ) : (
           assistantMessages.map((m, idx) => (
-            <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div key={idx} className={`group flex items-start gap-1 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] ${m.role === 'user' ? 'order-2' : ''}`}>
                 <div className={`rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${
                   m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'
@@ -270,6 +318,10 @@ export default function DashboardAssistant() {
                   </div>
                 )}
               </div>
+              <button onClick={() => deleteAssistantMessage(idx)} title="이 메시지 삭제"
+                className="opacity-0 group-hover:opacity-100 mt-1 p-1 rounded text-gray-300 hover:text-red-500 transition-opacity shrink-0">
+                <X size={12} />
+              </button>
             </div>
           ))
         )}
@@ -298,6 +350,8 @@ export default function DashboardAssistant() {
           <Send size={16} />
         </button>
       </div>
+        </div>{/* 채팅 영역 */}
+      </div>{/* flex 행 */}
     </div>
   );
 }

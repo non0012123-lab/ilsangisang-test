@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification } from '../types';
 import { SCHEDULE_ENTRIES, CLIENTS, HANDOVER_DOCS, USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
@@ -34,11 +34,18 @@ interface AppContextType {
   aiImageError: string;
   startAiImageJob: (planId: string, platforms: string[], cols: number) => Promise<void>;
   // 대시보드 AI 어시스턴트 (전역 → 다른 메뉴로 이동해도 대화·진행이 유지됨)
-  assistantMessages: AssistantMessage[];
+  assistantMessages: AssistantMessage[];   // 활성 대화의 메시지
   assistantLoading: boolean;
   runAssistant: (text: string) => Promise<void>;
   applyAssistantProposal: (index: number) => void;
   undoAssistantProposal: (index: number) => void;
+  // 대화 기록 관리 (대화목록 + 새 채팅 + 삭제)
+  conversations: AssistantConversation[];
+  activeConversationId: string | null;
+  newConversation: () => void;
+  selectConversation: (id: string) => void;
+  deleteConversation: (id: string) => void;
+  deleteAssistantMessage: (index: number) => void;
   // 업무 데이터 영구 저장(레코드 단위) — 로컬 상태 갱신 + Supabase 반영
   saveEntry: (entry: ScheduleEntry) => void;
   saveEntries: (entries: ScheduleEntry[]) => void;
@@ -124,8 +131,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeAiPlanId, setActiveAiPlanId] = useState<string | null>(null);
   const [aiImageRunning, setAiImageRunning] = useState<string | null>(null);
   const [aiImageError, setAiImageError] = useState('');
-  const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
+  const [conversations, setConversations] = useState<AssistantConversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [assistantLoading, setAssistantLoading] = useState(false);
+  // 활성 대화의 메시지 (UI·apply/undo 가 이 배열을 인덱스로 참조)
+  const assistantMessages = useMemo(
+    () => conversations.find(c => c.id === activeConversationId)?.messages ?? [],
+    [conversations, activeConversationId],
+  );
   const [notifications, setNotifications] = useState<AppNotification[]>(() => lsLoad<AppNotification>(NOTIFS_LS_KEY));
   // 기본 켜짐 — 사용자가 명시적으로 끈('0') 경우에만 꺼진 상태로 시작
   const [desktopNotifyEnabled, setDesktopNotifyEnabled] = useState<boolean>(() => {
@@ -179,8 +192,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => { lsSave(REPORTS_LS_KEY, reports); }, [reports]);
   // 알림은 기기별 — localStorage 에만 저장(Supabase 동기화 안 함)
   useEffect(() => { lsSave(NOTIFS_LS_KEY, notifications); }, [notifications]);
-  const assistantMessagesRef = useRef(assistantMessages);
-  useEffect(() => { assistantMessagesRef.current = assistantMessages; }, [assistantMessages]);
+  const conversationsRef = useRef(conversations);
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+  const activeConversationIdRef = useRef(activeConversationId);
+  useEffect(() => { activeConversationIdRef.current = activeConversationId; }, [activeConversationId]);
   const assistantLoadingRef = useRef(assistantLoading);
   useEffect(() => { assistantLoadingRef.current = assistantLoading; }, [assistantLoading]);
   const userRef = useRef(user);
@@ -430,10 +445,74 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [saveAiPlan, pushNotification]);
 
+  // ── 대화(채팅) 관리 ───────────────────────────────────
+  const deriveTitle = (messages: AssistantMessage[]) =>
+    messages.find(m => m.role === 'user')?.text.trim().slice(0, 30) || '새 대화';
+
+  // 활성(또는 지정) 대화의 메시지를 갱신하고, 제목·updatedAt 을 맞춘다. (Supabase 저장은 별도 effect 가 담당)
+  const mutateMessages = useCallback((convId: string, updater: (prev: AssistantMessage[]) => AssistantMessage[]) => {
+    setConversations(prev => prev.map(c => {
+      if (c.id !== convId) return c;
+      const messages = updater(c.messages);
+      return { ...c, messages, title: deriveTitle(messages), updatedAt: nowMs() };
+    }));
+  }, []);
+
+  // 새 대화 생성 → id 반환 (refs 도 즉시 갱신해 같은 tick 의 후속 호출이 바로 이 대화를 가리키게 함)
+  const createConversation = useCallback((): string => {
+    const id = `conv-${nowMs()}-${Math.random().toString(36).slice(2, 7)}`;
+    const conv: AssistantConversation = { id, title: '새 대화', messages: [], createdAt: nowMs(), updatedAt: nowMs() };
+    conversationsRef.current = [conv, ...conversationsRef.current];
+    activeConversationIdRef.current = id;
+    setConversations(prev => [conv, ...prev]);
+    setActiveConversationId(id);
+    return id;
+  }, []);
+
+  // UI: "새 채팅" — 이미 비어 있는 새 대화에 있으면 그대로 두고, 아니면 새로 만든다.
+  const newConversation = useCallback(() => {
+    const active = conversationsRef.current.find(c => c.id === activeConversationIdRef.current);
+    if (active && active.messages.length === 0) return;
+    createConversation();
+  }, [createConversation]);
+
+  const selectConversation = useCallback((id: string) => setActiveConversationId(id), []);
+
+  const deleteConversation = useCallback((id: string) => {
+    setConversations(prev => {
+      const next = prev.filter(c => c.id !== id);
+      if (activeConversationIdRef.current === id) {
+        const nextId = next[0]?.id ?? null;
+        activeConversationIdRef.current = nextId;
+        setActiveConversationId(nextId);
+      }
+      conversationsRef.current = next;
+      return next;
+    });
+    persistDelete('assistant_conversations', id);
+  }, []);
+
+  // 개별 메시지 삭제 (어시스턴트의 장황한 답변 등 정리용)
+  const deleteAssistantMessage = useCallback((index: number) => {
+    const convId = activeConversationIdRef.current;
+    if (!convId) return;
+    mutateMessages(convId, prev => prev.filter((_, i) => i !== index));
+  }, [mutateMessages]);
+
+  // 활성 대화가 바뀔 때마다(메시지 추가/수정/삭제 포함) Supabase 에 저장. 빈 대화는 저장하지 않음.
+  useEffect(() => {
+    if (!supabase) return;
+    const c = conversations.find(x => x.id === activeConversationId);
+    if (c && c.messages.length > 0) persistOne('assistant_conversations', c);
+  }, [conversations, activeConversationId]);
+
   // ── 대시보드 AI 어시스턴트 (전역 실행 → 다른 메뉴로 이동해도 대화·진행 유지) ──
   const runAssistant = useCallback(async (text: string) => {
     const message = text.trim();
     if (!message || assistantLoadingRef.current) return;
+    // 활성 대화 확보(없으면 새로 생성). 이후 모든 메시지 갱신은 이 대화를 대상으로 한다.
+    let convId = activeConversationIdRef.current;
+    if (!convId || !conversationsRef.current.some(c => c.id === convId)) convId = createConversation();
     const u = userRef.current;
     const isAdmin = u?.role === 'admin';
     const allEntries = entriesRef.current;
@@ -470,8 +549,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const siteContext = siteEntriesRef.current.map(s => ({
       id: s.id, name: s.name, url: s.url, username: s.username, description: s.description,
     }));
-    const history = assistantMessagesRef.current.map(m => ({ role: m.role, text: m.text }));
-    setAssistantMessages(prev => [...prev, { role: 'user', text: message }]);
+    const history = (conversationsRef.current.find(c => c.id === convId)?.messages ?? []).map(m => ({ role: m.role, text: m.text }));
+    mutateMessages(convId, prev => [...prev, { role: 'user', text: message }]);
     setAssistantLoading(true);
     try {
       const res = await fetch('/api/ai-assistant', {
@@ -509,7 +588,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
       const keywords: string[] = Array.isArray(data.keywords) ? data.keywords.filter((k: unknown) => typeof k === 'string' && k.trim()) : [];
-      setAssistantMessages(prev => [...prev, {
+      mutateMessages(convId, prev => [...prev, {
         role: 'assistant',
         text: data.reply || '(응답이 비어 있습니다)',
         entries: Array.isArray(data.entries) ? data.entries : [],
@@ -538,23 +617,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const stats = (Array.isArray(kdata.keywords) ? kdata.keywords : []).map((r: { keyword: string; mobile: number | string; pc: number | string; total: number; found: boolean }) => ({
             keyword: r.keyword, mobile: r.mobile, pc: r.pc, total: r.total, found: r.found,
           }));
-          setAssistantMessages(prev => prev.map((m, i) => i === prev.length - 1 && m.role === 'assistant' ? { ...m, keywordStats: stats } : m));
+          mutateMessages(convId, prev => prev.map((m, i) => i === prev.length - 1 && m.role === 'assistant' ? { ...m, keywordStats: stats } : m));
         } catch (ke) {
-          setAssistantMessages(prev => prev.map((m, i) => i === prev.length - 1 && m.role === 'assistant'
+          mutateMessages(convId, prev => prev.map((m, i) => i === prev.length - 1 && m.role === 'assistant'
             ? { ...m, text: `${m.text}\n\n⚠️ 키워드 조회 실패: ${ke instanceof Error ? ke.message : '오류'}`, keywordStats: [] } : m));
         }
       }
     } catch (e) {
-      setAssistantMessages(prev => [...prev, { role: 'assistant', text: `⚠️ ${e instanceof Error ? e.message : '오류가 발생했습니다.'}` }]);
+      mutateMessages(convId, prev => [...prev, { role: 'assistant', text: `⚠️ ${e instanceof Error ? e.message : '오류가 발생했습니다.'}` }]);
     } finally {
       setAssistantLoading(false);
     }
-  }, []);
+  }, [createConversation, mutateMessages]);
 
   // 어시스턴트 제안을 실제 시스템에 반영 (업체 신규등록 → 인수인계 → 일정 생성/변경 순)
   const applyAssistantProposal = useCallback((index: number) => {
-    const msg = assistantMessagesRef.current[index];
-    if (!msg || msg.applied != null) return;
+    const convId = activeConversationIdRef.current;
+    const activeMsgs = conversationsRef.current.find(c => c.id === convId)?.messages ?? [];
+    const msg = activeMsgs[index];
+    if (!convId || !msg || msg.applied != null) return;
     const u = userRef.current;
     const mem = membersRef.current;
     const selfId = u?.id && mem.some(m => m.id === u.id) ? u.id : '';
@@ -744,7 +825,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    setAssistantMessages(prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
+    mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
     // AI 어시스턴트로 반영된 변경도 알림(일정·업체·계정 등 종류 무관). 대시보드에서 작업해도 떠야 하므로 직접 푸시.
     if (count > 0) {
       const bits: string[] = [];
@@ -758,12 +839,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         link: '/schedule/daily',
       });
     }
-  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, pushNotification]);
+  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, pushNotification, mutateMessages]);
 
   // 직전 적용을 되돌린다(생성한 레코드 제거 + 삭제/수정한 일정 복원)
   const undoAssistantProposal = useCallback((index: number) => {
-    const msg = assistantMessagesRef.current[index];
-    if (!msg || msg.applied == null || msg.undone || !msg.undo) return;
+    const convId = activeConversationIdRef.current;
+    const activeMsgs = conversationsRef.current.find(c => c.id === convId)?.messages ?? [];
+    const msg = activeMsgs[index];
+    if (!convId || !msg || msg.applied == null || msg.undone || !msg.undo) return;
     const u = msg.undo;
     u.entryIds.forEach(id => removeEntry(id));
     u.vendorIds.forEach(id => removeVendor(id));
@@ -782,8 +865,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (u.deletedSites ?? []).forEach(s => saveSite(s));
     (u.updatedAccountsPrev ?? []).forEach(a => saveAccount(a));
     (u.updatedSitesPrev ?? []).forEach(s => saveSite(s));
-    setAssistantMessages(prev => prev.map((m, i) => i === index ? { ...m, undone: true } : m));
-  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite]);
+    mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, undone: true } : m));
+  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, mutateMessages]);
 
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
@@ -827,6 +910,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const sites = await load<SiteEntry>('site_entries');
       const rep = await load<Report>('reports');
       const plans = await load<AiPlanResult>('ai_plans');
+      const convs = await load<AssistantConversation>('assistant_conversations'); // RLS 로 본인 것만 조회됨
       if (!active) return;
       if (c && c.length === 0) { await seed('clients', CLIENTS); c = CLIENTS; }
       if (e && e.length === 0) { await seed('schedule_entries', SCHEDULE_ENTRIES); e = SCHEDULE_ENTRIES; }
@@ -854,6 +938,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // ai_plans: 원격에 있으면 그걸 우선(공유본), 원격이 비었고 로컬에만 있으면 backfill(다른 데이터와 동일).
       if (plans && plans.length) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
       else if (plans && plans.length === 0 && aiHistoryRef.current.length) persistMany('ai_plans', aiHistoryRef.current);
+      // 어시스턴트 대화: 최신순으로 정렬, 가장 최근 대화를 활성화(없으면 빈 상태 → 첫 전송 시 자동 생성)
+      if (convs) {
+        const sorted = [...convs].sort((a, b) => b.updatedAt - a.updatedAt);
+        setConversations(sorted);
+        setActiveConversationId(sorted[0]?.id ?? null);
+      }
     })();
     return () => { active = false; };
   }, [uid]);
@@ -889,6 +979,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
       aiImageRunning, aiImageError, startAiImageJob,
       assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
+      conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,

@@ -114,6 +114,16 @@ export interface AssistantMessage {
   undone?: boolean;   // 되돌리기 완료 표시
 }
 
+// AI 어시스턴트 대화(채팅) — 계정별로 여러 개를 만들고 기록을 관리한다.
+// 개인 대화이므로 Supabase 에 소유자(user_id) RLS 로 저장한다(공유 데이터 아님).
+export interface AssistantConversation {
+  id: string;
+  title: string;        // 첫 사용자 메시지에서 자동 생성(없으면 '새 대화')
+  messages: AssistantMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type AccountStatus = 'active' | 'suspended';
 
 // Supabase 인증 + profiles 테이블에서 만들어지는 로그인 사용자
