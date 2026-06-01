@@ -8,7 +8,6 @@ import InlineScreenshot from '../components/InlineScreenshot';
 import InlineLink from '../components/InlineLink';
 import ScheduleModal from '../components/ScheduleModal';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
-import { USERS } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
 import { overlapsRange, isMultiDay } from '../utils/dateRange';
@@ -16,7 +15,7 @@ import { overlapsRange, isMultiDay } from '../utils/dateRange';
 const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
 export default function FullSchedulePage() {
-  const { entries, saveEntry, removeEntry, patchEntry, clients } = useApp();
+  const { entries, saveEntry, removeEntry, patchEntry, clients, members } = useApp();
   const { notify, show: showToast } = useCopyToast();
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
@@ -29,7 +28,8 @@ export default function FullSchedulePage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  const managers = USERS.filter(u => u.role !== 'client');
+  // 담당자 필터는 실제 가입·승인된 담당자(Supabase profiles)를 사용 (스케줄 등록 모달과 동일 소스)
+  const managers = members;
 
   const filtered = entries
     .filter(e => filterClient === 'all' || e.clientId === filterClient)

@@ -12,14 +12,13 @@ import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
 import { coversDate, isMultiDay, fmtLocal } from '../utils/dateRange';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
-import { USERS } from '../data/mockData';
 
 const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
 function toDateStr(d: Date) { return fmtLocal(d); }
 
 export default function DailySchedulePage() {
-  const { entries, saveEntry, removeEntry, patchEntry, clients } = useApp();
+  const { entries, saveEntry, removeEntry, patchEntry, clients, members } = useApp();
   const { notify, show: showToast } = useCopyToast();
 
   const [date, setDate] = useState(toDateStr(new Date()));
@@ -32,7 +31,8 @@ export default function DailySchedulePage() {
   const [filterStatus, setFilterStatus] = useState<ScheduleStatus | 'all'>('all');
   const [filterManager, setFilterManager] = useState('all');
 
-  const managers = USERS.filter(u => u.role !== 'client');
+  // 담당자 필터는 실제 가입·승인된 담당자(Supabase profiles)를 사용 (스케줄 등록 모달과 동일 소스)
+  const managers = members;
 
   const prevDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() - 1); setDate(toDateStr(d)); };
   const nextDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() + 1); setDate(toDateStr(d)); };
