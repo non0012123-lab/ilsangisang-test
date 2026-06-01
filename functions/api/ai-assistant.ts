@@ -59,7 +59,7 @@ interface AssistantRequest {
   history?: { role: 'user' | 'assistant'; text: string }[];
   today?: string;
   managers?: string[];
-  clients?: string[];
+  clients?: { id?: string; name?: string; industry?: string; categories?: string[]; reportAnchorDate?: string; status?: string }[];
   categories?: string[];
   entries?: CtxEntry[];
   handoverDocs?: CtxHandover[];
@@ -108,7 +108,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const today = req.today || new Date().toISOString().slice(0, 10);
   const managers = req.managers ?? [];
-  const clients = req.clients ?? [];
+  const clients = (Array.isArray(req.clients) ? req.clients : []).filter(c => c && c.name);
+  const clientNames = clients.map(c => c.name as string);
   const categories = req.categories ?? [];
   const entries = (Array.isArray(req.entries) ? req.entries : []).slice(0, 400);
   const handoverDocs = (Array.isArray(req.handoverDocs) ? req.handoverDocs : []).slice(0, 60);
@@ -183,7 +184,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  "entries": [ { "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "managerName":"", "clientName":"", "category":"", "keyword":"", "status":"pending|in-progress|completed" } ],',
     '  "updates": [ { "id":"기존 일정 id", "date":"YYYY-MM-DD 또는 null", "endDate":"YYYY-MM-DD 또는 null", "managerName":"문자열 또는 null", "status":"상태 또는 null" } ],',
     '  "deletes": [ "삭제할 기존 일정 id" ],',
-    '  "clients": [ { "name":"", "industry":"", "categories":[], "contactPerson":"", "phone":"", "email":"" } ],',
+    '  "clients": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 업체 id", "name":"", "industry":"", "categories":[], "contactPerson":"", "phone":"", "email":"", "status":"active|inactive|pending", "reportAnchorDate":"YYYY-MM-DD (월간 보고 기준 시작일)" } ],',
     '  "handovers": [ { "clientName":"", "overview":"" } ],',
     '  "vendors": [ { "name":"", "services":"", "contactPerson":"", "phone":"", "email":"", "pricing":"", "notes":"" } ],',
     '  "accounts": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "platform":"블로그|SNS|유튜브|기타", "grade":"블로그 등급(준최2~준최6/최적1~최적4)", "ownership":"client|inhouse", "username":"", "password":"", "category":"", "ip":"" } ],',
@@ -200,7 +201,11 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- "배분/재배치/나눠줘" 요청이면, 아래 현재 일정을 참고해 날짜·담당자를 합리적으로 분산한다. 기존 일정을 옮기는 것은 updates(그 일정의 id 사용), 새로 만드는 것은 entries 에 담는다. 변경하지 않는 필드는 null.',
     '- 일정 삭제/취소("6/10 현대자동차 블로그관리 삭제해줘", "○○ 일정 취소해줘", "방금 추가한 거 삭제" 등): 아래 현재 일정 목록에서 날짜·업체·카테고리·키워드로 가장 잘 맞는 일정을 찾아 그 id 를 deletes 배열에 담는다. 여러 건이 맞으면 모두 담는다. 일치하는 게 없거나 어느 것인지 모호하면 삭제하지 말고 reply 에서 어떤 일정인지 되묻는다. 삭제는 되돌리기 어려우니, reply 에 무엇을 삭제할지 명확히 적고 "적용"을 눌러야 반영된다고 안내한다.',
     '- "방금 적용한 거 취소/되돌려줘"처럼 직전 적용 자체를 되돌리는 요청이면, 일정 id 를 추측해 deletes 에 넣지 말고, reply 에서 "적용된 메시지의 \'실행 취소\' 버튼을 눌러주세요"라고 안내한다(임의 삭제 방지).',
-    '- 신규 업체(클라이언트) 등록: 사용자가 새 업체 등록을 원하거나, 일정/인수인계를 만들려는 업체가 아래 "업체 목록"에 없으면 clients 에 그 업체를 담아 먼저 등록을 제안한다. 그리고 그 업체명을 entries/handovers 의 clientName 에 그대로 사용한다(적용 시 신규 업체가 먼저 생성된 뒤 연결됨). 아는 정보만 채우고 모르면 빈 문자열.',
+    '- 클라이언트(업체) 추가/수정/삭제는 clients 배열에 op(add/update/delete)로 담는다(수정·삭제는 아래 "업체 상세"의 id 사용).',
+    '  · add: 새 업체 등록 요청이거나, 일정/인수인계를 만들려는 업체가 "업체 목록"에 없으면 op:"add"로 담아 먼저 등록을 제안하고, 그 업체명을 entries/handovers 의 clientName 에 그대로 사용한다. 아는 정보만 채우고 모르면 빈 문자열.',
+    '  · update: 기존 업체의 업종/카테고리/담당자/연락처/상태/보고 기준 시작일 변경 요청이면 op:"update" + 그 업체 id 로 담고, 바꿀 필드만 채운다(나머지는 생략하면 기존값 유지).',
+    '  · delete: 업체 삭제/해지 요청이면 op:"delete" + id. 삭제하면 연결된 인수인계도 함께 삭제되고 되돌리기 어려우니, reply 에 어떤 업체를 삭제할지 명확히 적고 "적용"을 눌러야 반영된다고 안내한다. 어느 업체인지 모호하면 삭제하지 말고 되묻는다.',
+    '  · 월간 보고서 기준일: "○○ 보고 기준일/정산일/보고 시작일 5일로 해줘"처럼 말하면 reportAnchorDate 에 YYYY-MM-DD 로 채운다("매월 5일"류는 가장 적절한 해당 일자로). 이 날짜 기준 30일 주기로 월간 보고서가 자동 생성된다.',
     '- 인수인계 문서 신규 등록: 사용자가 특정 업체의 인수인계 문서를 만들어 달라고 하면 handovers 에 담는다(overview 에 간단 요약 가능).',
     '- 업체 가이드라인 질문("○○ 업체 가이드라인 알려줘", "스타벅스 톤앤매너는?", "△△ 운영 규칙/주의사항 뭐야?" 등): 아래 "업체 가이드라인(인수인계)"과 "AI 기획 결과 요약"을 근거로 해당 업체의 운영 가이드라인·톤앤매너·금지사항·특이사항·기획 방향을 정리해 reply 에 답한다. 이때는 모든 액션 배열(entries/updates/clients/handovers)을 비운다(등록이 아니라 조회·요약이므로).',
     '- 가이드라인을 답할 때는 인수인계 문서의 내용을 우선하고, AI 기획 결과의 캠페인 방향·톤을 보조적으로 덧붙인다. 해당 업체 정보가 아래에 없으면 지어내지 말고 "등록된 인수인계/기획 정보가 없다"고 안내한다.',
@@ -219,7 +224,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 확실하지 않은 정보를 지어내지 말 것. 모르면 reply 에서 추가 정보를 요청.',
     '',
     `담당자 목록: ${managers.join(', ') || '(없음)'}`,
-    `업체 목록: ${clients.join(', ') || '(없음)'}`,
+    `업체 목록: ${clientNames.join(', ') || '(없음)'}`,
+    '업체 상세(수정/삭제 시 id 사용 · reportAnchorDate=월간 보고 기준 시작일):',
+    JSON.stringify(clients.map(c => ({ id: c.id, name: c.name, industry: c.industry, categories: c.categories, reportAnchorDate: c.reportAnchorDate ?? null, status: c.status }))),
     `카테고리 목록: ${categories.join(', ')}`,
     '',
     '현재 등록된 일정(JSON, id 포함 — updates 에 이 id 사용):',

@@ -5,6 +5,7 @@ import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
+import { entryImages } from '../utils/entryImages';
 import InlineLink from '../components/InlineLink';
 import ScheduleModal from '../components/ScheduleModal';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
@@ -128,7 +129,7 @@ export default function FullSchedulePage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
-                  {['#', '날짜', '담당자', '클라이언트', '카테고리', '키워드/제목', '링크/내용', '순위', '캡처본', '상태', '작업'].map(h => (
+                  {['#', '날짜', '담당자', '클라이언트', '카테고리', '키워드/제목', '링크/내용', '순위', '이미지', '상태', '작업'].map(h => (
                     <th key={h} className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -170,8 +171,8 @@ export default function FullSchedulePage() {
                       </td>
                       <td className="px-4 py-3">
                         <InlineScreenshot
-                          screenshot={entry.screenshot}
-                          onChange={v => updateEntry(entry.id, { screenshot: v })}
+                          images={entryImages(entry)}
+                          onImagesChange={imgs => updateEntry(entry.id, { images: imgs, screenshot: undefined })}
                           onPreview={setPreviewImg}
                         />
                       </td>
@@ -222,7 +223,7 @@ export default function FullSchedulePage() {
               <p className="text-xs text-gray-500 mb-2">{entry.managerName} · {entry.clientName}</p>
               <div className="flex items-center gap-3 flex-wrap">
                 <InlineLink link={entry.link} onChange={v => updateEntry(entry.id, { link: v })} onCopied={notify} />
-                <InlineScreenshot screenshot={entry.screenshot} onChange={v => updateEntry(entry.id, { screenshot: v })} onPreview={setPreviewImg} />
+                <InlineScreenshot images={entryImages(entry)} onImagesChange={imgs => updateEntry(entry.id, { images: imgs, screenshot: undefined })} onPreview={setPreviewImg} />
               </div>
             </div>
           ))}
@@ -232,7 +233,7 @@ export default function FullSchedulePage() {
       {modal.open && <ScheduleModal entry={modal.entry} onSave={handleSave} onClose={() => setModal({ open: false })} />}
       {previewImg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setPreviewImg(null)}>
-          <img src={previewImg} alt="캡처본" className="max-w-full max-h-full rounded-xl shadow-2xl" />
+          <img src={previewImg} alt="이미지" className="max-w-full max-h-full rounded-xl shadow-2xl" />
         </div>
       )}
       {showToast && (

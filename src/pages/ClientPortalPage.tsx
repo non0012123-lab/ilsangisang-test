@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare, CalendarRange, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { REPORTS } from '../data/mockData';
 import { useApp } from '../context/AppContext';
+import { duePeriods, reportIdFor, aggregateForPeriod, periodLabel, fallbackSummary, fallbackHighlights } from '../utils/monthlyReports';
 import CategoryBadge from '../components/CategoryBadge';
+import ImageGallery from '../components/ImageGallery';
 import KeywordTool from '../components/KeywordTool';
 import { downloadReportPdf } from '../utils/reportPdf';
-import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd } from '../utils/dateRange';
-import { todayStr, currentMonthStr } from '../utils/today';
+import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
+import { todayStr } from '../utils/today';
 import type { ScheduleEntry } from '../types';
 
 type Tab = 'dashboard' | 'timetable' | 'reports' | 'keywords';
@@ -205,27 +206,85 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
 
 export default function ClientPortalPage() {
   const { user, logout } = useAuth();
-  const { entries: allEntries, clients } = useApp();
+  const { entries: allEntries, clients, reports: allReports, saveReport } = useApp();
   const [tab, setTab] = useState<Tab>('dashboard');
 
   const clientId = user?.clientId ?? '';
   const client = clients.find(c => c.id === clientId);
-  const reports = REPORTS.filter(r => r.clientId === clientId);
   const entries = allEntries.filter(e => e.clientId === clientId);
   const TODAY = todayStr();
-  const currentMonth = entries.filter(e => e.date.startsWith(currentMonthStr()));
 
-  const completed = currentMonth.filter(e => e.status === 'completed').length;
-  const inProgress = currentMonth.filter(e => e.status === 'in-progress').length;
-  const pending = currentMonth.filter(e => e.status === 'pending').length;
+  // 전송일이 지난 월간 보고서를 자동 생성(+AI 요약, 1회 후 저장)하고, 클라이언트에게 노출
+  const clientReports = allReports
+    .filter(r => r.clientId === clientId && (r.releaseDate ?? r.date) <= TODAY)
+    .sort((a, b) => (b.periodEnd ?? b.date).localeCompare(a.periodEnd ?? a.date));
+  const genRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!client) return;
+    duePeriods(client, TODAY).forEach(p => {
+      const id = reportIdFor(client.id, p.start);
+      if (allReports.some(r => r.id === id) || genRef.current.has(id)) return;
+      genRef.current.add(id);
+      (async () => {
+        const agg = aggregateForPeriod(allEntries, client.id, p.start, p.end);
+        const label = periodLabel(p.start, p.end);
+        let summary = '', highlights: string[] = [], aiGenerated = false;
+        try {
+          const res = await fetch('/api/ai-monthly-summary', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              clientName: client.name, industry: client.industry, period: label,
+              total: agg.total, completed: agg.completed, totalViews: agg.totalViews, totalLikes: agg.totalLikes, totalSaves: agg.totalSaves,
+              byCategory: agg.byCategory,
+              entries: agg.entries.map(e => ({ date: e.date, category: e.category, title: e.opinionTitle ?? e.keyword ?? '', status: e.status, rank: e.rank, views: e.metrics?.views })),
+            }),
+          });
+          if ((res.headers.get('content-type') ?? '').includes('application/json')) {
+            const data = await res.json();
+            if (res.ok && !data.error && data.summary) {
+              summary = data.summary;
+              highlights = Array.isArray(data.highlights) ? data.highlights : [];
+              aiGenerated = true;
+            }
+          }
+        } catch { /* AI 실패 → 규칙기반 폴백 */ }
+        if (!summary) { summary = fallbackSummary(label, agg); highlights = fallbackHighlights(agg); }
+        saveReport({
+          id, clientId: client.id, clientName: client.name,
+          title: `${client.name} ${label} 보고서`, date: p.releaseDate, period: label, type: 'monthly',
+          summary, highlights, periodStart: p.start, periodEnd: p.end, releaseDate: p.releaseDate,
+          aiGenerated, createdAt: Date.now(),
+        });
+      })();
+    });
+  }, [client, allReports, allEntries, TODAY, saveReport]);
 
-  const recentEntries = entries
-    .filter(e => e.date <= TODAY && e.category !== '네이버 여론작업')
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 6);
+  // 마케팅 현황 기간 — 기본은 '당일'(오늘 작업 기준), 지난 7일/30일/기간 지정으로 전환 가능
+  const [preset, setPreset] = useState<'day' | '7d' | '30d' | 'custom'>('day');
+  const [customFrom, setCustomFrom] = useState(TODAY);
+  const [customTo, setCustomTo] = useState(TODAY);
 
-  const opinionEntries = entries
-    .filter(e => e.category === '네이버 여론작업' && e.date <= TODAY)
+  const range = (() => {
+    const back = (n: number) => { const d = new Date(TODAY + 'T00:00:00'); d.setDate(d.getDate() - n); return fmtLocal(d); };
+    if (preset === '7d') return { from: back(6), to: TODAY };   // 오늘 포함 지난 7일
+    if (preset === '30d') return { from: back(29), to: TODAY }; // 오늘 포함 지난 30일
+    if (preset === 'custom') return { from: customFrom, to: customTo };
+    return { from: TODAY, to: TODAY };
+  })();
+  const rangeLabel = preset === 'day' ? '오늘' : preset === '7d' ? '지난 7일' : preset === '30d' ? '지난 30일' : `${range.from} ~ ${range.to}`;
+
+  // 선택 기간에 걸치는(기간 작업 포함) 작업
+  const rangeEntries = entries.filter(e => overlapsRange(e, range.from, range.to));
+  const completed = rangeEntries.filter(e => e.status === 'completed').length;
+  const inProgress = rangeEntries.filter(e => e.status === 'in-progress').length;
+  const pending = rangeEntries.filter(e => e.status === 'pending').length;
+
+  const recentEntries = rangeEntries
+    .filter(e => e.category !== '네이버 여론작업')
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const opinionEntries = rangeEntries
+    .filter(e => e.category === '네이버 여론작업')
     .sort((a, b) => b.date.localeCompare(a.date));
 
   if (!client) {
@@ -269,7 +328,7 @@ export default function ClientPortalPage() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold mb-1">안녕하세요, {client.name} 님 👋</h1>
-              <p className="text-blue-200 text-sm">5월 마케팅 현황을 확인하세요</p>
+              <p className="text-blue-200 text-sm">{parseInt(TODAY.slice(5, 7), 10)}월 마케팅 현황을 확인하세요</p>
             </div>
             <div className="text-right">
               <p className="text-blue-200 text-xs">계약 기간</p>
@@ -286,7 +345,7 @@ export default function ClientPortalPage() {
         {/* Tabs */}
         <div className="flex bg-white rounded-2xl shadow-sm border border-gray-100 p-1.5 gap-1">
           {([
-            { key: 'dashboard', icon: <TrendingUp size={15} />, label: '작업 현황' },
+            { key: 'dashboard', icon: <TrendingUp size={15} />, label: '마케팅 현황' },
             { key: 'timetable', icon: <CalendarRange size={15} />, label: '타임테이블' },
             { key: 'reports', icon: <FileText size={15} />, label: '보고서' },
             { key: 'keywords', icon: <Search size={15} />, label: '키워드 조회' },
@@ -303,6 +362,25 @@ export default function ClientPortalPage() {
         {/* Tab: Dashboard */}
         {tab === 'dashboard' && (
           <>
+            {/* 기간 선택 — 기본 당일(오늘 작업 기준) */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-gray-400 mr-1">기간</span>
+              {([['day', '당일'], ['7d', '지난 7일'], ['30d', '지난 30일'], ['custom', '기간 지정']] as [typeof preset, string][]).map(([v, label]) => (
+                <button key={v} onClick={() => setPreset(v)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${preset === v ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{label}</button>
+              ))}
+              {preset === 'custom' && (
+                <div className="flex items-center gap-1.5 ml-1">
+                  <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <span className="text-gray-400 text-xs">~</span>
+                  <input type="date" value={customTo} min={customFrom} onChange={e => setCustomTo(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              )}
+              <span className="ml-auto text-xs text-gray-400">{rangeLabel} · {rangeEntries.length}건</span>
+            </div>
+
             {/* Stats */}
             <div className="grid grid-cols-3 gap-4">
               {[
@@ -313,7 +391,7 @@ export default function ClientPortalPage() {
                 <div key={s.label} className={`bg-white rounded-2xl border ${s.border} p-5`}>
                   <div className={`w-10 h-10 rounded-xl ${s.bg} ${s.color} flex items-center justify-center mb-3`}>{s.icon}</div>
                   <p className="text-3xl font-bold text-gray-900">{s.value}</p>
-                  <p className="text-sm text-gray-500 mt-0.5">5월 {s.label}</p>
+                  <p className="text-sm text-gray-500 mt-0.5">{rangeLabel} {s.label}</p>
                 </div>
               ))}
             </div>
@@ -321,7 +399,7 @@ export default function ClientPortalPage() {
             {/* Recent Tasks */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
               <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between">
-                <h3 className="font-bold text-gray-900">최근 작업 현황</h3>
+                <h3 className="font-bold text-gray-900">{rangeLabel} 마케팅 현황</h3>
                 <TrendingUp size={16} className="text-gray-400" />
               </div>
               <div className="overflow-x-auto">
@@ -418,6 +496,9 @@ export default function ClientPortalPage() {
                 </div>
               </div>
             )}
+
+            {/* 매체별 첨부 이미지 (시안/인사이트 분리) — 선택 기간 기준 */}
+            <ImageGallery entries={rangeEntries} title="첨부 이미지 (시안·인사이트)" />
           </>
         )}
 
@@ -441,10 +522,10 @@ export default function ClientPortalPage() {
               <FileText size={16} className="text-gray-400" />
             </div>
             <div className="p-4 grid sm:grid-cols-2 gap-3">
-              {reports.length === 0 ? (
-                <p className="col-span-2 text-center py-10 text-gray-400 text-sm">보고서가 없습니다.</p>
+              {clientReports.length === 0 ? (
+                <p className="col-span-2 text-center py-10 text-gray-400 text-sm">아직 공개된 보고서가 없습니다. 전송일이 지나면 월간 보고서가 자동으로 표시됩니다.</p>
               ) : (
-                reports.map(report => (
+                clientReports.map(report => (
                   <div key={report.id} className="border border-gray-100 rounded-xl p-4 hover:border-blue-200 transition-colors">
                     <div className="flex items-start justify-between mb-2">
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${report.type === 'monthly' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>

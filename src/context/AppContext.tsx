@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, Vendor, AssistantUndo, AccountEntry, SiteEntry } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report } from '../types';
 import { SCHEDULE_ENTRIES, CLIENTS, HANDOVER_DOCS, USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
@@ -14,6 +14,7 @@ interface AppContextType {
   vendors: Vendor[];
   accounts: AccountEntry[];
   siteEntries: SiteEntry[];
+  reports: Report[];
   members: TeamMember[];
   reloadMembers: () => Promise<void>;
   aiHistory: AiPlanResult[];
@@ -51,6 +52,8 @@ interface AppContextType {
   removeAccount: (id: string) => void;
   saveSite: (site: SiteEntry) => void;
   removeSite: (id: string) => void;
+  saveReport: (report: Report) => void;
+  removeReport: (id: string) => void;
 }
 
 export interface AiPlanJobInput {
@@ -78,6 +81,7 @@ const lsSave = (key: string, list: unknown) => {
 const VENDORS_LS_KEY = 'ilsangisang.vendors.v1';
 const ACCOUNTS_LS_KEY = 'ilsangisang.accounts.v1';
 const SITES_LS_KEY = 'ilsangisang.sites.v1';
+const REPORTS_LS_KEY = 'ilsangisang.reports.v1';
 const loadLocalVendors = (): Vendor[] => lsLoad<Vendor>(VENDORS_LS_KEY);
 const saveLocalVendors = (list: Vendor[]) => lsSave(VENDORS_LS_KEY, list);
 
@@ -96,6 +100,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [vendors, setVendors] = useState<Vendor[]>(loadLocalVendors);
   const [accounts, setAccounts] = useState<AccountEntry[]>(() => lsLoad<AccountEntry>(ACCOUNTS_LS_KEY));
   const [siteEntries, setSiteEntries] = useState<SiteEntry[]>(() => lsLoad<SiteEntry>(SITES_LS_KEY));
+  const [reports, setReports] = useState<Report[]>(() => lsLoad<Report>(REPORTS_LS_KEY));
   const [members, setMembers] = useState<TeamMember[]>(MOCK_MEMBERS);
   const [aiHistory, setAiHistory] = useState<AiPlanResult[]>([]);
   const [aiPlanRunning, setAiPlanRunning] = useState(false);
@@ -138,6 +143,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const siteEntriesRef = useRef(siteEntries);
   useEffect(() => { siteEntriesRef.current = siteEntries; }, [siteEntries]);
   useEffect(() => { lsSave(SITES_LS_KEY, siteEntries); }, [siteEntries]);
+  const reportsRef = useRef(reports);
+  useEffect(() => { reportsRef.current = reports; }, [reports]);
+  useEffect(() => { lsSave(REPORTS_LS_KEY, reports); }, [reports]);
   const assistantMessagesRef = useRef(assistantMessages);
   useEffect(() => { assistantMessagesRef.current = assistantMessages; }, [assistantMessages]);
   const assistantLoadingRef = useRef(assistantLoading);
@@ -243,6 +251,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeSite = useCallback((id: string) => {
     setSiteEntries(prev => prev.filter(s => s.id !== id));
     persistDelete('site_entries', id);
+  }, []);
+
+  // ── 월간 보고서 (전송일이 지나면 포털에서 자동 생성·캐시) ──
+  const saveReport = useCallback((report: Report) => {
+    setReports(prev => prev.some(r => r.id === report.id) ? prev.map(r => r.id === report.id ? report : r) : [...prev, report]);
+    persistOne('reports', report);
+  }, []);
+  const removeReport = useCallback((id: string) => {
+    setReports(prev => prev.filter(r => r.id !== id));
+    persistDelete('reports', id);
   }, []);
 
   // ── AI 기획 결과 (이미지는 용량 때문에 DB 저장 제외; 로컬 세션에만 유지) ──
@@ -387,7 +405,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           message, history, today: todayStr(),
           managers: membersRef.current.map(m => m.name),
-          clients: activeClients.map(c => c.name),
+          clients: activeClients.map(c => ({ id: c.id, name: c.name, industry: c.industry, categories: c.categories, reportAnchorDate: c.reportAnchorDate, status: c.status })),
           categories: ASSISTANT_CATEGORIES,
           handoverDocs: handoverContext,
           aiPlans: aiPlanContext,
@@ -462,6 +480,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const undo: AssistantUndo = {
       entryIds: [], clientIds: [], vendorIds: [], handoverIds: [], deletedEntries: [], updatedPrev: [],
       accountIds: [], siteIds: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
+      deletedClients: [], updatedClientsPrev: [], deletedHandovers: [],
     };
 
     const matchManager = (name?: string) => {
@@ -471,15 +490,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return mem.find(m => name.includes(m.name) || m.name.includes(name))?.id ?? '';
     };
 
-    // 1) 신규 업체 등록
+    // 1) 클라이언트 추가/수정/삭제
     const created: { name: string; id: string }[] = [];
+    const findClient = (c: { id?: string; name?: string }) =>
+      clientsRef.current.find(x => x.id === c.id) ?? (c.name ? clientsRef.current.find(x => x.name === c.name) : undefined);
+    const filterCats = (arr?: string[]) => (Array.isArray(arr) ? arr.filter(x => (ASSISTANT_CATEGORIES as string[]).includes(x)) as Category[] : undefined);
     (msg.clients ?? []).forEach((c, i) => {
+      const op = c.op ?? (c.id ? 'update' : 'add');
+      if (op === 'delete') {
+        const cur = findClient(c);
+        if (!cur) return;
+        undo.deletedClients!.push({ ...cur });
+        handoverDocsRef.current.filter(d => d.clientId === cur.id).forEach(d => undo.deletedHandovers!.push({ ...d }));
+        removeClient(cur.id); // 연결 인수인계도 함께 제거
+        count += 1;
+        return;
+      }
+      if (op === 'update') {
+        const cur = findClient(c);
+        if (!cur) return;
+        const cats = filterCats(c.categories);
+        undo.updatedClientsPrev!.push({ ...cur });
+        saveClient({ ...cur,
+          name: c.name ?? cur.name, industry: c.industry ?? cur.industry,
+          contactPerson: c.contactPerson ?? cur.contactPerson, email: c.email ?? cur.email, phone: c.phone ?? cur.phone,
+          categories: cats ?? cur.categories, status: c.status ?? cur.status, reportAnchorDate: c.reportAnchorDate ?? cur.reportAnchorDate,
+        });
+        created.push({ name: cur.name, id: cur.id });
+        count += 1;
+        return;
+      }
+      // add (기본)
       if (!c.name) return;
       const ex = clientsRef.current.find(x => x.name === c.name);
       if (ex) { created.push({ name: c.name, id: ex.id }); return; }
       const id = `cl-${Date.now()}-${i}`;
-      const cats = (Array.isArray(c.categories) ? c.categories : []).filter(x => (ASSISTANT_CATEGORIES as string[]).includes(x)) as Category[];
-      saveClient({ id, name: c.name, industry: c.industry || '', contactPerson: c.contactPerson || '', email: c.email || '', phone: c.phone || '', startDate: todayStr(), categories: cats, status: 'active', description: '' });
+      saveClient({ id, name: c.name, industry: c.industry || '', contactPerson: c.contactPerson || '', email: c.email || '', phone: c.phone || '', startDate: todayStr(), categories: filterCats(c.categories) ?? [], status: c.status ?? 'active', description: '', reportAnchorDate: c.reportAnchorDate });
       created.push({ name: c.name, id });
       undo.clientIds.push(id);
       count += 1;
@@ -613,7 +659,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     setAssistantMessages(prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
-  }, [saveClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite]);
+  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite]);
 
   // 직전 적용을 되돌린다(생성한 레코드 제거 + 삭제/수정한 일정 복원)
   const undoAssistantProposal = useCallback((index: number) => {
@@ -626,6 +672,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     u.clientIds.forEach(id => removeClient(id)); // 연결 인수인계도 함께 제거됨
     u.deletedEntries.forEach(e => saveEntry(e)); // 삭제했던 일정 복원
     u.updatedPrev.forEach(e => saveEntry(e));    // 수정 전 원본 복원
+    // 클라이언트 수정/삭제 되돌리기 (이전 버전 메시지엔 필드가 없을 수 있어 ?? [])
+    (u.updatedClientsPrev ?? []).forEach(c => saveClient(c));
+    (u.deletedClients ?? []).forEach(c => saveClient(c));
+    (u.deletedHandovers ?? []).forEach(h => saveHandover(h));
     // 아이디 목록 / 홈페이지 목록 되돌리기 (이전 버전 메시지엔 필드가 없을 수 있어 ?? [])
     (u.accountIds ?? []).forEach(id => removeAccount(id));
     (u.siteIds ?? []).forEach(id => removeSite(id));
@@ -634,7 +684,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (u.updatedAccountsPrev ?? []).forEach(a => saveAccount(a));
     (u.updatedSitesPrev ?? []).forEach(s => saveSite(s));
     setAssistantMessages(prev => prev.map((m, i) => i === index ? { ...m, undone: true } : m));
-  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, removeAccount, removeSite, saveAccount, saveSite]);
+  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite]);
 
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
@@ -676,6 +726,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const v = await load<Vendor>('vendors');
       const acc = await load<AccountEntry>('accounts');
       const sites = await load<SiteEntry>('site_entries');
+      const rep = await load<Report>('reports');
       const plans = await load<AiPlanResult>('ai_plans');
       if (!active) return;
       if (c && c.length === 0) { await seed('clients', CLIENTS); c = CLIENTS; }
@@ -700,6 +751,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       syncLocalFirst('vendors', v, vendorsRef.current, setVendors);
       syncLocalFirst('accounts', acc, accountsRef.current, setAccounts);
       syncLocalFirst('site_entries', sites, siteEntriesRef.current, setSiteEntries);
+      syncLocalFirst('reports', rep, reportsRef.current, setReports);
       if (plans) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
     })();
     return () => { active = false; };
@@ -707,12 +759,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      entries, clients, handoverDocs, vendors, accounts, siteEntries, members: orderedMembers, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
+      entries, clients, handoverDocs, vendors, accounts, siteEntries, reports, members: orderedMembers, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
       aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
       aiImageRunning, aiImageError, startAiImageJob,
       assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
-      saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite,
+      saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
     }}>
       {children}
     </AppContext.Provider>

@@ -1,7 +1,10 @@
-import { useState, useRef, type ChangeEvent } from 'react';
-import { X, Upload, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { useState } from 'react';
+import { X, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import type { ScheduleEntry, Category, ScheduleStatus, AIMetrics } from '../types';
 import { useApp } from '../context/AppContext';
+import ImageDropzone from './ImageDropzone';
+import ImageThumb from './ImageThumb';
+import { MAX_IMAGES, entryImages } from '../utils/entryImages';
 
 const CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 const STATUSES: { value: ScheduleStatus; label: string }[] = [
@@ -50,10 +53,16 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
   const [metrics, setMetrics] = useState<AIMetrics>(entry?.metrics ?? {});
   const [showMetrics, setShowMetrics] = useState(!!entry?.metrics);
   const [aiLoading, setAiLoading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const set = (key: keyof ScheduleEntry, value: unknown) =>
     setForm(prev => ({ ...prev, [key]: value }));
+
+  // 이미지(시안/인사이트) — 레거시 screenshot/문자열 호환 + 신규 {url,kind} 배열, 최대 MAX_IMAGES 장
+  const images = entryImages(form);
+  const setImages = (imgs: typeof images) => setForm(prev => ({ ...prev, images: imgs, screenshot: undefined }));
+  const addImage = (url: string) => { setImages([...images, { url, kind: 'design' as const }].slice(0, MAX_IMAGES)); setShowMetrics(true); };
+  const removeImage = (i: number) => setImages(images.filter((_, idx) => idx !== i));
+  const toggleKind = (i: number) => setImages(images.map((im, idx) => idx === i ? { ...im, kind: im.kind === 'insight' ? 'design' : 'insight' } : im));
 
   const setMetric = (key: keyof AIMetrics, value: string) => {
     const num = Number(value.replace(/,/g, ''));
@@ -68,17 +77,6 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
   const handleManager = (id: string) => {
     const u = members.find(u => u.id === id);
     if (u) setForm(prev => ({ ...prev, managerId: u.id, managerName: u.name }));
-  };
-
-  const handleFile = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      set('screenshot', ev.target?.result as string);
-      setShowMetrics(true);
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleAiAnalyze = () => {
@@ -106,7 +104,7 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
       status: form.status!,
       keyword: form.keyword, link: form.link, rank: form.rank,
       opinionTitle: form.opinionTitle, opinionContent: form.opinionContent, opinionComments: form.opinionComments,
-      screenshot: form.screenshot,
+      images: images.length ? images : undefined, screenshot: undefined,
       metrics: hasMetrics ? { ...metrics, aiAnalyzed: false } : undefined,
       notes: form.notes,
     });
@@ -237,34 +235,21 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
             </>
           )}
 
-          {/* Screenshot */}
+          {/* 이미지 (시안/결과물) — 최대 MAX_IMAGES 장, 드래그앤드롭 */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">캡처본</label>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-            {form.screenshot ? (
-              <div className="flex items-start gap-3">
-                <div className="relative inline-block">
-                  <img src={form.screenshot} alt="캡처본" className="h-20 rounded-lg border border-gray-200 object-cover cursor-pointer"
-                    onClick={() => window.open(form.screenshot, '_blank')} />
-                  <button onClick={() => { set('screenshot', undefined); setShowMetrics(false); }}
-                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">
-                    <X size={10} />
-                  </button>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <button onClick={() => fileRef.current?.click()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-500 hover:bg-gray-50">
-                    <Upload size={12} /> 교체
-                  </button>
-                  <p className="text-xs text-gray-400">클릭 시 원본 보기</p>
-                </div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">
+              이미지 <span className="text-gray-400 font-normal">(최대 {MAX_IMAGES}장 · 배지로 시안/인사이트 전환 — 인사이트는 보고서에 크게 표시)</span>
+            </label>
+            {images.length > 0 && (
+              <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 mb-2">
+                {images.map((img, i) => (
+                  <ImageThumb key={i} img={img} onClick={() => window.open(img.url, '_blank')} onToggleKind={() => toggleKind(i)} onRemove={() => removeImage(i)} />
+                ))}
               </div>
-            ) : (
-              <button onClick={() => fileRef.current?.click()}
-                className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-200 rounded-lg text-sm text-gray-500 hover:border-blue-300 hover:text-blue-500 transition-colors w-full justify-center">
-                <Upload size={14} /> 캡처본 업로드
-              </button>
             )}
+            {images.length < MAX_IMAGES
+              ? <ImageDropzone className="w-full h-32" onImage={addImage} />
+              : <p className="text-xs text-amber-600 py-1">최대 {MAX_IMAGES}장까지 첨부할 수 있습니다.</p>}
           </div>
 
           {/* AI Metrics Section */}
@@ -285,11 +270,11 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
               <div className="px-4 py-4 space-y-3">
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-xs text-gray-500">
-                    캡처본의 인사이트 수치를 입력하세요. 향후 AI 자동 분석이 지원됩니다.
+                    이미지의 인사이트 수치를 입력하세요. 향후 AI 자동 분석이 지원됩니다.
                   </p>
-                  <button onClick={handleAiAnalyze} disabled={!form.screenshot || aiLoading}
+                  <button onClick={handleAiAnalyze} disabled={images.length === 0 || aiLoading}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                      form.screenshot
+                      images.length > 0
                         ? 'bg-blue-600 hover:bg-blue-700 text-white'
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     }`}>

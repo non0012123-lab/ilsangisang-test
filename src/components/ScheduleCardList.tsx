@@ -4,6 +4,7 @@ import InlineStatus from './InlineStatus';
 import InlineScreenshot from './InlineScreenshot';
 import InlineLink from './InlineLink';
 import { isMultiDay } from '../utils/dateRange';
+import { entryImages } from '../utils/entryImages';
 import type { ScheduleEntry, ScheduleStatus } from '../types';
 
 interface Props {
@@ -47,7 +48,7 @@ export default function ScheduleCardList({ entries, onPatch, onPreview, onEdit, 
           <p className="text-xs text-gray-500 mb-2">{entry.managerName} · {entry.clientName}</p>
           <div className="flex items-center gap-3 flex-wrap">
             <InlineLink link={entry.link} onChange={v => onPatch(entry.id, { link: v })} onCopied={onCopied} />
-            <InlineScreenshot screenshot={entry.screenshot} onChange={v => onPatch(entry.id, { screenshot: v })} onPreview={onPreview} />
+            <InlineScreenshot images={entryImages(entry)} onImagesChange={imgs => onPatch(entry.id, { images: imgs, screenshot: undefined })} onPreview={onPreview} />
           </div>
         </div>
       ))}

@@ -11,7 +11,7 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { openAiPlanPrint } from '../utils/aiPlanPdf';
 import { todayStr } from '../utils/today';
-import type { Client, Category, HandoverDoc, KeyContact, ImportantLink, BudgetItem } from '../types';
+import type { Client, Category, HandoverDoc, KeyContact, ImportantLink, BudgetItem, ReportPeriod } from '../types';
 
 const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업'];
 const STATUS_ORDER: Record<string, number> = { active: 0, pending: 1, inactive: 2 };
@@ -33,7 +33,7 @@ interface AiHandoverResult {
   keyContacts: KeyContact[];
   importantLinks: ImportantLink[];
   // 'new' 모드일 때 추출된 신규 업체 기본 정보
-  client?: { name: string; industry: string; contactPerson: string; email: string; phone: string; categories: Category[] };
+  client?: { name: string; industry: string; contactPerson: string; email: string; phone: string; categories: Category[]; reportAnchorDate?: string };
 }
 
 type DetailTab = 'overview' | 'schedule' | 'budget' | 'contacts' | 'guidelines' | 'memo' | 'ai' | 'prompt';
@@ -212,6 +212,8 @@ export default function ClientManagementPage() {
 
   const openAdd = () => { setForm(EMPTY_CLIENT); setEditClient(null); setShowForm(true); };
   const openEdit = (c: Client) => { setForm({ ...c }); setEditClient(c); setShowForm(true); };
+  const updatePeriod = (id: string, patch: Partial<ReportPeriod>) =>
+    setForm(prev => ({ ...prev, reportPeriods: (prev.reportPeriods ?? []).map(p => p.id === id ? { ...p, ...patch } : p) }));
 
   const handleSave = () => {
     if (!form.name) { alert('업체명은 필수입니다.'); return; }
@@ -397,6 +399,7 @@ export default function ClientManagementPage() {
             status: 'active',
             description: '',
             budgetItems: [],
+            reportAnchorDate: aiResult.client?.reportAnchorDate || undefined,
           };
       if (!existing) saveClient(client);
       const doc = buildHandoverFromAi(emptyHandover(client), aiResult);
@@ -1055,6 +1058,53 @@ export default function ClientManagementPage() {
                   <option value="pending">대기</option>
                   <option value="inactive">비활성</option>
                 </select>
+              </div>
+
+              {/* 월간 보고서 자동화 설정 */}
+              <div className="border border-gray-100 rounded-xl p-4 bg-gray-50/50 space-y-3">
+                <p className="text-xs font-bold text-gray-700">월간 보고서 자동화</p>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">보고 기준 시작일</label>
+                  <input type="date" value={form.reportAnchorDate ?? ''}
+                    onChange={e => setForm(prev => ({ ...prev, reportAnchorDate: e.target.value || undefined }))}
+                    className="w-full sm:w-52 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <p className="text-[11px] text-gray-400 leading-relaxed">
+                  기준 시작일부터 <b>30일 단위</b>로 구간을 끊고, <b>종료 다음 날</b> 보고서가 자동 공개됩니다.<br />
+                  · 6/5 기준 → <b>6/5~7/5</b> 작업 → <b>7/6</b> 공개<br />
+                  · 다음 구간 <b>7/5~8/4</b> → <b>8/5</b> 공개 (이후 8/4~9/3 …)<br />
+                  비워두면 <b>계약 시작일</b>을 기준으로 사용하며, 계약 시작일도 없으면 자동 생성하지 않습니다.
+                </p>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-gray-600">수동 지정 기간 <span className="text-gray-400 font-normal">(기간·공개일 직접 지정)</span></label>
+                    <button type="button"
+                      onClick={() => setForm(prev => ({ ...prev, reportPeriods: [...(prev.reportPeriods ?? []), { id: Date.now().toString(), start: '', end: '', releaseDate: '' }] }))}
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700">+ 기간 추가</button>
+                  </div>
+                  {(form.reportPeriods ?? []).length === 0 ? (
+                    <p className="text-[11px] text-gray-400">예: 5/1~5/31 기간과 공개일을 직접 추가하면 해당 월간 보고서가 그 날부터 포털에 표시됩니다.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 text-[10px] font-semibold text-gray-400 px-1">
+                        <span>시작일</span><span>종료일</span><span>공개일</span><span></span>
+                      </div>
+                      {(form.reportPeriods ?? []).map(p => (
+                        <div key={p.id} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
+                          <input type="date" value={p.start} onChange={e => updatePeriod(p.id, { start: e.target.value })}
+                            className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          <input type="date" value={p.end} min={p.start} onChange={e => updatePeriod(p.id, { end: e.target.value })}
+                            className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          <input type="date" value={p.releaseDate} onChange={e => updatePeriod(p.id, { releaseDate: e.target.value })}
+                            className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          <button type="button" onClick={() => setForm(prev => ({ ...prev, reportPeriods: (prev.reportPeriods ?? []).filter(x => x.id !== p.id) }))}
+                            className="p-1 text-gray-400 hover:text-red-500"><X size={14} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div>

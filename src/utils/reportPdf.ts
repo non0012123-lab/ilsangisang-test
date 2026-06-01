@@ -1,5 +1,7 @@
 import type { Report, Client, ScheduleEntry } from '../types';
 import { overlapsRange, isMultiDay, entryEnd } from './dateRange';
+import { entryImages } from './entryImages';
+import { buildGalleryGroups } from './galleryGroups';
 
 function num(n: number | undefined) {
   if (!n) return '-';
@@ -21,12 +23,13 @@ function statusColor(s: string) {
   return s === 'completed' ? '#16a34a' : s === 'in-progress' ? '#2563eb' : '#d97706';
 }
 
-export function downloadReportPdf(report: Report, client: Client, allEntries: ScheduleEntry[]) {
-  // 해당 보고서의 월(YYYY-MM)과 겹치는(기간 작업 포함) 클라이언트 항목 전체 표시
+// 보고서 인쇄용 HTML 문자열을 만든다(브라우저 비의존 — 테스트/사전렌더 가능).
+export function buildReportHtml(report: Report, client: Client, allEntries: ScheduleEntry[]): string {
+  // 집계 기간: 자동 월간 보고서는 periodStart/End 사용, 없으면 발행월(YYYY-MM) 전체.
   const reportMonth = report.date.slice(0, 7); // "2026-05"
-  const mStart = `${reportMonth}-01`;
   const [my, mm] = reportMonth.split('-').map(Number);
-  const mEnd = `${reportMonth}-${String(new Date(my, mm, 0).getDate()).padStart(2, '0')}`;
+  const mStart = report.periodStart ?? `${reportMonth}-01`;
+  const mEnd = report.periodEnd ?? `${reportMonth}-${String(new Date(my, mm, 0).getDate()).padStart(2, '0')}`;
   const clientEntries = allEntries
     .filter(e => e.clientId === client.id && overlapsRange(e, mStart, mEnd))
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -48,17 +51,19 @@ export function downloadReportPdf(report: Report, client: Client, allEntries: Sc
     </li>`
   ).join('');
 
-  const entryRows = regularEntries.map((e, i) => `
+  const entryRows = regularEntries.map((e, i) => {
+    const imgs = entryImages(e);
+    return `
     <tr style="background:${i % 2 === 0 ? '#ffffff' : '#f9fafb'}">
       <td style="padding:8px 10px;font-size:12px;color:#6b7280;border-bottom:1px solid #f3f4f6;white-space:nowrap;">${isMultiDay(e) ? `${e.date}<br/><span style="color:#2563eb;font-size:10px;">~ ${entryEnd(e)}</span>` : e.date}</td>
       <td style="padding:8px 10px;font-size:12px;color:#111827;font-weight:500;border-bottom:1px solid #f3f4f6;white-space:nowrap;">${e.managerName}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;">
         <span style="background:${categoryColor(e.category)}22;color:${categoryColor(e.category)};font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;">${e.category}</span>
       </td>
-      <td style="padding:8px 10px;font-size:12px;color:#374151;border-bottom:1px solid #f3f4f6;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+      <td style="padding:8px 10px;font-size:12px;color:#374151;border-bottom:1px solid #f3f4f6;max-width:160px;word-break:break-word;">
         ${e.keyword ?? '-'}
       </td>
-      <td style="padding:8px 10px;font-size:11px;color:#2563eb;border-bottom:1px solid #f3f4f6;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+      <td style="padding:8px 10px;font-size:11px;color:#2563eb;border-bottom:1px solid #f3f4f6;max-width:200px;word-break:break-all;">
         ${e.link ? `<a href="${e.link}" style="color:#2563eb;">${e.link}</a>` : '-'}
       </td>
       <td style="padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6;">
@@ -67,14 +72,12 @@ export function downloadReportPdf(report: Report, client: Client, allEntries: Sc
       <td style="padding:8px 10px;font-size:12px;color:#2563eb;font-weight:700;border-bottom:1px solid #f3f4f6;text-align:center;">
         ${e.rank ? `${e.rank}위` : (e.metrics?.views ? num(e.metrics.views) + '회' : '-')}
       </td>
-      <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;text-align:center;">
-        ${e.screenshot
-          ? `<img src="${e.screenshot}" style="width:48px;height:36px;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb;display:block;margin:0 auto;" />`
-          : '<span style="font-size:10px;color:#d1d5db;">없음</span>'
-        }
+      <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;text-align:center;font-size:11px;color:#6b7280;white-space:nowrap;">
+        ${imgs.length ? `${imgs.length}장` : '<span style="color:#d1d5db;">없음</span>'}
       </td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   const opinionRows = opinionEntries.map(e => `
     <div style="border:1px solid #e0f2fe;border-radius:10px;padding:14px 16px;margin-bottom:10px;background:#f0f9ff;">
@@ -90,10 +93,43 @@ export function downloadReportPdf(report: Report, client: Client, allEntries: Sc
       <div style="display:flex;align-items:flex-start;gap:12px;">
         ${e.metrics?.views ? `<span style="font-size:11px;color:#0369a1;">👁 ${num(e.metrics.views)} 조회</span>` : ''}
         ${e.metrics?.comments ? `<span style="font-size:11px;color:#0369a1;">💬 ${num(e.metrics.comments)} 댓글</span>` : ''}
-        ${e.screenshot ? `<img src="${e.screenshot}" style="height:48px;border-radius:6px;border:1px solid #bae6fd;margin-left:auto;" />` : ''}
+        ${entryImages(e).length ? `<span style="font-size:11px;color:#0369a1;margin-left:auto;">🖼 이미지 ${entryImages(e).length}장 (첨부 이미지 페이지 참고)</span>` : ''}
       </div>
     </div>
   `).join('');
+
+  // 첨부 이미지 갤러리 — 매체(카테고리)별로 묶고, 각 매체 안에서 시안/인사이트를 분리해 보여준다.
+  // 인사이트(글씨·숫자·그래프)는 한 장씩 크게·잘림 없이(contain), 시안은 그리드로.
+  const galleryHtml = buildGalleryGroups(clientEntries).map(g => {
+    const cap = (im: { date: string; keyword?: string }) => `${im.date}${im.keyword ? ` · ${im.keyword}` : ''}`;
+    const designGrid = g.design.length ? `
+      <p style="font-size:11px;font-weight:700;color:#6b7280;margin:0 0 6px;">시안 · 결과물 (${g.design.length})</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:${g.insight.length ? '16px' : '0'};">
+        ${g.design.map(im => `
+        <figure style="margin:0;width:150px;">
+          <img src="${im.url}" style="width:150px;height:150px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;display:block;" />
+          <figcaption style="font-size:9px;color:#9ca3af;margin-top:3px;width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${cap(im)}</figcaption>
+        </figure>`).join('')}
+      </div>` : '';
+    const insightList = g.insight.length ? `
+      <p style="font-size:11px;font-weight:700;color:#6b7280;margin:0 0 6px;">인사이트 (데이터) (${g.insight.length})</p>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        ${g.insight.map(im => `
+        <figure style="margin:0;page-break-inside:avoid;">
+          <img src="${im.url}" style="max-width:100%;width:auto;max-height:760px;height:auto;object-fit:contain;border-radius:8px;border:1px solid #e5e7eb;display:block;" />
+          <figcaption style="font-size:10px;color:#6b7280;margin-top:4px;">${cap(im)} · ${im.managerName}</figcaption>
+        </figure>`).join('')}
+      </div>` : '';
+    return `
+    <div style="margin-bottom:26px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;border-bottom:2px solid ${categoryColor(g.category)}33;padding-bottom:6px;">
+        <span style="background:${categoryColor(g.category)}22;color:${categoryColor(g.category)};font-size:12px;font-weight:700;padding:3px 12px;border-radius:20px;">${g.category}</span>
+        <span style="font-size:11px;color:#9ca3af;">시안 ${g.design.length} · 인사이트 ${g.insight.length}</span>
+      </div>
+      ${designGrid}
+      ${insightList}
+    </div>`;
+  }).join('');
 
   const html = `<!DOCTYPE html>
 <html lang="ko">
@@ -201,7 +237,7 @@ export function downloadReportPdf(report: Report, client: Client, allEntries: Sc
     <table style="width:100%;border-collapse:collapse;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
       <thead>
         <tr style="background:#1e293b;">
-          ${['날짜', '담당자', '카테고리', '키워드', '링크', '상태', '순위', '캡처본'].map(h =>
+          ${['날짜', '담당자', '카테고리', '키워드', '링크', '상태', '순위', '이미지'].map(h =>
             `<th style="padding:10px;font-size:11px;font-weight:600;color:#94a3b8;text-align:left;letter-spacing:0.5px;">${h}</th>`
           ).join('')}
         </tr>
@@ -225,6 +261,18 @@ export function downloadReportPdf(report: Report, client: Client, allEntries: Sc
   </div>
 </div>
 
+${galleryHtml ? `
+<!-- Page 3: 첨부 이미지 갤러리 -->
+<div class="page page-break">
+  <div style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:22px 50px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h2 style="color:white;font-size:18px;font-weight:700;">첨부 이미지 (시안·결과물)</h2>
+      <p style="color:#bfdbfe;font-size:12px;">${client.name} · 카테고리·날짜·키워드별</p>
+    </div>
+  </div>
+  <div style="padding:28px 50px;">${galleryHtml}</div>
+</div>` : ''}
+
 <div class="no-print" style="position:fixed;bottom:24px;right:24px;display:flex;gap:10px;">
   <button onclick="window.print()" style="background:#2563eb;color:white;border:none;padding:12px 24px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(37,99,235,0.4);">
     🖨️ PDF로 저장 / 인쇄
@@ -234,6 +282,11 @@ export function downloadReportPdf(report: Report, client: Client, allEntries: Sc
 </body>
 </html>`;
 
+  return html;
+}
+
+export function downloadReportPdf(report: Report, client: Client, allEntries: ScheduleEntry[]) {
+  const html = buildReportHtml(report, client, allEntries);
   const win = window.open('', '_blank', 'width=960,height=900');
   if (!win) { alert('팝업이 차단되었습니다. 브라우저에서 팝업을 허용해주세요.'); return; }
   win.document.write(html);

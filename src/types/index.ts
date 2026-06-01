@@ -65,7 +65,8 @@ export interface AiPlanResult {
 // 어시스턴트가 제안하는 액션들 (사용자가 "적용" 해야 반영됨)
 export interface AssistantProposalEntry { date?: string; endDate?: string | null; managerName?: string; clientName?: string; category?: string; keyword?: string; status?: string }
 export interface AssistantProposalUpdate { id?: string; date?: string | null; endDate?: string | null; managerName?: string | null; status?: string | null }
-export interface AssistantProposalClient { name?: string; industry?: string; categories?: string[]; contactPerson?: string; phone?: string; email?: string }
+// 클라이언트는 추가/수정/삭제를 op 로 구분 (수정·삭제는 id 사용). reportAnchorDate = 월간 보고 기준 시작일.
+export interface AssistantProposalClient { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; industry?: string; categories?: string[]; contactPerson?: string; phone?: string; email?: string; status?: 'active' | 'inactive' | 'pending'; reportAnchorDate?: string }
 export interface AssistantProposalHandover { clientName?: string; overview?: string }
 export interface AssistantProposalVendor { name?: string; services?: string; contactPerson?: string; phone?: string; email?: string; pricing?: string; notes?: string }
 // 아이디 목록/홈페이지 목록은 추가·수정·삭제를 op 로 구분
@@ -81,6 +82,10 @@ export interface AssistantUndo {
   handoverIds: string[];
   deletedEntries: ScheduleEntry[]; // 삭제했던 일정(되돌릴 때 복원)
   updatedPrev: ScheduleEntry[];    // 수정 전 원본(되돌릴 때 복원)
+  // 클라이언트 수정/삭제 되돌리기 (삭제 시 연결 인수인계도 함께 스냅샷)
+  deletedClients?: Client[];
+  updatedClientsPrev?: Client[];
+  deletedHandovers?: HandoverDoc[];
   // 아이디 목록/홈페이지 목록
   accountIds: string[];
   siteIds: string[];
@@ -122,6 +127,13 @@ export interface AuthUser {
   status?: AccountStatus;   // 'suspended' 면 내부 접근 차단
 }
 
+// 첨부 이미지 종류: 'design'=시안/결과물(그리드로 작게), 'insight'=인사이트 캡처(글씨·숫자·그래프 → 크게·잘림없이)
+export type ImageKind = 'design' | 'insight';
+export interface EntryImage {
+  url: string;       // base64 data URL
+  kind: ImageKind;
+}
+
 export interface ScheduleEntry {
   id: string;
   date: string;        // 시작일 (하루 작업이면 종료일과 동일)
@@ -135,7 +147,8 @@ export interface ScheduleEntry {
   opinionTitle?: string;
   opinionContent?: string;
   opinionComments?: string;
-  screenshot?: string;
+  screenshot?: string;             // 레거시: 단일 이미지 (신규는 images 사용 — entryImages 헬퍼로 통합 조회)
+  images?: (string | EntryImage)[]; // 첨부 이미지, 최대 10장. 문자열은 레거시(시안 취급), 신규는 {url,kind}
   metrics?: AIMetrics;
   clientId: string;
   clientName: string;
@@ -165,6 +178,11 @@ export interface Client {
   description?: string;
   monthlyBudget?: string;
   budgetItems?: BudgetItem[];
+  // ── 월간 보고서 자동화 (고정 30일 롤링) ──
+  // 기준 시작일부터 30일 단위로 구간을 끊는다. 예) 6/5 → 6/5~7/5, 다음 7/5~8/4, …
+  // 종료 당일 작업까지 포함되고 그 다음 날(종료+1) 자동 공개된다. 비우면 계약 시작일(startDate)을 기준으로 사용.
+  reportAnchorDate?: string;      // 보고 기준 시작일 (YYYY-MM-DD). 설정 시 30일 주기로 월간 보고서 자동 생성
+  reportPeriods?: ReportPeriod[]; // 수동 지정 기간(예: 5/1~5/31, 공개일 직접 지정)
 }
 
 // ── 외주사(아웃소싱 파트너) ──────────────────────────
@@ -209,13 +227,28 @@ export interface SiteEntry {
 export interface Report {
   id: string;
   clientId: string;
+  clientName?: string;
   title: string;
-  date: string;
-  period: string;
+  date: string;            // 발행일(생성일). 표시용
+  period: string;          // 사람이 읽는 기간 라벨 (예: "2026년 5월" / "2026.05.01 ~ 05.31")
   type: 'monthly' | 'weekly' | 'custom';
   summary: string;
   highlights?: string[];
   fileSize?: string;
+  // ── 자동 월간 보고서용 ──
+  periodStart?: string;    // 집계 시작일 YYYY-MM-DD (있으면 PDF/집계가 이 기간을 사용)
+  periodEnd?: string;      // 집계 종료일 YYYY-MM-DD
+  releaseDate?: string;    // 공개일 — 오늘 ≥ releaseDate 면 클라이언트 포털에 노출
+  aiGenerated?: boolean;   // AI 요약 성공 여부 (false면 규칙기반 폴백)
+  createdAt?: number;
+}
+
+// 클라이언트별 수동 지정 보고 기간 (자동 주기와 별개로 추가 가능)
+export interface ReportPeriod {
+  id: string;
+  start: string;        // YYYY-MM-DD
+  end: string;          // YYYY-MM-DD
+  releaseDate: string;  // YYYY-MM-DD
 }
 
 // ── 인수인계 ──────────────────────────────────────────

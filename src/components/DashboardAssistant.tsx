@@ -98,12 +98,17 @@ export default function DashboardAssistant() {
                 {/* 제안된 액션 */}
                 {m.role === 'assistant' && proposalCount(m) > 0 && (
                   <div className="mt-2 border border-purple-100 bg-purple-50/50 rounded-xl p-3 space-y-1.5">
-                    {(m.clients ?? []).map((c, i) => (
-                      <div key={`c${i}`} className="flex items-start gap-2 text-xs text-gray-700">
-                        <Building2 size={13} className="text-emerald-500 shrink-0 mt-0.5" />
-                        <span><strong>신규 업체</strong> {c.name || '업체명?'}{c.industry ? ` · ${c.industry}` : ''}</span>
-                      </div>
-                    ))}
+                    {(m.clients ?? []).map((c, i) => {
+                      const op = c.op ?? (c.id ? 'update' : 'add');
+                      const label = op === 'delete' ? '업체 삭제' : op === 'update' ? '업체 수정' : '신규 업체';
+                      const extra = [c.industry, c.reportAnchorDate ? `보고기준 ${c.reportAnchorDate}` : '', c.status].filter(Boolean).join(' · ');
+                      return (
+                        <div key={`c${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                          <Building2 size={13} className={`shrink-0 mt-0.5 ${op === 'delete' ? 'text-red-500' : 'text-emerald-500'}`} />
+                          <span><strong>{label}</strong> {c.name || '업체명?'}{extra ? ` · ${extra}` : ''}</span>
+                        </div>
+                      );
+                    })}
                     {(m.handovers ?? []).map((h, i) => (
                       <div key={`h${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                         <ClipboardList size={13} className="text-blue-500 shrink-0 mt-0.5" />
