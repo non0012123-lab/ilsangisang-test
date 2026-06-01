@@ -107,6 +107,16 @@ const NOTIFS_MAX = 50; // 알림은 최근 50개까지만 보관
 const AI_RESULT_PATHS = ['/ai-planning', '/ai-results'];
 const loadLocalVendors = (): Vendor[] => lsLoad<Vendor>(VENDORS_LS_KEY);
 const saveLocalVendors = (list: Vendor[]) => lsSave(VENDORS_LS_KEY, list);
+// clients/schedule/handover 는 원래 첫 화면을 목업으로 그렸다가 Supabase 응답으로 교체돼 깜빡였다.
+// vendors 처럼 로컬 캐시를 붙여, 재방문 시엔 "마지막 실데이터"로 첫 화면을 그린다(교체가 안 보임).
+const CLIENTS_LS_KEY = 'ilsangisang.clients.v1';
+const SCHEDULE_LS_KEY = 'ilsangisang.schedule.v1';
+const HANDOVER_LS_KEY = 'ilsangisang.handover.v1';
+// 캐시가 비어 있으면 목업으로 폴백(진짜 첫 설치 땐 시드 데모 유지).
+const lsLoadOr = <T,>(key: string, fallback: T[]): T[] => {
+  const cached = lsLoad<T>(key);
+  return cached.length ? cached : fallback;
+};
 
 const AppContext = createContext<AppContextType | null>(null);
 
@@ -117,9 +127,9 @@ const MOCK_MEMBERS: TeamMember[] = USERS
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [entries, setEntries] = useState<ScheduleEntry[]>(SCHEDULE_ENTRIES);
-  const [clients, setClients] = useState<Client[]>(CLIENTS);
-  const [handoverDocs, setHandoverDocs] = useState<HandoverDoc[]>(HANDOVER_DOCS);
+  const [entries, setEntries] = useState<ScheduleEntry[]>(() => lsLoadOr(SCHEDULE_LS_KEY, SCHEDULE_ENTRIES));
+  const [clients, setClients] = useState<Client[]>(() => lsLoadOr(CLIENTS_LS_KEY, CLIENTS));
+  const [handoverDocs, setHandoverDocs] = useState<HandoverDoc[]>(() => lsLoadOr(HANDOVER_LS_KEY, HANDOVER_DOCS));
   const [vendors, setVendors] = useState<Vendor[]>(loadLocalVendors);
   const [accounts, setAccounts] = useState<AccountEntry[]>(() => lsLoad<AccountEntry>(ACCOUNTS_LS_KEY));
   const [siteEntries, setSiteEntries] = useState<SiteEntry[]>(() => lsLoad<SiteEntry>(SITES_LS_KEY));
@@ -162,6 +172,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // 헬퍼에서 최신 배열을 참조하기 위한 ref (setState 업데이터 내 부수효과 회피)
   const entriesRef = useRef(entries);
   useEffect(() => { entriesRef.current = entries; }, [entries]);
+  useEffect(() => { lsSave(SCHEDULE_LS_KEY, entries); }, [entries]);
   // 어시스턴트 적용으로 막 생성한 일정 id — realtime 에코 때 (요약 알림과) 중복 알림을 막기 위해 추적
   const assistantEntryIdsRef = useRef<Set<string>>(new Set());
   // 전역 이미지 작업이 완료 시 최신 기획 결과를 머지하기 위한 ref
@@ -175,8 +186,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => { membersRef.current = members; }, [members]);
   const clientsRef = useRef(clients);
   useEffect(() => { clientsRef.current = clients; }, [clients]);
+  useEffect(() => { lsSave(CLIENTS_LS_KEY, clients); }, [clients]);
   const handoverDocsRef = useRef(handoverDocs);
   useEffect(() => { handoverDocsRef.current = handoverDocs; }, [handoverDocs]);
+  useEffect(() => { lsSave(HANDOVER_LS_KEY, handoverDocs); }, [handoverDocs]);
   const vendorsRef = useRef(vendors);
   useEffect(() => { vendorsRef.current = vendors; }, [vendors]);
   // 외주사가 바뀔 때마다 로컬 캐시에 보관 → 새로고침·재배포에도 유지
@@ -902,15 +915,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const seed = async <T extends { id: string }>(table: string, rows: T[]) => {
         await sb.from(table).upsert(rows.map(r => ({ id: r.id, data: r })));
       };
-      let c = await load<Client>('clients');
-      let e = await load<ScheduleEntry>('schedule_entries');
-      let h = await load<HandoverDoc>('handover_docs');
-      const v = await load<Vendor>('vendors');
-      const acc = await load<AccountEntry>('accounts');
-      const sites = await load<SiteEntry>('site_entries');
-      const rep = await load<Report>('reports');
-      const plans = await load<AiPlanResult>('ai_plans');
-      const convs = await load<AssistantConversation>('assistant_conversations'); // RLS 로 본인 것만 조회됨
+      // 9개 테이블을 병렬로 조회한다(직렬 await 사슬이면 왕복이 줄줄이 더해져 느림).
+      const [c0, e0, h0, v, acc, sites, rep, plans, convs] = await Promise.all([
+        load<Client>('clients'),
+        load<ScheduleEntry>('schedule_entries'),
+        load<HandoverDoc>('handover_docs'),
+        load<Vendor>('vendors'),
+        load<AccountEntry>('accounts'),
+        load<SiteEntry>('site_entries'),
+        load<Report>('reports'),
+        load<AiPlanResult>('ai_plans'),
+        load<AssistantConversation>('assistant_conversations'), // RLS 로 본인 것만 조회됨
+      ]);
+      // clients/schedule/handover 는 빈 테이블일 때 목업 시드 후 재할당하므로 let.
+      let c = c0, e = e0, h = h0;
       if (!active) return;
       if (c && c.length === 0) { await seed('clients', CLIENTS); c = CLIENTS; }
       if (e && e.length === 0) { await seed('schedule_entries', SCHEDULE_ENTRIES); e = SCHEDULE_ENTRIES; }
