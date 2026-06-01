@@ -3,7 +3,7 @@
 //  • 담당자의 하루 업무(대기중/작업중/완료)를 받아 AI가 한국어로 간결히 요약.
 //  • 일일보고서 PDF 상단에 들어가는 "AI 요약"에 사용된다.
 //
-// 환경변수: OPENAI_API_KEY (필수), OPENAI_MODEL (선택, 기본 gpt-5.5)
+// 환경변수: OPENAI_API_KEY (필수), OPENAI_MODEL (선택, 기본 gpt-5.4-mini)
 // ───────────────────────────────────────────────────────────────
 
 interface Env {
@@ -75,7 +75,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
       body: JSON.stringify({
-        model: env.OPENAI_MODEL || 'gpt-5.5',
+        model: env.OPENAI_MODEL || 'gpt-5.4-mini',
         input: [
           { role: 'developer', content: [{ type: 'input_text', text: developer }] },
           { role: 'user', content: [{ type: 'input_text', text: userInput }] },

@@ -8,7 +8,7 @@
 //
 // 환경변수 (Cloudflare Pages → Settings → Environment variables):
 //  • OPENAI_API_KEY  (필수, Secret)
-//  • OPENAI_MODEL    (선택, 기본 gpt-5.5)
+//  • OPENAI_MODEL    (선택, 기본 gpt-5.4-mini)
 //
 // ⚠️ 키에 VITE_ 접두사를 붙이지 말 것 — 브라우저 번들에 노출됩니다.
 // ───────────────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
         Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: env.OPENAI_MODEL || 'gpt-5.5',
+        model: env.OPENAI_MODEL || 'gpt-5.4-mini',
         input: [
           { role: 'developer', content: [{ type: 'input_text', text: DEVELOPER_PROMPT }] },
           { role: 'user', content: [{ type: 'input_text', text: userText }] },

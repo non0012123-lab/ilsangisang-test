@@ -2,7 +2,7 @@
 # 이 파일을 복사해 .dev.vars 로 만들고 값을 채우세요:  cp .dev.vars.example .dev.vars
 # (.dev.vars 는 .gitignore 로 커밋되지 않습니다. 절대 키를 커밋하지 마세요.)
 OPENAI_API_KEY=sk-XXXXXXXXXXXXXXXXXXXX
-# OPENAI_MODEL=gpt-5.5
+# OPENAI_MODEL=gpt-5.4-mini
 # OPENAI_IMAGE_MODEL=gpt-image-2
 
 # 네이버 검색광고 API (키워드 조회) — 검색광고 시스템 > 도구 > API 사용관리

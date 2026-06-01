@@ -3,7 +3,7 @@
 //  • 클라이언트 월간 보고서의 요약(summary)·하이라이트(highlights)를 AI로 생성.
 //  • 클라이언트 포털에서 전송일이 지난 월간 구간 보고서를 만들 때 1회 호출(결과는 저장·캐시).
 //
-// 환경변수: OPENAI_API_KEY (필수), OPENAI_MODEL (선택, 기본 gpt-5.5)
+// 환경변수: OPENAI_API_KEY (필수), OPENAI_MODEL (선택, 기본 gpt-5.4-mini)
 // ───────────────────────────────────────────────────────────────
 
 interface Env {
@@ -77,7 +77,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
       body: JSON.stringify({
-        model: env.OPENAI_MODEL || 'gpt-5.5',
+        model: env.OPENAI_MODEL || 'gpt-5.4-mini',
         input: [
           { role: 'developer', content: [{ type: 'input_text', text: developer }] },
           { role: 'user', content: [{ type: 'input_text', text: userInput }] },

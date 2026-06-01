@@ -4,7 +4,7 @@
 //    문서의 항목(개요·가이드라인·톤·금지사항·특이사항·메모·연락처·링크)으로
 //    구조화해 돌려준다. 프론트에서 사용자가 미리보기 후 "적용"한다.
 //
-// 환경변수: OPENAI_API_KEY (필수), OPENAI_MODEL (선택, 기본 gpt-5.5)
+// 환경변수: OPENAI_API_KEY (필수), OPENAI_MODEL (선택, 기본 gpt-5.4-mini)
 // ───────────────────────────────────────────────────────────────
 
 interface Env {
@@ -128,7 +128,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
         Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: env.OPENAI_MODEL || 'gpt-5.5',
+        model: env.OPENAI_MODEL || 'gpt-5.4-mini',
         input: [
           { role: 'developer', content: [{ type: 'input_text', text: developer }] },
           { role: 'user', content: [{ type: 'input_text', text: userInput }] },

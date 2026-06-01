@@ -4,7 +4,7 @@
 //  • 자연어 문장 → ScheduleEntry 후보(JSON) 추출. (등록은 프론트에서 확인 후)
 //  • 추출 작업이라 추론 최소화 + 웹 검색 없음 → 빠르고 저렴.
 //
-// 환경변수: OPENAI_API_KEY (필수), OPENAI_MODEL (선택, 기본 gpt-5.5)
+// 환경변수: OPENAI_API_KEY (필수), OPENAI_MODEL (선택, 기본 gpt-5.4-mini)
 // ───────────────────────────────────────────────────────────────
 
 interface Env {
@@ -87,7 +87,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
         Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: env.OPENAI_MODEL || 'gpt-5.5',
+        model: env.OPENAI_MODEL || 'gpt-5.4-mini',
         input: [
           { role: 'developer', content: [{ type: 'input_text', text: developer }] },
           { role: 'user', content: [{ type: 'input_text', text: req.text }] },

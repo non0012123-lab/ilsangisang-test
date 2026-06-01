@@ -4,7 +4,7 @@
 //    구조화한다. 서비스는 드롭다운이 아니라 자유 서술로 정리한다.
 //  • 프론트에서 사용자가 미리보기 후 "적용"하면 등록된다.
 //
-// 환경변수: OPENAI_API_KEY (필수), OPENAI_MODEL (선택, 기본 gpt-5.5)
+// 환경변수: OPENAI_API_KEY (필수), OPENAI_MODEL (선택, 기본 gpt-5.4-mini)
 // ───────────────────────────────────────────────────────────────
 
 interface Env {
@@ -97,7 +97,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
         Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: env.OPENAI_MODEL || 'gpt-5.5',
+        model: env.OPENAI_MODEL || 'gpt-5.4-mini',
         input: [
           { role: 'developer', content: [{ type: 'input_text', text: developer }] },
           { role: 'user', content: [{ type: 'input_text', text: userInput }] },
