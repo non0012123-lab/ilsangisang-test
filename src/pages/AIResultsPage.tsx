@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileText, Clock, ArrowLeft, Copy, Check, Trash2, Sparkles, Building2, ImageIcon, Download } from 'lucide-react';
+import { FileText, Clock, ArrowLeft, Copy, Check, Trash2, Sparkles, Building2, ImageIcon, Download, X } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import ReportDocument from '../components/ReportDocument';
@@ -10,7 +10,7 @@ import { openAiPlanPrint } from '../utils/aiPlanPdf';
 const fmt = (ts: number) => new Date(ts).toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 export default function AIResultsPage() {
-  const { aiHistory, removeAiPlan, clients } = useApp();
+  const { aiHistory, removeAiPlan, saveAiPlan, clients } = useApp();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -19,9 +19,16 @@ export default function AIResultsPage() {
 
   const selected = aiHistory.find(p => p.id === selectedId) ?? null;
   const list = aiHistory.filter(p => filterClient === 'all' || p.clientId === filterClient);
-  // 생성된 이미지 시안은 모두 영속화되므로 그대로 표시(삭제는 기획 페이지의 X 버튼)
+  // 생성된 이미지 시안은 모두 영속화되므로 그대로 표시
   const savedImages = selected ? selected.images : [];
   const savedCount = (p: typeof aiHistory[number]) => p.images.length;
+
+  // 이미지 시안 삭제 — plan 에서 제거하고 DB 에도 반영
+  const removeImage = (imgId: string) => {
+    if (!selected) return;
+    if (!window.confirm('이 이미지 시안을 삭제할까요?')) return;
+    saveAiPlan({ ...selected, images: selected.images.filter(i => i.id !== imgId) });
+  };
 
   const copy = async () => {
     if (!selected) return;
@@ -73,10 +80,16 @@ export default function AIResultsPage() {
                     <div key={img.id} className="border border-gray-100 rounded-xl overflow-hidden">
                       <div className="flex items-center justify-between px-3 py-2 bg-gray-50 gap-2">
                         <span className="text-xs font-semibold text-gray-600 truncate">{img.channel} · {img.cols}×{img.cols} 시안</span>
-                        <a href={img.url} download={`${img.channel}_시안.png`}
-                          className="flex items-center gap-1 text-xs text-gray-500 hover:text-purple-600 transition-colors shrink-0">
-                          <Download size={12} /> 다운로드
-                        </a>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <a href={img.url} download={`${img.channel}_시안.png`}
+                            className="flex items-center gap-1 text-xs text-gray-500 hover:text-purple-600 transition-colors">
+                            <Download size={12} /> 다운로드
+                          </a>
+                          <button onClick={() => removeImage(img.id)} title="이 시안 삭제"
+                            className="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg bg-gray-200 text-gray-600 hover:bg-red-100 hover:text-red-600 transition-colors">
+                            <X size={11} /> 삭제
+                          </button>
+                        </div>
                       </div>
                       <img src={img.url} alt={`${img.channel} 시안`} className="w-full object-contain bg-gray-50" />
                     </div>
