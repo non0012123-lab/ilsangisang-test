@@ -92,6 +92,7 @@ const VENDORS_LS_KEY = 'ilsangisang.vendors.v1';
 const ACCOUNTS_LS_KEY = 'ilsangisang.accounts.v1';
 const SITES_LS_KEY = 'ilsangisang.sites.v1';
 const REPORTS_LS_KEY = 'ilsangisang.reports.v1';
+const AI_PLANS_LS_KEY = 'ilsangisang.aiplans.v1';
 const NOTIFS_LS_KEY = 'ilsangisang.notifications.v1';
 const DESKTOP_NOTIFY_LS_KEY = 'ilsangisang.notify.desktop.v1';
 const NOTIFS_MAX = 50; // 알림은 최근 50개까지만 보관
@@ -117,7 +118,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [siteEntries, setSiteEntries] = useState<SiteEntry[]>(() => lsLoad<SiteEntry>(SITES_LS_KEY));
   const [reports, setReports] = useState<Report[]>(() => lsLoad<Report>(REPORTS_LS_KEY));
   const [members, setMembers] = useState<TeamMember[]>(MOCK_MEMBERS);
-  const [aiHistory, setAiHistory] = useState<AiPlanResult[]>([]);
+  const [aiHistory, setAiHistory] = useState<AiPlanResult[]>(() => lsLoad<AiPlanResult>(AI_PLANS_LS_KEY));
   const [aiPlanRunning, setAiPlanRunning] = useState(false);
   const [aiPlanError, setAiPlanError] = useState('');
   const [activeAiPlanId, setActiveAiPlanId] = useState<string | null>(null);
@@ -153,6 +154,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // 전역 이미지 작업이 완료 시 최신 기획 결과를 머지하기 위한 ref
   const aiHistoryRef = useRef(aiHistory);
   useEffect(() => { aiHistoryRef.current = aiHistory; }, [aiHistory]);
+  // AI 기획 결과도 로컬 캐시 → 새로고침/일시적 네트워크 문제에도 유지(다른 데이터와 동일 정책).
+  // 이미지(base64)는 용량이 커 로컬엔 제외하고 텍스트 결과만 캐시한다(이미지 원본은 Supabase).
+  useEffect(() => { lsSave(AI_PLANS_LS_KEY, aiHistory.map(p => ({ ...p, images: [] }))); }, [aiHistory]);
   // 어시스턴트가 전역(언마운트 무관)으로 최신 데이터를 참조하기 위한 ref 들
   const membersRef = useRef(members);
   useEffect(() => { membersRef.current = members; }, [members]);
@@ -847,7 +851,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       syncLocalFirst('accounts', acc, accountsRef.current, setAccounts);
       syncLocalFirst('site_entries', sites, siteEntriesRef.current, setSiteEntries);
       syncLocalFirst('reports', rep, reportsRef.current, setReports);
-      if (plans) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
+      // ai_plans: 원격에 있으면 그걸 우선(공유본), 원격이 비었고 로컬에만 있으면 backfill(다른 데이터와 동일).
+      if (plans && plans.length) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
+      else if (plans && plans.length === 0 && aiHistoryRef.current.length) persistMany('ai_plans', aiHistoryRef.current);
     })();
     return () => { active = false; };
   }, [uid]);
