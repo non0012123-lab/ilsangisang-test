@@ -19,9 +19,9 @@ export default function AIResultsPage() {
 
   const selected = aiHistory.find(p => p.id === selectedId) ?? null;
   const list = aiHistory.filter(p => filterClient === 'all' || p.clientId === filterClient);
-  // 같은 세션 메모리에는 미저장 시안도 있으므로, 보관/연동 화면에서는 "저장"한 시안만 표시
-  const savedImages = selected ? selected.images.filter(i => i.saved) : [];
-  const savedCount = (p: typeof aiHistory[number]) => p.images.filter(i => i.saved).length;
+  // 생성된 이미지 시안은 모두 영속화되므로 그대로 표시(삭제는 기획 페이지의 X 버튼)
+  const savedImages = selected ? selected.images : [];
+  const savedCount = (p: typeof aiHistory[number]) => p.images.length;
 
   const copy = async () => {
     if (!selected) return;
@@ -65,7 +65,7 @@ export default function AIResultsPage() {
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                 <div className="flex items-center gap-2 mb-4">
                   <ImageIcon size={18} className="text-purple-500" />
-                  <h3 className="font-bold text-gray-900">저장된 이미지 시안</h3>
+                  <h3 className="font-bold text-gray-900">이미지 시안</h3>
                   <span className="text-xs text-gray-400">{savedImages.length}개</span>
                 </div>
                 <div className="grid sm:grid-cols-2 gap-4">

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Upload, Sparkles, FileSpreadsheet, X, CheckCircle2, AlertTriangle, Copy, Check, ImageIcon, Download, History, Clock, FileText, Save, LayoutGrid } from 'lucide-react';
+import { Upload, Sparkles, FileSpreadsheet, X, CheckCircle2, AlertTriangle, Copy, Check, ImageIcon, Download, History, Clock, FileText, LayoutGrid } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import ReportDocument from '../components/ReportDocument';
@@ -101,12 +101,12 @@ export default function AIPlanningPage() {
     startAiImageJob(viewing.id, imgPlatforms, gridCols);
   };
 
-  // 시안 "저장" 토글 — 저장한 이미지만 DB에 영속화되어 AI 기획 결과·인수인계에 연동됨
-  const toggleSaveImage = (imgId: string) => {
+  // 시안 삭제 — 생성된 이미지는 모두 영속화되므로, X 를 누르면 plan 에서 제거하고 DB 에도 반영한다
+  const removeImage = (imgId: string) => {
     if (!viewing) return;
     saveAiPlan({
       ...viewing,
-      images: viewing.images.map(i => i.id === imgId ? { ...i, saved: !i.saved } : i),
+      images: viewing.images.filter(i => i.id !== imgId),
     });
   };
 
@@ -396,7 +396,7 @@ export default function AIPlanningPage() {
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 disabled:opacity-50 text-white">
                   {imgLoading
                     ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 생성 중... (최대 1~2분)</>
-                    : <><Sparkles size={14} /> {viewing.images.some(i => !i.saved) ? '다시 생성' : '이미지 시안 생성'}</>}
+                    : <><Sparkles size={14} /> {viewing.images.length > 0 ? '추가 생성' : '이미지 시안 생성'}</>}
                 </button>
               </div>
 
@@ -420,7 +420,7 @@ export default function AIPlanningPage() {
               ) : (
                 <div className="grid sm:grid-cols-2 gap-4">
                   {viewing.images.map(img => (
-                    <div key={img.id} className={`border rounded-xl overflow-hidden ${img.saved ? 'border-purple-300 ring-1 ring-purple-200' : 'border-gray-100'}`}>
+                    <div key={img.id} className="border border-gray-100 rounded-xl overflow-hidden">
                       <div className="flex items-center justify-between px-3 py-2 bg-gray-50 gap-2">
                         <span className="text-xs font-semibold text-gray-600 truncate">
                           {img.channel} · {img.cols}×{img.cols} 시안
@@ -430,11 +430,9 @@ export default function AIPlanningPage() {
                             className="flex items-center gap-1 text-xs text-gray-500 hover:text-purple-600 transition-colors">
                             <Download size={12} /> 다운로드
                           </a>
-                          <button onClick={() => toggleSaveImage(img.id)}
-                            className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg transition-colors ${
-                              img.saved ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}>
-                            {img.saved ? <><Check size={11} /> 저장됨</> : <><Save size={11} /> 저장</>}
+                          <button onClick={() => removeImage(img.id)} title="이 시안 삭제"
+                            className="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg bg-gray-200 text-gray-600 hover:bg-red-100 hover:text-red-600 transition-colors">
+                            <X size={11} /> 삭제
                           </button>
                         </div>
                       </div>
@@ -444,7 +442,7 @@ export default function AIPlanningPage() {
                 </div>
               )}
               <p className="text-xs text-gray-400 mt-3">
-                <Save size={11} className="inline -mt-0.5" /> "저장"한 시안만 <strong>AI 기획 결과</strong>와 <strong>인수인계</strong>(해당 업체)에 영구 보관됩니다. 저장하지 않은 시안은 새로고침 시 사라집니다.
+                생성된 시안은 자동으로 <strong>AI 기획 결과</strong>에 함께 보관됩니다(새로고침해도 유지). 필요 없는 시안은 <X size={11} className="inline -mt-0.5" /> 삭제 버튼으로 지우세요.
               </p>
             </div>
             </>

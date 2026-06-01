@@ -846,7 +846,7 @@ export default function ClientManagementPage() {
                       연계된 AI 기획 결과가 없습니다. (AI 기획 메뉴에서 이 업체로 생성하면 자동 표시됩니다)
                     </p>
                   ) : linked.map(p => {
-                    const saved = p.images.filter(i => i.saved);
+                    const saved = p.images; // 생성된 시안은 모두 영속화되어 그대로 연동 표시
                     return (
                       <div key={p.id} className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
                         <div className="flex items-center gap-3">

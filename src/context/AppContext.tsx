@@ -330,9 +330,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ── AI 기획 결과 (이미지는 용량 때문에 DB 저장 제외; 로컬 세션에만 유지) ──
   const saveAiPlan = useCallback((plan: AiPlanResult) => {
     setAiHistory(prev => prev.some(p => p.id === plan.id) ? prev.map(p => p.id === plan.id ? plan : p) : [plan, ...prev]);
-    // 이미지는 용량이 크므로, 사용자가 "저장"한 시안만 DB에 영속화한다(나머지는 세션 한정).
-    const persisted: AiPlanResult = { ...plan, images: plan.images.filter(i => i.saved) };
-    persistOne('ai_plans', persisted);
+    // 생성된 이미지 시안도 함께 영속화 → 새로고침/다른 기기에서도 유지(삭제는 X 버튼으로).
+    persistOne('ai_plans', plan);
   }, []);
   const removeAiPlan = useCallback((id: string) => {
     setAiHistory(prev => prev.filter(p => p.id !== id));
@@ -413,10 +412,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
       const imgs: AiPlanImage[] = Array.isArray(data.images) ? data.images : [];
-      // 최신 상태를 ref 로 다시 읽어, 이미 "저장"한 시안은 유지하고 새 작업본을 덧붙인다
+      // 최신 상태를 ref 로 다시 읽어, 기존 시안에 새로 생성한 시안을 덧붙인다(모두 영속화, 삭제는 X 버튼).
       const latest = aiHistoryRef.current.find(p => p.id === planId) ?? plan;
-      const kept = latest.images.filter(i => i.saved);
-      saveAiPlan({ ...latest, images: [...kept, ...imgs] });
+      saveAiPlan({ ...latest, images: [...latest.images, ...imgs] });
       // AI 결과 화면을 떠나 있을 때만 알림
       if (!AI_RESULT_PATHS.includes(currentPathRef.current)) {
         pushNotification({ type: 'ai-image', title: 'AI 이미지 생성 완료', body: `${plan.clientName} 이미지 시안 ${imgs.length}장이 준비됐어요`, link: '/ai-results' });
