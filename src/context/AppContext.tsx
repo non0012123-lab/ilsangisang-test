@@ -1,8 +1,10 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report } from '../types';
+import { useLocation } from 'react-router-dom';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification } from '../types';
 import { SCHEDULE_ENTRIES, CLIENTS, HANDOVER_DOCS, USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
+import { fireDesktop, requestNotifyPermission } from '../utils/notifications';
 import { useAuth } from './AuthContext';
 
 const ASSISTANT_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
@@ -54,6 +56,14 @@ interface AppContextType {
   removeSite: (id: string) => void;
   saveReport: (report: Report) => void;
   removeReport: (id: string) => void;
+  // 알림(종 아이콘) — 내 스케줄 등록·AI 완료를 모아 보여주고, 다른 탭일 땐 데스크톱 알림도 띄움
+  notifications: AppNotification[];
+  unreadCount: number;
+  markAllNotificationsRead: () => void;
+  markNotificationRead: (id: string) => void;
+  clearNotifications: () => void;
+  desktopNotifyEnabled: boolean;
+  enableDesktopNotify: () => Promise<void>;
 }
 
 export interface AiPlanJobInput {
@@ -82,6 +92,11 @@ const VENDORS_LS_KEY = 'ilsangisang.vendors.v1';
 const ACCOUNTS_LS_KEY = 'ilsangisang.accounts.v1';
 const SITES_LS_KEY = 'ilsangisang.sites.v1';
 const REPORTS_LS_KEY = 'ilsangisang.reports.v1';
+const NOTIFS_LS_KEY = 'ilsangisang.notifications.v1';
+const DESKTOP_NOTIFY_LS_KEY = 'ilsangisang.notify.desktop.v1';
+const NOTIFS_MAX = 50; // 알림은 최근 50개까지만 보관
+// AI 결과 화면 계열 경로 — 이 페이지에 머무는 동안엔 AI 완료 알림을 만들지 않는다(이미 보고 있으므로)
+const AI_RESULT_PATHS = ['/ai-planning', '/ai-results'];
 const loadLocalVendors = (): Vendor[] => lsLoad<Vendor>(VENDORS_LS_KEY);
 const saveLocalVendors = (list: Vendor[]) => lsSave(VENDORS_LS_KEY, list);
 
@@ -110,7 +125,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [aiImageError, setAiImageError] = useState('');
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
   const [assistantLoading, setAssistantLoading] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => lsLoad<AppNotification>(NOTIFS_LS_KEY));
+  const [desktopNotifyEnabled, setDesktopNotifyEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem(DESKTOP_NOTIFY_LS_KEY) === '1'; } catch { return false; }
+  });
   const uid = user?.id;
+
+  // 현재 라우트 경로 — AI 완료 알림 시 "그 페이지를 떠났는지" 판정용 (AppProvider 는 Router 내부라 사용 가능)
+  const { pathname } = useLocation();
+  const currentPathRef = useRef(pathname);
+  useEffect(() => { currentPathRef.current = pathname; }, [pathname]);
 
   // 담당자 드롭다운(스케줄 필터·등록 모달·AI 일정 모달)에서 로그인한 본인이 맨 앞에 오도록 정렬.
   // 등록 모달은 members[0] 을 기본 담당자로 쓰므로 기본 선택도 본인이 된다. (조회용 find 는 순서 무관)
@@ -146,12 +170,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const reportsRef = useRef(reports);
   useEffect(() => { reportsRef.current = reports; }, [reports]);
   useEffect(() => { lsSave(REPORTS_LS_KEY, reports); }, [reports]);
+  // 알림은 기기별 — localStorage 에만 저장(Supabase 동기화 안 함)
+  useEffect(() => { lsSave(NOTIFS_LS_KEY, notifications); }, [notifications]);
   const assistantMessagesRef = useRef(assistantMessages);
   useEffect(() => { assistantMessagesRef.current = assistantMessages; }, [assistantMessages]);
   const assistantLoadingRef = useRef(assistantLoading);
   useEffect(() => { assistantLoadingRef.current = assistantLoading; }, [assistantLoading]);
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
+
+  // ── 알림 ──────────────────────────────────────────────
+  // 인앱 알림을 추가하고, 탭이 숨겨져 있으면(다른 탭/창) 데스크톱 알림도 띄운다(fireDesktop 내부에서 판정).
+  const pushNotification = useCallback((n: Omit<AppNotification, 'id' | 'createdAt' | 'read'>) => {
+    const notif: AppNotification = { ...n, id: `ntf-${nowMs()}-${Math.random().toString(36).slice(2, 7)}`, createdAt: nowMs(), read: false };
+    setNotifications(prev => [notif, ...prev].slice(0, NOTIFS_MAX));
+    fireDesktop(notif.title, notif.body, notif.type);
+  }, []);
+  const markAllNotificationsRead = useCallback(() => setNotifications(prev => prev.map(n => n.read ? n : { ...n, read: true })), []);
+  const markNotificationRead = useCallback((id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n)), []);
+  const clearNotifications = useCallback(() => setNotifications([]), []);
+  const enableDesktopNotify = useCallback(async () => {
+    const perm = await requestNotifyPermission();
+    const granted = perm === 'granted';
+    setDesktopNotifyEnabled(granted);
+    try { localStorage.setItem(DESKTOP_NOTIFY_LS_KEY, granted ? '1' : '0'); } catch { /* 무시 */ }
+  }, []);
+  const unreadCount = useMemo(() => notifications.reduce((a, n) => a + (n.read ? 0 : 1), 0), [notifications]);
 
   // ── Supabase 영속화 헬퍼 (있으면 비동기로 반영, 실패는 콘솔에만) ──
   const persistOne = (table: string, row: { id: string }) => {
@@ -317,6 +361,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
       saveAiPlan(result);
       setActiveAiPlanId(result.id);
+      // AI 결과 화면을 떠나 있을 때만 알림(보고 있으면 화면에 바로 뜨므로 불필요)
+      if (!AI_RESULT_PATHS.includes(currentPathRef.current)) {
+        pushNotification({ type: 'ai-plan', title: 'AI 기획 완료', body: `${result.clientName} 기획 리포트가 준비됐어요`, link: '/ai-results' });
+      }
       return result.id;
     } catch (e) {
       setAiPlanError(e instanceof Error ? e.message : 'AI 분석 중 오류가 발생했습니다.');
@@ -324,7 +372,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       setAiPlanRunning(false);
     }
-  }, [saveAiPlan]);
+  }, [saveAiPlan, pushNotification]);
 
   // 이미지 시안 생성을 앱 전역에서 실행 → 다른 메뉴로 이동해도 끝까지 진행되고 결과가 보관됨
   const startAiImageJob = useCallback(async (planId: string, platforms: string[], cols: number) => {
@@ -349,12 +397,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const latest = aiHistoryRef.current.find(p => p.id === planId) ?? plan;
       const kept = latest.images.filter(i => i.saved);
       saveAiPlan({ ...latest, images: [...kept, ...imgs] });
+      // AI 결과 화면을 떠나 있을 때만 알림
+      if (!AI_RESULT_PATHS.includes(currentPathRef.current)) {
+        pushNotification({ type: 'ai-image', title: 'AI 이미지 생성 완료', body: `${plan.clientName} 이미지 시안 ${imgs.length}장이 준비됐어요`, link: '/ai-results' });
+      }
     } catch (e) {
       setAiImageError(e instanceof Error ? e.message : '이미지 생성 중 오류가 발생했습니다.');
     } finally {
       setAiImageRunning(null);
     }
-  }, [saveAiPlan]);
+  }, [saveAiPlan, pushNotification]);
 
   // ── 대시보드 AI 어시스턴트 (전역 실행 → 다른 메뉴로 이동해도 대화·진행 유지) ──
   const runAssistant = useCallback(async (text: string) => {
@@ -766,6 +818,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, [uid]);
 
+  // 스케줄 실시간 구독: 다른 사람(또는 다른 기기)이 내 담당 스케줄을 등록하면 새로고침 없이 알림 + 목록 반영.
+  //  • 0010_realtime_schedule.sql 로 schedule_entries 가 realtime publication 에 추가돼 있어야 한다.
+  //  • 내가 방금 만든 항목은 이미 로컬에 있으므로(dedup) 알림하지 않는다.
+  useEffect(() => {
+    if (!supabase || !uid) return;
+    const sb = supabase;
+    const channel = sb
+      .channel(`rt-schedule-${uid}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'schedule_entries' }, payload => {
+        const e = (payload.new as { data?: ScheduleEntry })?.data;
+        if (!e || e.managerId !== uid) return;            // 내 담당 스케줄만
+        if (entriesRef.current.some(x => x.id === e.id)) return; // 내가 만든 것/이미 있는 것 제외
+        setEntries(prev => prev.some(x => x.id === e.id) ? prev : [e, ...prev]); // 목록에도 즉시 반영
+        pushNotification({
+          type: 'schedule',
+          title: '새 스케줄이 등록됐어요',
+          body: `${e.date} · ${e.category}${e.keyword ? ` · ${e.keyword}` : ''}`,
+          link: '/schedule/daily',
+        });
+      })
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [uid, pushNotification]);
+
   return (
     <AppContext.Provider value={{
       entries, clients, handoverDocs, vendors, accounts, siteEntries, reports, members: orderedMembers, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
@@ -774,6 +850,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
+      notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,
+      desktopNotifyEnabled, enableDesktopNotify,
     }}>
       {children}
     </AppContext.Provider>

@@ -243,6 +243,19 @@ export interface Report {
   createdAt?: number;
 }
 
+// ── 알림 ──────────────────────────────────────────────
+// 우측 상단 종 아이콘에 쌓이는 인앱 알림. 읽음 상태·데스크톱 권한은 기기마다 다르므로
+// localStorage(기기별)에만 저장하고 Supabase 동기화는 하지 않는다.
+export interface AppNotification {
+  id: string;
+  type: 'schedule' | 'ai-plan' | 'ai-image';
+  title: string;
+  body?: string;
+  link?: string;        // 클릭 시 이동할 라우트 (예: '/ai-results', '/schedule/daily')
+  createdAt: number;
+  read: boolean;
+}
+
 // 클라이언트별 수동 지정 보고 기간 (자동 주기와 별개로 추가 가능)
 export interface ReportPeriod {
   id: string;
