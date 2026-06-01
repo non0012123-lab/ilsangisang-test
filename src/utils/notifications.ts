@@ -22,12 +22,16 @@ export async function requestNotifyPermission(): Promise<NotificationPermission>
 }
 
 // OS 데스크톱 알림을 띄운다. 권한이 없거나 미지원이면 아무것도 하지 않는다(탭 포커스 여부와 무관하게 항상 표시).
-export function fireDesktop(title: string, body?: string, tag?: string): void {
-  if (!isNotifySupported() || Notification.permission !== 'granted') return;
+// 실제로 알림을 생성했으면 true, (권한 없음/미지원/생성 실패) 면 false 를 반환한다.
+export function fireDesktop(title: string, body?: string, tag?: string): boolean {
+  if (!isNotifySupported() || Notification.permission !== 'granted') return false;
   try {
     const n = new Notification(title, { body, tag, icon: '/favicon.ico' });
     n.onclick = () => { try { window.focus(); } catch { /* noop */ } n.close(); };
-  } catch {
-    /* 일부 브라우저는 ServiceWorker 없이는 생성자 호출이 막힐 수 있음 — 무시 */
+    return true;
+  } catch (e) {
+    // 일부 브라우저(예: Android Chrome)는 ServiceWorker 없이는 생성자 호출이 막힘
+    console.warn('[notify] 데스크톱 알림 생성 실패:', e);
+    return false;
   }
 }
