@@ -22,6 +22,7 @@ interface CtxEntry {
   category?: string;
   keyword?: string;
   status?: string;
+  link?: string | null;
 }
 
 interface CtxHandover {
@@ -189,8 +190,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '반드시 아래 JSON 객체로만 응답해(코드펜스·설명문 금지):',
     '{',
     '  "reply": "사용자에게 보여줄 자연스러운 한국어 답변",',
-    '  "entries": [ { "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "managerName":"", "clientName":"", "category":"", "keyword":"", "status":"pending|in-progress|completed" } ],',
-    '  "updates": [ { "id":"기존 일정 id", "date":"YYYY-MM-DD 또는 null", "endDate":"YYYY-MM-DD 또는 null", "managerName":"문자열 또는 null", "status":"상태 또는 null" } ],',
+    '  "entries": [ { "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "managerName":"", "clientName":"", "category":"", "keyword":"", "status":"pending|in-progress|completed", "link":"결과/키워드 링크 URL(없으면 생략)" } ],',
+    '  "updates": [ { "id":"기존 일정 id", "date":"YYYY-MM-DD 또는 null", "endDate":"YYYY-MM-DD 또는 null", "managerName":"문자열 또는 null", "status":"상태 또는 null", "link":"링크 URL(추가/수정) 또는 ""(빈문자열=링크 삭제) 또는 null(변경 안 함)" } ],',
     '  "deletes": [ "삭제할 기존 일정 id" ],',
     '  "clients": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 업체 id", "name":"", "industry":"", "categories":[], "contactPerson":"", "phone":"", "email":"", "status":"active|inactive|pending", "reportAnchorDate":"YYYY-MM-DD (월간 보고 기준 시작일)" } ],',
     '  "handovers": [ { "clientName":"", "overview":"" } ],',
@@ -207,6 +208,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 사용자가 새 일정을 말하면("오늘 스케줄은 ~~~ 있어" 등) 해당 일정을 entries 배열에 담는다. 한 문장에 여러 건이면 모두.',
     '- 단순 질문·조언("시간 분배 어떻게 효율적일까?" 등)이면 모든 액션 배열은 비우고 reply 에만 구체적이고 실용적으로 답한다. 현재 일정 목록을 근거로 답할 것.',
     '- "배분/재배치/나눠줘" 요청이면, 아래 현재 일정을 참고해 날짜·담당자를 합리적으로 분산한다. 기존 일정을 옮기는 것은 updates(그 일정의 id 사용), 새로 만드는 것은 entries 에 담는다. 변경하지 않는 필드는 null.',
+    '- 스케줄 링크(작업 결과/키워드 URL) 추가·수정·삭제: "오늘 한 ○○ 키워드 링크는 https://... 야 추가해줘", "△△ 일정에 이 링크 넣어줘/바꿔줘", "□□ 링크 지워줘" 같은 요청이면, 아래 현재 일정 목록에서 날짜·업체·카테고리·키워드로 가장 잘 맞는 일정을 찾아 그 id 로 updates 에 담고 link 필드를 채운다. 추가/수정은 link 에 URL 문자열, 삭제는 link 에 빈 문자열("")을 넣는다. 링크 외 다른 필드는 null(변경 안 함). 어느 일정인지 모호하면 바꾸지 말고 reply 에서 되묻는다. URL 은 사용자가 준 값을 그대로 쓰고 지어내지 않는다.',
     '- 일정 삭제/취소("6/10 현대자동차 블로그관리 삭제해줘", "○○ 일정 취소해줘", "방금 추가한 거 삭제" 등): 아래 현재 일정 목록에서 날짜·업체·카테고리·키워드로 가장 잘 맞는 일정을 찾아 그 id 를 deletes 배열에 담는다. 여러 건이 맞으면 모두 담는다. 일치하는 게 없거나 어느 것인지 모호하면 삭제하지 말고 reply 에서 어떤 일정인지 되묻는다. 삭제는 되돌리기 어려우니, reply 에 무엇을 삭제할지 명확히 적고 "적용"을 눌러야 반영된다고 안내한다.',
     '- "방금 적용한 거 취소/되돌려줘"처럼 직전 적용 자체를 되돌리는 요청이면, 일정 id 를 추측해 deletes 에 넣지 말고, reply 에서 "적용된 메시지의 \'실행 취소\' 버튼을 눌러주세요"라고 안내한다(임의 삭제 방지).',
     '- 클라이언트(업체) 추가/수정/삭제는 clients 배열에 op(add/update/delete)로 담는다(수정·삭제는 아래 "업체 상세"의 id 사용).',

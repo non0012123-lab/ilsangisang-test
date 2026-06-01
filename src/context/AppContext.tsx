@@ -591,6 +591,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             id: e.id, date: e.date, endDate: e.endDate ?? null,
             managerName: e.managerName, clientName: e.clientName,
             category: e.category, keyword: e.keyword, status: e.status,
+            link: e.link ?? null,
           })),
         }),
       });
@@ -759,6 +760,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
         date: e.date, endDate, managerId, managerName: mem.find(m => m.id === managerId)?.name ?? '',
         category, keyword: e.keyword || undefined, clientId, clientName: clientNameOf(clientId),
+        link: e.link || undefined,
         status: (['pending', 'in-progress', 'completed'].includes(e.status ?? '') ? e.status : 'pending') as ScheduleStatus,
       });
     });
@@ -780,6 +782,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (mid) { patch.managerId = mid; patch.managerName = mem.find(m => m.id === mid)?.name ?? cur.managerName; }
       }
       if (up.status && ['pending', 'in-progress', 'completed'].includes(up.status)) patch.status = up.status as ScheduleStatus;
+      // 스케줄 링크: 문자열이면 추가/수정, 빈 문자열("")이면 삭제, null/생략이면 변경 안 함
+      if (up.link !== undefined && up.link !== null && up.link !== 'null') patch.link = up.link ? up.link : undefined;
       if (Object.keys(patch).length) { undo.updatedPrev.push({ ...cur }); patchEntry(up.id, patch); count += 1; }
     });
 

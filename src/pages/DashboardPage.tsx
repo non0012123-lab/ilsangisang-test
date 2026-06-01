@@ -1,12 +1,15 @@
-import { CheckCircle2, Clock, Calendar, ArrowUpRight, Plus, TrendingUp, Users, Flame } from 'lucide-react';
+import { CheckCircle2, Clock, Calendar, ArrowUpRight, Plus, TrendingUp, Users, Flame, Pencil, Trash2 } from 'lucide-react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
+import ScheduleModal from '../components/ScheduleModal';
 import DashboardAssistant from '../components/DashboardAssistant';
 import DailyReportButton from '../components/DailyReportButton';
 import { useApp } from '../context/AppContext';
+import type { ScheduleEntry } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { coversDate, overlapsRange, isMultiDay } from '../utils/dateRange';
 import { todayStr, currentMonthStr, monthStartStr, monthEndStr } from '../utils/today';
@@ -32,8 +35,21 @@ function getWeekRange(base: string) {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { entries: allEntries, patchEntry } = useApp();
+  const { entries: allEntries, patchEntry, saveEntry, removeEntry } = useApp();
   const isAdmin = user?.role === 'admin';
+
+  // 대시보드에서 바로 일정 추가/수정/삭제 (일일 스케줄 페이지와 동일한 ScheduleModal 재사용)
+  const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
+  const handleSave = (entry: ScheduleEntry) => { saveEntry(entry); setModal({ open: false }); };
+  const handleDelete = (id: string) => { if (confirm('이 일정을 삭제하시겠습니까?')) removeEntry(id); };
+  const rowActions = (entry: ScheduleEntry) => (
+    <div className="flex items-center gap-0.5 shrink-0">
+      <button onClick={() => setModal({ open: true, entry })} title="수정"
+        className="p-1 rounded text-gray-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil size={13} /></button>
+      <button onClick={() => handleDelete(entry.id)} title="삭제"
+        className="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"><Trash2 size={13} /></button>
+    </div>
+  );
 
   // 내 작업: admin은 전체, 일반 담당자는 본인 것만
   const myEntries = isAdmin ? allEntries : allEntries.filter(e => e.managerId === user?.id);
@@ -131,10 +147,16 @@ export default function DashboardPage() {
                   <span className="text-xs bg-orange-100 text-orange-600 font-semibold px-2 py-0.5 rounded-full">{todayTasks.length}건</span>
                 )}
               </h3>
-              <button onClick={() => navigate('/schedule/daily')}
-                className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 font-medium">
-                일일 스케줄 <ArrowUpRight size={14} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setModal({ open: true, entry: null })}
+                  className="flex items-center gap-1 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1 rounded-lg transition-colors">
+                  <Plus size={14} /> 추가
+                </button>
+                <button onClick={() => navigate('/schedule/daily')}
+                  className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 font-medium">
+                  일일 스케줄 <ArrowUpRight size={14} />
+                </button>
+              </div>
             </div>
 
             {todayTasks.length === 0 ? (
@@ -142,7 +164,7 @@ export default function DashboardPage() {
                 <p className="text-2xl mb-2">🎉</p>
                 <p className="font-semibold text-gray-700">오늘 예정된 작업이 없습니다</p>
                 <p className="text-sm text-gray-400 mt-1">여유로운 하루 보내세요!</p>
-                <button onClick={() => navigate('/schedule/daily')}
+                <button onClick={() => setModal({ open: true, entry: null })}
                   className="mt-3 flex items-center gap-1.5 mx-auto px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors">
                   <Plus size={14} /> 스케줄 추가
                 </button>
@@ -157,7 +179,7 @@ export default function DashboardPage() {
                         { h: '카테고리', w: 'w-[116px]' },
                         { h: '클라이언트', w: 'w-auto' },
                         { h: '키워드/제목', w: 'w-auto' },
-                        { h: '상태', w: 'w-[120px]' },
+                        { h: '상태', w: 'w-[160px]' },
                       ].map(c => (
                         <th key={c.h} className={`text-left text-xs font-semibold text-gray-500 px-4 py-2.5 whitespace-nowrap ${c.w}`}>{c.h}</th>
                       ))}
@@ -176,10 +198,13 @@ export default function DashboardPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          <InlineStatus
-                            status={entry.status}
-                            onChange={s => updateEntry(entry.id, { status: s })}
-                          />
+                          <div className="flex items-center gap-1.5">
+                            <InlineStatus
+                              status={entry.status}
+                              onChange={s => updateEntry(entry.id, { status: s })}
+                            />
+                            {rowActions(entry)}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -196,6 +221,7 @@ export default function DashboardPage() {
                       <p className="text-xs text-gray-400 truncate">{entry.clientName}</p>
                     </div>
                     <InlineStatus status={entry.status} onChange={s => updateEntry(entry.id, { status: s })} />
+                    {rowActions(entry)}
                   </div>
                 ))}
               </div>
@@ -224,6 +250,7 @@ export default function DashboardPage() {
                       </span>
                       <span className="text-xs text-gray-400 shrink-0 truncate max-w-[84px] hidden sm:block">{entry.clientName}</span>
                       <InlineStatus status={entry.status} onChange={s => updateEntry(entry.id, { status: s })} />
+                      {rowActions(entry)}
                     </div>
                   ))}
                 </div>
@@ -257,6 +284,7 @@ export default function DashboardPage() {
                         <p className="text-xs font-semibold text-gray-900 truncate">{entry.opinionTitle ?? entry.keyword ?? entry.category}</p>
                         <p className="text-xs text-gray-400 truncate">{entry.clientName} · {entry.category}</p>
                       </div>
+                      {rowActions(entry)}
                     </div>
                   ))}
                 </div>
@@ -309,6 +337,9 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+      {modal.open && (
+        <ScheduleModal entry={modal.entry} defaultDate={TODAY} onSave={handleSave} onClose={() => setModal({ open: false })} />
+      )}
     </Layout>
   );
 }

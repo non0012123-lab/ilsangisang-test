@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare } from 'lucide-react';
+import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { AssistantMessage } from '../types';
 
@@ -35,6 +35,12 @@ export default function DashboardAssistant() {
   const [input, setInput] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 대화목록 사이드바: 좁은 화면(모바일)에선 기본 접힘 → 채팅 영역을 넓게 쓴다. 토글로 펼침.
+  const [convListOpen, setConvListOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 640);
+  const isMobile = () => typeof window !== 'undefined' && window.innerWidth < 640;
+  // 모바일에선 대화 선택/새 채팅 후 목록을 자동으로 접어 곧바로 채팅을 넓게 본다.
+  const handleSelect = (id: string) => { selectConversation(id); if (isMobile()) setConvListOpen(false); };
+  const handleNew = () => { newConversation(); if (isMobile()) setConvListOpen(false); };
 
   const copy = (value: string, key: string) => {
     if (!value) return;
@@ -81,12 +87,17 @@ export default function DashboardAssistant() {
           <h3 className="font-bold text-gray-900 text-sm leading-tight">AI 어시스턴트</h3>
           <p className="text-xs text-gray-400">일정·업체·인수인계·외주사·아이디/홈페이지 목록 조회·등록·수정·삭제, 키워드 조회수까지 대화로 처리합니다</p>
         </div>
+        <button onClick={() => setConvListOpen(o => !o)} title={convListOpen ? '대화목록 접기' : '대화목록 펼치기'}
+          className="ml-auto shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:text-purple-700 hover:bg-purple-50 transition-colors">
+          {convListOpen ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
+          <span className="hidden sm:inline">{convListOpen ? '목록 접기' : '대화목록'}</span>
+        </button>
       </div>
 
       <div className="flex">
         {/* 대화목록 + 새 채팅 */}
-        <aside className="w-40 sm:w-52 shrink-0 border-r border-gray-50 flex flex-col" style={{ maxHeight: '30rem' }}>
-          <button onClick={newConversation}
+        <aside className={`${convListOpen ? 'flex' : 'hidden'} w-40 sm:w-52 shrink-0 border-r border-gray-50 flex-col`} style={{ maxHeight: '30rem' }}>
+          <button onClick={handleNew}
             className="m-2 flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl text-xs font-semibold bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors">
             <Plus size={13} /> 새 채팅
           </button>
@@ -96,7 +107,7 @@ export default function DashboardAssistant() {
             ) : (
               conversations.map(c => (
                 <div key={c.id}
-                  onClick={() => selectConversation(c.id)}
+                  onClick={() => handleSelect(c.id)}
                   className={`group/conv flex items-center gap-1 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${
                     c.id === activeConversationId ? 'bg-purple-100 text-purple-800' : 'hover:bg-gray-50 text-gray-700'
                   }`}>
@@ -186,7 +197,7 @@ export default function DashboardAssistant() {
                         <CalendarPlus size={13} className="text-purple-500 shrink-0 mt-0.5" />
                         <span>
                           <strong>신규 일정</strong> {e.date}{e.endDate && e.endDate !== 'null' ? `~${e.endDate}` : ''} · {e.managerName || '담당자?'} · {e.clientName || '업체?'} · {e.category || '기타'}
-                          {e.keyword ? ` · ${e.keyword}` : ''}{e.status && e.status !== 'pending' ? ` (${STATUS_LABEL[e.status] ?? e.status})` : ''}
+                          {e.keyword ? ` · ${e.keyword}` : ''}{e.status && e.status !== 'pending' ? ` (${STATUS_LABEL[e.status] ?? e.status})` : ''}{e.link ? ' · 🔗 링크' : ''}
                         </span>
                       </div>
                     ))}
@@ -198,7 +209,7 @@ export default function DashboardAssistant() {
                           <span>
                             <strong>일정 변경</strong> {cur ? `${cur.clientName} ${cur.category}${cur.keyword ? ` (${cur.keyword})` : ''}` : u.id}
                             {' → '}
-                            {[u.date && u.date !== 'null' ? `날짜 ${u.date}` : '', u.managerName && u.managerName !== 'null' ? `담당 ${u.managerName}` : '', u.status && u.status !== 'null' ? STATUS_LABEL[u.status] ?? u.status : ''].filter(Boolean).join(', ')}
+                            {[u.date && u.date !== 'null' ? `날짜 ${u.date}` : '', u.managerName && u.managerName !== 'null' ? `담당 ${u.managerName}` : '', u.status && u.status !== 'null' ? STATUS_LABEL[u.status] ?? u.status : '', u.link != null && u.link !== 'null' ? (u.link ? '🔗 링크 변경' : '🔗 링크 삭제') : ''].filter(Boolean).join(', ')}
                           </span>
                         </div>
                       );
