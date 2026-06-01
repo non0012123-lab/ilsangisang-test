@@ -148,6 +148,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // 헬퍼에서 최신 배열을 참조하기 위한 ref (setState 업데이터 내 부수효과 회피)
   const entriesRef = useRef(entries);
   useEffect(() => { entriesRef.current = entries; }, [entries]);
+  // 어시스턴트 적용으로 막 생성한 일정 id — realtime 에코 때 (요약 알림과) 중복 알림을 막기 위해 추적
+  const assistantEntryIdsRef = useRef<Set<string>>(new Set());
   // 전역 이미지 작업이 완료 시 최신 기획 결과를 머지하기 위한 ref
   const aiHistoryRef = useRef(aiHistory);
   useEffect(() => { aiHistoryRef.current = aiHistory; }, [aiHistory]);
@@ -195,6 +197,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const granted = perm === 'granted';
     setDesktopNotifyEnabled(granted);
     try { localStorage.setItem(DESKTOP_NOTIFY_LS_KEY, granted ? '1' : '0'); } catch { /* 무시 */ }
+    // 허용 직후 바로 한 번 띄워 동작을 확인시켜 준다("허용했는데 안 뜬다" 방지)
+    if (granted) fireDesktop('PC 알림이 켜졌어요', '이제 새 스케줄·AI 완료 알림을 데스크톱에서 받아요.');
   }, []);
   const unreadCount = useMemo(() => notifications.reduce((a, n) => a + (n.read ? 0 : 1), 0), [notifications]);
 
@@ -208,6 +212,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const granted = perm === 'granted';
         setDesktopNotifyEnabled(granted);
         try { localStorage.setItem(DESKTOP_NOTIFY_LS_KEY, granted ? '1' : '0'); } catch { /* 무시 */ }
+        if (granted) fireDesktop('PC 알림이 켜졌어요', '이제 새 스케줄·AI 완료 알림을 데스크톱에서 받아요.');
       });
     }
   }, [uid, desktopNotifyEnabled]);
@@ -661,7 +666,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         status: (['pending', 'in-progress', 'completed'].includes(e.status ?? '') ? e.status : 'pending') as ScheduleStatus,
       });
     });
-    if (newEntries.length) { saveEntries(newEntries); count += newEntries.length; undo.entryIds.push(...newEntries.map(e => e.id)); }
+    if (newEntries.length) {
+      saveEntries(newEntries); count += newEntries.length; undo.entryIds.push(...newEntries.map(e => e.id));
+      newEntries.forEach(e => assistantEntryIdsRef.current.add(e.id)); // realtime 중복 알림 방지용
+    }
 
     // 4) 기존 일정 변경 (배분/재배치)
     (msg.updates ?? []).forEach(up => {
@@ -735,7 +743,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     setAssistantMessages(prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
-  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite]);
+    // AI 어시스턴트로 반영된 변경도 알림(일정·업체·계정 등 종류 무관). 대시보드에서 작업해도 떠야 하므로 직접 푸시.
+    if (count > 0) {
+      const bits: string[] = [];
+      if (newEntries.length) bits.push(`일정 ${newEntries.length}건`);
+      const others = count - newEntries.length;
+      if (others > 0) bits.push(`그 외 ${others}건`);
+      pushNotification({
+        type: 'assistant',
+        title: 'AI 어시스턴트 적용 완료',
+        body: `${bits.join(' · ') || `${count}건`}이 반영됐어요`,
+        link: '/schedule/daily',
+      });
+    }
+  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, pushNotification]);
 
   // 직전 적용을 되돌린다(생성한 레코드 제거 + 삭제/수정한 일정 복원)
   const undoAssistantProposal = useCallback((index: number) => {
@@ -845,6 +866,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const e = (payload.new as { data?: ScheduleEntry })?.data;
         if (!e || e.managerId !== uid) return;            // 내 담당 스케줄만(본인 등록분 포함)
         setEntries(prev => prev.some(x => x.id === e.id) ? prev : [e, ...prev]); // 목록 중복만 방지
+        // 어시스턴트로 막 만든 일정은 이미 "적용 완료" 요약 알림이 떴으므로 여기선 건너뜀
+        if (assistantEntryIdsRef.current.has(e.id)) { assistantEntryIdsRef.current.delete(e.id); return; }
         pushNotification({
           type: 'schedule',
           title: '새 스케줄이 등록됐어요',

@@ -248,7 +248,7 @@ export interface Report {
 // localStorage(기기별)에만 저장하고 Supabase 동기화는 하지 않는다.
 export interface AppNotification {
   id: string;
-  type: 'schedule' | 'ai-plan' | 'ai-image';
+  type: 'schedule' | 'ai-plan' | 'ai-image' | 'assistant';
   title: string;
   body?: string;
   link?: string;        // 클릭 시 이동할 라우트 (예: '/ai-results', '/schedule/daily')
