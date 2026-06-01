@@ -64,7 +64,6 @@ interface AppContextType {
   clearNotifications: () => void;
   desktopNotifyEnabled: boolean;
   enableDesktopNotify: () => Promise<void>;
-  sendTestNotification: () => Promise<{ supported: boolean; permission: NotificationPermission; desktopFired: boolean }>;
 }
 
 export interface AiPlanJobInput {
@@ -201,20 +200,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 허용 직후 바로 한 번 띄워 동작을 확인시켜 준다("허용했는데 안 뜬다" 방지)
     if (granted) fireDesktop('PC 알림이 켜졌어요', '이제 새 스케줄·AI 완료 알림을 데스크톱에서 받아요.');
   }, []);
-  // 진단/확인용: 권한이 없으면 먼저 요청한 뒤, 종(인앱)+데스크톱 테스트 알림을 띄운다.
-  // 반환값으로 지원 여부·권한 상태·데스크톱 표시 성공 여부를 알려 화면에서 원인을 안내한다.
-  const sendTestNotification = useCallback(async (): Promise<{ supported: boolean; permission: NotificationPermission; desktopFired: boolean }> => {
-    const supported = isNotifySupported();
-    let permission: NotificationPermission = supported ? Notification.permission : 'denied';
-    if (supported && permission === 'default') {
-      permission = await requestNotifyPermission();
-      const granted = permission === 'granted';
-      setDesktopNotifyEnabled(granted);
-      try { localStorage.setItem(DESKTOP_NOTIFY_LS_KEY, granted ? '1' : '0'); } catch { /* 무시 */ }
-    }
-    const desktopFired = pushNotification({ type: 'assistant', title: '테스트 알림', body: 'PC 알림이 정상이면 이 메시지가 화면(OS) 알림으로도 떠요.' });
-    return { supported, permission, desktopFired };
-  }, [pushNotification]);
   const unreadCount = useMemo(() => notifications.reduce((a, n) => a + (n.read ? 0 : 1), 0), [notifications]);
 
   // PC 알림은 기본 켜짐 — 로그인하면 권한을 자동 요청한다(브라우저 권한 팝업은 사용자가 한 번 "허용"해야 함).
@@ -903,7 +888,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,
-      desktopNotifyEnabled, enableDesktopNotify, sendTestNotification,
+      desktopNotifyEnabled, enableDesktopNotify,
     }}>
       {children}
     </AppContext.Provider>

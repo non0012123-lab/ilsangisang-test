@@ -35,13 +35,12 @@ export default function Header({ title, subtitle }: Props) {
   const { user } = useAuth();
   const {
     notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,
-    desktopNotifyEnabled, enableDesktopNotify, sendTestNotification,
+    desktopNotifyEnabled, enableDesktopNotify,
   } = useApp();
   const navigate = useNavigate();
   const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
 
   const [open, setOpen] = useState(false);
-  const [testResult, setTestResult] = useState('');
   const panelRef = useRef<HTMLDivElement>(null);
 
   // 바깥 클릭 시 닫기
@@ -64,14 +63,6 @@ export default function Header({ title, subtitle }: Props) {
   const supported = isNotifySupported();
   const blocked = supported && notifyPermission() === 'denied';
   const desktopOn = supported && desktopNotifyEnabled && notifyPermission() === 'granted';
-
-  const onTest = async () => {
-    const r = await sendTestNotification();
-    if (!r.supported) setTestResult('이 브라우저는 데스크톱 알림을 지원하지 않아요.');
-    else if (r.permission === 'denied') setTestResult('브라우저에서 알림이 차단돼 있어요. 주소창 자물쇠 → 알림을 "허용"으로 바꿔주세요.');
-    else if (r.desktopFired) setTestResult('테스트 알림을 보냈어요. 화면(OS)에 안 보이면 OS 방해금지/집중모드나 OS 알림 설정을 확인해 주세요.');
-    else setTestResult('알림 생성에 실패했어요. 브라우저/OS 알림 설정을 확인해 주세요.');
-  };
 
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between">
@@ -130,27 +121,19 @@ export default function Header({ title, subtitle }: Props) {
                 )}
               </div>
 
-              {/* PC 데스크톱 알림 토글 + 테스트 */}
-              <div className="px-4 py-3 border-t border-gray-50 bg-gray-50/50 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  {!supported ? (
-                    <p className="text-xs text-gray-400 flex items-center gap-1.5"><Monitor size={13} /> 이 브라우저는 PC 알림을 지원하지 않습니다.</p>
-                  ) : blocked ? (
-                    <p className="text-xs text-gray-500 flex items-center gap-1.5"><Monitor size={13} /> PC 알림이 차단됨 — 주소창 알림 설정에서 허용해 주세요.</p>
-                  ) : desktopOn ? (
-                    <p className="text-xs text-green-600 flex items-center gap-1.5"><Check size={13} /> PC 알림이 켜져 있어요 (항상 표시)</p>
-                  ) : (
-                    <button onClick={enableDesktopNotify} className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1.5">
-                      <Monitor size={13} /> PC 알림 켜기
-                    </button>
-                  )}
-                  {supported && !blocked && (
-                    <button onClick={onTest} className="shrink-0 text-xs font-semibold text-gray-600 hover:text-gray-900 px-2 py-1 rounded-md border border-gray-200 hover:bg-white transition-colors">
-                      테스트
-                    </button>
-                  )}
-                </div>
-                {testResult && <p className="text-[11px] text-gray-500 leading-snug">{testResult}</p>}
+              {/* PC 데스크톱 알림 토글 */}
+              <div className="px-4 py-3 border-t border-gray-50 bg-gray-50/50">
+                {!supported ? (
+                  <p className="text-xs text-gray-400 flex items-center gap-1.5"><Monitor size={13} /> 이 브라우저는 PC 알림을 지원하지 않습니다.</p>
+                ) : blocked ? (
+                  <p className="text-xs text-gray-500 flex items-center gap-1.5"><Monitor size={13} /> PC 알림이 차단됨 — 브라우저 주소창의 알림 설정에서 허용해 주세요.</p>
+                ) : desktopOn ? (
+                  <p className="text-xs text-green-600 flex items-center gap-1.5"><Check size={13} /> PC 알림이 켜져 있어요 (항상 표시)</p>
+                ) : (
+                  <button onClick={enableDesktopNotify} className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1.5">
+                    <Monitor size={13} /> PC 알림 켜기
+                  </button>
+                )}
               </div>
             </div>
           )}
