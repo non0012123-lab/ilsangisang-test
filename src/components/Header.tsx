@@ -127,7 +127,7 @@ export default function Header({ title, subtitle }: Props) {
                 ) : blocked ? (
                   <p className="text-xs text-gray-500 flex items-center gap-1.5"><Monitor size={13} /> PC 알림이 차단됨 — 브라우저 주소창의 알림 설정에서 허용해 주세요.</p>
                 ) : desktopOn ? (
-                  <p className="text-xs text-green-600 flex items-center gap-1.5"><Check size={13} /> PC 알림이 켜져 있어요 (다른 탭일 때 표시)</p>
+                  <p className="text-xs text-green-600 flex items-center gap-1.5"><Check size={13} /> PC 알림이 켜져 있어요 (항상 표시)</p>
                 ) : (
                   <button onClick={enableDesktopNotify} className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1.5">
                     <Monitor size={13} /> PC 알림 켜기

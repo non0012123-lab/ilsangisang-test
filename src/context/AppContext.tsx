@@ -4,7 +4,7 @@ import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, Ai
 import { SCHEDULE_ENTRIES, CLIENTS, HANDOVER_DOCS, USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
-import { fireDesktop, requestNotifyPermission } from '../utils/notifications';
+import { fireDesktop, requestNotifyPermission, isNotifySupported } from '../utils/notifications';
 import { useAuth } from './AuthContext';
 
 const ASSISTANT_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
@@ -126,8 +126,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>(() => lsLoad<AppNotification>(NOTIFS_LS_KEY));
+  // 기본 켜짐 — 사용자가 명시적으로 끈('0') 경우에만 꺼진 상태로 시작
   const [desktopNotifyEnabled, setDesktopNotifyEnabled] = useState<boolean>(() => {
-    try { return localStorage.getItem(DESKTOP_NOTIFY_LS_KEY) === '1'; } catch { return false; }
+    try { return localStorage.getItem(DESKTOP_NOTIFY_LS_KEY) !== '0'; } catch { return true; }
   });
   const uid = user?.id;
 
@@ -196,6 +197,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem(DESKTOP_NOTIFY_LS_KEY, granted ? '1' : '0'); } catch { /* 무시 */ }
   }, []);
   const unreadCount = useMemo(() => notifications.reduce((a, n) => a + (n.read ? 0 : 1), 0), [notifications]);
+
+  // PC 알림은 기본 켜짐 — 로그인하면 권한을 자동 요청한다(브라우저 권한 팝업은 사용자가 한 번 "허용"해야 함).
+  // 일부 브라우저(Firefox/Safari)는 사용자 제스처 없이는 요청이 막힐 수 있어, 그 경우 알림함의 "PC 알림 켜기"가 대체 수단이 된다.
+  useEffect(() => {
+    if (!uid || !isNotifySupported()) return;
+    if (Notification.permission === 'granted') { setDesktopNotifyEnabled(true); return; }
+    if (Notification.permission === 'default' && desktopNotifyEnabled) {
+      requestNotifyPermission().then(perm => {
+        const granted = perm === 'granted';
+        setDesktopNotifyEnabled(granted);
+        try { localStorage.setItem(DESKTOP_NOTIFY_LS_KEY, granted ? '1' : '0'); } catch { /* 무시 */ }
+      });
+    }
+  }, [uid, desktopNotifyEnabled]);
 
   // ── Supabase 영속화 헬퍼 (있으면 비동기로 반영, 실패는 콘솔에만) ──
   const persistOne = (table: string, row: { id: string }) => {
@@ -818,9 +833,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, [uid]);
 
-  // 스케줄 실시간 구독: 다른 사람(또는 다른 기기)이 내 담당 스케줄을 등록하면 새로고침 없이 알림 + 목록 반영.
+  // 스케줄 실시간 구독: 내 담당 스케줄이 등록되면 새로고침 없이 알림 + 목록 반영.
   //  • 0010_realtime_schedule.sql 로 schedule_entries 가 realtime publication 에 추가돼 있어야 한다.
-  //  • 내가 방금 만든 항목은 이미 로컬에 있으므로(dedup) 알림하지 않는다.
+  //  • 본인이 등록한 것도 본인 담당이면 알림한다(요청사항). 목록 중복만 dedup.
   useEffect(() => {
     if (!supabase || !uid) return;
     const sb = supabase;
@@ -828,9 +843,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .channel(`rt-schedule-${uid}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'schedule_entries' }, payload => {
         const e = (payload.new as { data?: ScheduleEntry })?.data;
-        if (!e || e.managerId !== uid) return;            // 내 담당 스케줄만
-        if (entriesRef.current.some(x => x.id === e.id)) return; // 내가 만든 것/이미 있는 것 제외
-        setEntries(prev => prev.some(x => x.id === e.id) ? prev : [e, ...prev]); // 목록에도 즉시 반영
+        if (!e || e.managerId !== uid) return;            // 내 담당 스케줄만(본인 등록분 포함)
+        setEntries(prev => prev.some(x => x.id === e.id) ? prev : [e, ...prev]); // 목록 중복만 방지
         pushNotification({
           type: 'schedule',
           title: '새 스케줄이 등록됐어요',
