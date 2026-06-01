@@ -32,6 +32,7 @@ interface CtxHandover {
   dontDo?: string;
   specialNotes?: string;
   managerMemo?: string;
+  keyContacts?: { name?: string; role?: string; phone?: string; email?: string; notes?: string }[];
 }
 
 interface CtxAiPlan {
@@ -59,7 +60,11 @@ interface AssistantRequest {
   history?: { role: 'user' | 'assistant'; text: string }[];
   today?: string;
   managers?: string[];
-  clients?: { id?: string; name?: string; industry?: string; categories?: string[]; reportAnchorDate?: string; status?: string }[];
+  clients?: {
+    id?: string; name?: string; industry?: string; categories?: string[]; reportAnchorDate?: string; status?: string;
+    contactPerson?: string; email?: string; phone?: string; startDate?: string; contractEnd?: string; description?: string;
+    monthlyBudget?: string; budgetItems?: { product?: string; amount?: number; notes?: string }[];
+  }[];
   categories?: string[];
   entries?: CtxEntry[];
   handoverDocs?: CtxHandover[];
@@ -125,6 +130,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
         d.dontDo ? `절대 하지 말 것: ${d.dontDo}` : '',
         d.specialNotes ? `특이사항: ${d.specialNotes}` : '',
         d.managerMemo ? `인수인계 메모: ${d.managerMemo}` : '',
+        Array.isArray(d.keyContacts) && d.keyContacts.length
+          ? `담당자 연락처: ${d.keyContacts.map(k => [k.name, k.role, k.phone, k.email, k.notes].filter(Boolean).join(' / ')).filter(Boolean).join(' · ')}`
+          : '',
       ].filter(Boolean).join('\n  ');
       return parts ? `■ ${d.clientName || '(업체명 미상)'}\n  ${parts}` : '';
     })
@@ -207,8 +215,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  · delete: 업체 삭제/해지 요청이면 op:"delete" + id. 삭제하면 연결된 인수인계도 함께 삭제되고 되돌리기 어려우니, reply 에 어떤 업체를 삭제할지 명확히 적고 "적용"을 눌러야 반영된다고 안내한다. 어느 업체인지 모호하면 삭제하지 말고 되묻는다.',
     '  · 월간 보고서 기준일: "○○ 보고 기준일/정산일/보고 시작일 5일로 해줘"처럼 말하면 reportAnchorDate 에 YYYY-MM-DD 로 채운다("매월 5일"류는 가장 적절한 해당 일자로). 이 날짜 기준 30일 주기로 월간 보고서가 자동 생성된다.',
     '- 인수인계 문서 신규 등록: 사용자가 특정 업체의 인수인계 문서를 만들어 달라고 하면 handovers 에 담는다(overview 에 간단 요약 가능).',
-    '- 업체 가이드라인 질문("○○ 업체 가이드라인 알려줘", "스타벅스 톤앤매너는?", "△△ 운영 규칙/주의사항 뭐야?" 등): 아래 "업체 가이드라인(인수인계)"과 "AI 기획 결과 요약"을 근거로 해당 업체의 운영 가이드라인·톤앤매너·금지사항·특이사항·기획 방향을 정리해 reply 에 답한다. 이때는 모든 액션 배열(entries/updates/clients/handovers)을 비운다(등록이 아니라 조회·요약이므로).',
+    '- 업체 가이드라인 질문("○○ 업체 가이드라인 알려줘", "스타벅스 톤앤매너는?", "△△ 운영 규칙/주의사항 뭐야?" 등): 아래 "업체 가이드라인(인수인계)"과 "AI 기획 결과 요약"을 근거로 해당 업체의 운영 가이드라인·톤앤매너·금지사항·특이사항·기획 방향을 정리해 reply 에 답한다. 이때 해당 인수인계 문서의 "담당자 연락처(keyContacts)"와 "인수인계 메모(managerMemo)"도 reply 끝에 함께 정리해 덧붙인다(등록돼 있을 때만). 이때는 모든 액션 배열(entries/updates/clients/handovers)을 비운다(등록이 아니라 조회·요약이므로).',
     '- 가이드라인을 답할 때는 인수인계 문서의 내용을 우선하고, AI 기획 결과의 캠페인 방향·톤을 보조적으로 덧붙인다. 해당 업체 정보가 아래에 없으면 지어내지 말고 "등록된 인수인계/기획 정보가 없다"고 안내한다.',
+    '- 업체 연락처/예산/계약 질문("○○ 연락처/담당자/이메일/전화 알려줘", "△△ 월 예산/광고비 얼마야?", "□□ 계약 기간/시작일/종료일") : 위 "업체 상세"의 contactPerson·phone·email·monthlyBudget·budgetItems(product/amount, amount는 만원 단위)·startDate·contractEnd 를 근거로 reply 에 정리해 답한다. 인수인계 문서의 "담당자 연락처(keyContacts)"도 보조 근거로 함께 활용한다. 값이 비어 있으면(null/빈 배열) 지어내지 말고 "해당 항목이 등록돼 있지 않다"고 안내한다. 이때 모든 액션 배열은 비운다(조회이므로).',
     '- 외주사 질문("영수증리뷰 어디에 맡겨?", "앱설치 외주 어디 있어?", "○○ 작업 외주사 추천" 등): 아래 "외주사 목록"에서 해당 서비스를 제공하는 외주사를 찾아 업체명·담당자·연락처·단가/메모를 reply 에 정리해 답한다. 여러 곳이면 모두 제시. 이때 모든 액션 배열은 비운다(조회·추천이므로). 맞는 외주사가 없으면 지어내지 말고 "등록된 외주사가 없다"고 안내한다.',
     '- 외주사 등록: 사용자가 새 외주사를 자연어로 등록하려 하면("○○ 외주사 추가해줘. 영수증리뷰·앱설치 가능, 담당 …") vendors 에 담는다. services 는 정해진 코드가 아니라 자유 서술로, 입력에 언급된 서비스를 빠짐없이 담는다. 아는 정보만 채우고 모르면 빈 문자열. reply 에는 무엇을 등록할지 요약하고 "적용"을 안내한다.',
     '- 키워드 조회수 질문("○○ 키워드 조회수 알려줘", "△△ 검색량 얼마야?", "□□ 모바일/PC 조회수"): 실제 수치는 네이버 키워드도구로 따로 조회하므로, 너는 절대 숫자를 지어내지 말고 조회할 키워드만 keywords 배열에 담는다(여러 개면 모두). reply 에는 "조회수를 조회해 아래에 표시할게요" 정도로 짧게 답하고 다른 액션 배열은 비운다.',
@@ -225,8 +234,15 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '',
     `담당자 목록: ${managers.join(', ') || '(없음)'}`,
     `업체 목록: ${clientNames.join(', ') || '(없음)'}`,
-    '업체 상세(수정/삭제 시 id 사용 · reportAnchorDate=월간 보고 기준 시작일):',
-    JSON.stringify(clients.map(c => ({ id: c.id, name: c.name, industry: c.industry, categories: c.categories, reportAnchorDate: c.reportAnchorDate ?? null, status: c.status }))),
+    '업체 상세(연락처·예산·계약 포함 · 수정/삭제 시 id 사용 · reportAnchorDate=월간 보고 기준 시작일):',
+    JSON.stringify(clients.map(c => ({
+      id: c.id, name: c.name, industry: c.industry, categories: c.categories,
+      reportAnchorDate: c.reportAnchorDate ?? null, status: c.status,
+      contactPerson: c.contactPerson || null, phone: c.phone || null, email: c.email || null,
+      startDate: c.startDate || null, contractEnd: c.contractEnd || null, description: c.description || null,
+      monthlyBudget: c.monthlyBudget || null,
+      budgetItems: Array.isArray(c.budgetItems) ? c.budgetItems.map(b => ({ product: b.product, amount: b.amount, notes: b.notes })) : [],
+    }))),
     `카테고리 목록: ${categories.join(', ')}`,
     '',
     '현재 등록된 일정(JSON, id 포함 — updates 에 이 id 사용):',

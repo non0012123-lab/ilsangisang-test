@@ -375,6 +375,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dontDo: d.dontDo,
       specialNotes: d.specialNotes,
       managerMemo: d.managerMemo,
+      keyContacts: (d.keyContacts ?? []).map(k => ({ name: k.name, role: k.role, phone: k.phone, email: k.email, notes: k.notes })),
     }));
     const aiPlanContext = aiHistoryRef.current.slice(0, 20).map(p => ({
       clientName: clientNameOf(p.clientId, p.clientName),
@@ -405,7 +406,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           message, history, today: todayStr(),
           managers: membersRef.current.map(m => m.name),
-          clients: activeClients.map(c => ({ id: c.id, name: c.name, industry: c.industry, categories: c.categories, reportAnchorDate: c.reportAnchorDate, status: c.status })),
+          clients: activeClients.map(c => ({
+            id: c.id, name: c.name, industry: c.industry, categories: c.categories,
+            reportAnchorDate: c.reportAnchorDate, status: c.status,
+            // 연락처·계약·예산도 전달 — 어시스턴트가 "○○ 연락처/예산/계약 알려줘"에 답할 수 있도록
+            contactPerson: c.contactPerson, email: c.email, phone: c.phone,
+            startDate: c.startDate, contractEnd: c.contractEnd, description: c.description,
+            monthlyBudget: c.monthlyBudget,
+            budgetItems: (c.budgetItems ?? []).map(b => ({ product: b.product, amount: b.amount, notes: b.notes })),
+          })),
           categories: ASSISTANT_CATEGORIES,
           handoverDocs: handoverContext,
           aiPlans: aiPlanContext,
