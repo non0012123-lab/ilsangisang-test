@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, Vendor, AssistantUndo, AccountEntry, SiteEntry } from '../types';
 import { SCHEDULE_ENTRIES, CLIENTS, HANDOVER_DOCS, USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
@@ -106,6 +106,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const uid = user?.id;
+
+  // 담당자 드롭다운(스케줄 필터·등록 모달·AI 일정 모달)에서 로그인한 본인이 맨 앞에 오도록 정렬.
+  // 등록 모달은 members[0] 을 기본 담당자로 쓰므로 기본 선택도 본인이 된다. (조회용 find 는 순서 무관)
+  const orderedMembers = useMemo(() => {
+    const idx = uid ? members.findIndex(m => m.id === uid) : -1;
+    if (idx <= 0) return members;
+    return [members[idx], ...members.slice(0, idx), ...members.slice(idx + 1)];
+  }, [members, uid]);
 
   // 헬퍼에서 최신 배열을 참조하기 위한 ref (setState 업데이터 내 부수효과 회피)
   const entriesRef = useRef(entries);
@@ -699,7 +707,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      entries, clients, handoverDocs, vendors, accounts, siteEntries, members, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
+      entries, clients, handoverDocs, vendors, accounts, siteEntries, members: orderedMembers, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
       aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
       aiImageRunning, aiImageError, startAiImageJob,
       assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
