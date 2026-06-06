@@ -35,7 +35,9 @@ export interface User {
 export interface TeamMember {
   id: string;
   name: string;
-  department?: string;
+  department?: string;  // 팀 (마케팅팀/디자인팀/영상팀/총괄팀/대표)
+  title?: string;       // 직함 (사원~부장)
+  position?: string;    // 직책 (팀장/파트장/실장/본부장/이사/대표이사/매니저/PD/감독)
 }
 
 // AI 기획 결과 (내역으로 보관 — 재생성 없이 다시 보기 위함)
@@ -137,6 +139,8 @@ export interface AuthUser {
   email: string;
   role: UserRole;
   department?: string;
+  title?: string;       // 직함
+  position?: string;    // 직책
   clientId?: string;
   status?: AccountStatus;   // 'suspended' 면 내부 접근 차단
 }

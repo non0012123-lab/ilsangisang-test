@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ShieldCheck, UserCheck, Clock, RefreshCw, AlertTriangle, Ban, RotateCcw, Trash2 } from 'lucide-react';
+import { ShieldCheck, UserCheck, Clock, RefreshCw, AlertTriangle, Ban, RotateCcw, Trash2, XCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { DEPARTMENTS, TITLES, POSITIONS } from '../data/org';
 import type { UserRole } from '../types';
 
 interface Profile {
@@ -13,9 +14,24 @@ interface Profile {
   email: string | null;
   role: UserRole;
   department: string | null;
+  title: string | null;
+  position: string | null;
   client_id: string | null;
   status: 'active' | 'suspended';
   created_at: string;
+}
+
+// 부서/직함/직책 편집용 작은 드롭다운
+function OrgSelect({ value, options, onChange, disabled, placeholder }: {
+  value: string | null; options: readonly string[]; onChange: (v: string | null) => void; disabled?: boolean; placeholder: string;
+}) {
+  return (
+    <select value={value ?? ''} disabled={disabled} onChange={e => onChange(e.target.value || null)}
+      className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60">
+      <option value="">{placeholder}</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
 }
 
 const ROLE_STYLE: Record<UserRole, string> = {
@@ -38,7 +54,7 @@ export default function ApprovalsPage() {
     setLoading(true);
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, name, email, role, department, client_id, status, created_at')
+      .select('*') // '*' 로 조회 — title/position 컬럼이 아직 없어도(마이그레이션 전) 실패하지 않음
       .order('created_at', { ascending: false });
     if (error) setError(error.message);
     else setProfiles((data ?? []) as Profile[]);
@@ -61,6 +77,30 @@ export default function ApprovalsPage() {
       // 담당자 드롭다운(스케줄 등록)에 즉시 반영
       await reloadMembers();
     }
+    setBusyId(null);
+  };
+
+  // 부서/직함/직책 지정 (role 이 아니므로 권한변경 트리거 영향 없음)
+  const updateField = async (id: string, patch: Partial<Pick<Profile, 'department' | 'title' | 'position'>>) => {
+    if (!supabase) return;
+    setBusyId(id); setError('');
+    const { error } = await supabase.from('profiles').update(patch).eq('id', id);
+    if (error) setError(`수정 실패: ${error.message}`);
+    else {
+      setProfiles(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
+      await reloadMembers(); // 어시스턴트·드롭다운에 즉시 반영
+    }
+    setBusyId(null);
+  };
+
+  // 가입 거절 (승인 대기자의 프로필 삭제 → 더 이상 접근/목록 노출 안 됨)
+  const rejectUser = async (p: Profile) => {
+    if (!supabase) return;
+    if (!window.confirm(`'${p.name ?? p.email}' 님의 가입을 거절할까요?\n프로필이 삭제되어 더 이상 접근할 수 없습니다. (되돌릴 수 없음)`)) return;
+    setBusyId(p.id); setError('');
+    const { error } = await supabase.from('profiles').delete().eq('id', p.id);
+    if (error) setError(`거절 실패: ${error.message}`);
+    else setProfiles(prev => prev.filter(x => x.id !== p.id));
     setBusyId(null);
   };
 
@@ -129,7 +169,7 @@ export default function ApprovalsPage() {
           ) : (
             <div className="divide-y divide-gray-50">
               {pending.map(p => (
-                <ApprovalRow key={p.id} profile={p} clients={activeClients} busy={busyId === p.id} onUpdate={updateRole} />
+                <ApprovalRow key={p.id} profile={p} clients={activeClients} busy={busyId === p.id} onUpdate={updateRole} onReject={rejectUser} />
               ))}
             </div>
           )}
@@ -149,7 +189,7 @@ export default function ApprovalsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
-                    {['이름', '이메일', '부서', '역할', '연결 클라이언트', '상태', '관리'].map(h => (
+                    {['이름', '이메일', '팀', '직함', '직책', '역할', '연결 클라이언트', '상태', '관리'].map(h => (
                       <th key={h} className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -159,7 +199,18 @@ export default function ApprovalsPage() {
                     <tr key={p.id} className="hover:bg-gray-50/50">
                       <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{p.name ?? '-'}</td>
                       <td className="px-4 py-3 text-gray-500">{p.email}</td>
-                      <td className="px-4 py-3 text-gray-500">{p.department ?? '-'}</td>
+                      <td className="px-4 py-3">
+                        <OrgSelect value={p.department} options={DEPARTMENTS} placeholder="팀 선택" disabled={busyId === p.id}
+                          onChange={v => updateField(p.id, { department: v })} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <OrgSelect value={p.title} options={TITLES} placeholder="직함" disabled={busyId === p.id}
+                          onChange={v => updateField(p.id, { title: v })} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <OrgSelect value={p.position} options={POSITIONS} placeholder="직책" disabled={busyId === p.id}
+                          onChange={v => updateField(p.id, { position: v })} />
+                      </td>
                       <td className="px-4 py-3">
                         <select value={p.role} disabled={busyId === p.id || p.id === user?.id}
                           onChange={e => updateRole(p.id, e.target.value as UserRole, p.client_id)}
@@ -220,11 +271,12 @@ export default function ApprovalsPage() {
   );
 }
 
-function ApprovalRow({ profile, clients, busy, onUpdate }: {
+function ApprovalRow({ profile, clients, busy, onUpdate, onReject }: {
   profile: Profile;
   clients: { id: string; name: string }[];
   busy: boolean;
   onUpdate: (id: string, role: UserRole, clientId?: string | null) => void;
+  onReject: (p: Profile) => void;
 }) {
   const [clientId, setClientId] = useState('');
   return (
@@ -236,6 +288,10 @@ function ApprovalRow({ profile, clients, busy, onUpdate }: {
       <button onClick={() => onUpdate(profile.id, 'manager')} disabled={busy}
         className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
         <UserCheck size={14} /> 담당자로 승인
+      </button>
+      <button onClick={() => onReject(profile)} disabled={busy}
+        className="flex items-center gap-1.5 px-3 py-2 border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 text-sm font-semibold rounded-lg transition-colors">
+        <XCircle size={14} /> 거절
       </button>
       <div className="flex items-center gap-1.5">
         <select value={clientId} onChange={e => setClientId(e.target.value)}

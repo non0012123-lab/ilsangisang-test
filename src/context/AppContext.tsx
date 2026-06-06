@@ -678,7 +678,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           message, history, today: todayStr(),
           currentUser: u?.name ?? '', // 로그인한 본인 — 담당자 미지정 시 기본 담당자, "나/내가" 표현 매핑용
-          managers: membersRef.current.map(m => m.name),
+          // 이름 + 팀·직함·직책 — 어시스턴트가 "디자인팀장", "영상팀 PD" 등을 사람으로 해석하는 근거
+          managers: membersRef.current.map(m => ({ name: m.name, department: m.department, title: m.title, position: m.position })),
           clients: activeClients.map(c => ({
             id: c.id, name: c.name, industry: c.industry, categories: c.categories,
             reportAnchorDate: c.reportAnchorDate, status: c.status,
@@ -1034,7 +1035,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!supabase) return;
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, name, department, role')
+      .select('*') // '*' 로 조회 — title/position 컬럼이 아직 없어도(마이그레이션 전) 실패하지 않음
       .in('role', ['manager', 'admin'])
       .order('name', { ascending: true });
     if (error || !data) return;
@@ -1042,6 +1043,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       id: r.id,
       name: (r.name as string | null) ?? '이름없음',
       department: (r.department as string | null) ?? undefined,
+      title: (r.title as string | null) ?? undefined,
+      position: (r.position as string | null) ?? undefined,
     })));
   }, []);
 

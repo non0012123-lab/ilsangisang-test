@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { BarChart3, Eye, EyeOff, ArrowRight, AlertTriangle, UserPlus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { DEPARTMENTS } from '../data/org';
 
 export default function SignupPage() {
   const [name, setName] = useState('');
@@ -86,9 +87,12 @@ export default function SignupPage() {
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">부서 <span className="text-gray-400 font-normal">(선택)</span></label>
-                <input type="text" value={department} onChange={e => setDepartment(e.target.value)} placeholder="SNS팀"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">팀 <span className="text-gray-400 font-normal">(선택)</span></label>
+                <select value={department} onChange={e => setDepartment(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                  <option value="">팀 선택</option>
+                  {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
               </div>
             </div>
             <div>

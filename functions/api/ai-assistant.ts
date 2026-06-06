@@ -62,7 +62,7 @@ interface AssistantRequest {
   history?: { role: 'user' | 'assistant'; text: string }[];
   today?: string;
   currentUser?: string; // 로그인한 본인 이름 — 담당자 미지정 시 기본 담당자, "나/내가" 매핑용
-  managers?: string[];
+  managers?: ({ name?: string; department?: string; title?: string; position?: string } | string)[];
   clients?: {
     id?: string; name?: string; industry?: string; categories?: string[]; reportAnchorDate?: string; status?: string;
     contactPerson?: string; email?: string; phone?: string; startDate?: string; contractEnd?: string; description?: string;
@@ -116,7 +116,19 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const today = req.today || new Date().toISOString().slice(0, 10);
   const currentUser = (req.currentUser || '').trim();
-  const managers = req.managers ?? [];
+  // 담당자 명단: 이름 + 팀(department)·직함(title)·직책(position).
+  // 문자열로 와도(구버전) 이름만 있는 것으로 취급.
+  const managerList = (Array.isArray(req.managers) ? req.managers : []).map(m =>
+    typeof m === 'string' ? { name: m } : (m || {}));
+  const managerNames = managerList.map(m => m.name).filter(Boolean) as string[];
+  // 사람 식별용 명단 줄: "홍길동 (디자인팀 · 과장 · 팀장)"
+  const rosterLines = managerList
+    .filter(m => m.name)
+    .map(m => {
+      const meta = [m.department, m.title, m.position].filter(Boolean).join(' · ');
+      return `- ${m.name}${meta ? ` (${meta})` : ''}`;
+    })
+    .join('\n');
   const clients = (Array.isArray(req.clients) ? req.clients : []).filter(c => c && c.name);
   const clientNames = clients.map(c => c.name as string);
   const categories = req.categories ?? [];
@@ -234,7 +246,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 블로그(platform=블로그)는 등급(grade)을 가진다: 준최2/준최3/준최4/준최5/준최6, 최적1/최적2/최적3/최적4. "최적3 블로그 보여줘", "준최 블로그 목록" 같은 조회는 grade 로 필터해 accountLookups 에 담고, 추가/수정 시 grade 를 채운다. 블로그가 아니면 grade 는 비운다.',
     '- accounts/sites 의 추가/수정/삭제를 제안할 때는 reply 에 무엇을 할지 요약하고 "적용"을 안내한다. 조회·답변만 할 때는 모든 액션 배열을 비운다.',
     '- 다른 담당자에게 업무 요청 보내기("방두환한테 디자인 제작 요청해줘", "○○한테 △△ 확인해달라고 해줘", "□□에게 이거 부탁해"): requests 배열에 담는다. toName 은 "담당자 목록" 중 가장 가까운 이름, title 은 요청 내용을 한 줄로(예: "디자인 제작"), 상세 내용이 있으면 body 에. 이것은 일정 등록이 아니라 "확인/처리 요청"이므로 entries 에는 담지 않는다(일정도 같이 만들라고 명시하면 그때만 entries 추가). reply 에는 누구에게 무엇을 요청할지 요약하고 "적용"하면 그 담당자 화면에 알림이 뜬다고 안내한다. 받는 담당자를 특정할 수 없으면 requests 를 비우고 reply 에서 누구에게 보낼지 되묻는다.',
-    `- managerName(담당자): 사용자가 담당자를 명시적으로 지정했을 때만(예: "철수한테", "영희 담당으로") "담당자 목록" 중 가장 가까운 값을 넣는다. 담당자 언급이 전혀 없으면 절대 임의로 고르지 말고 managerName 을 빈 문자열("")로 둔다 — 그러면 시스템이 로그인한 본인을 자동 담당자로 넣는다. "나/내가/나한테/제가/저한테" 같은 1인칭 표현은 로그인 본인(${currentUser || '본인'})을 가리키므로 이때도 managerName 은 빈 문자열로 둔다.`,
+    '- 직책/직함/팀으로 사람 지목: 사용자가 이름 대신 "디자인팀장", "영상팀 PD/피디", "총괄팀 부장님", "마케팅 매니저", "대표님" 처럼 팀(department)·직책(position)·직함(title)으로 사람을 가리키면, 위 "담당자 명단"에서 팀·직책·직함이 맞는 사람을 찾아 그 사람의 "이름"을 managerName / 요청의 toName 에 넣는다(직책/직함 문자열이 아니라 반드시 이름). "PD" 와 "피디" 는 같은 직책이다. "팀장/대표/감독" 등은 팀과 함께 쓰면 그 팀의 해당 보직자를 가리킨다(예: "디자인팀장"=디자인팀 position 팀장). 조건에 맞는 사람이 명단에 없거나 두 명 이상이라 모호하면, 추측하지 말고 reply 에서 누구를 말하는지 되묻고 액션 배열은 비운다.',
+    `- managerName(담당자): 사용자가 담당자를 명시적으로 지정했을 때만(예: "철수한테", "영희 담당으로", "디자인팀장한테") "담당자 목록" 중 가장 가까운 값을 넣는다. 담당자 언급이 전혀 없으면 절대 임의로 고르지 말고 managerName 을 빈 문자열("")로 둔다 — 그러면 시스템이 로그인한 본인을 자동 담당자로 넣는다. "나/내가/나한테/제가/저한테" 같은 1인칭 표현은 로그인 본인(${currentUser || '본인'})을 가리키므로 이때도 managerName 은 빈 문자열로 둔다.`,
     '- clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
     '- 기간 작업이 아니면 endDate 는 null. status 미지정이면 "pending".',
     '- 순위(rank): "신사피부과 3위로 등록해줘", "○○ 키워드 5위" 처럼 순위를 말하면 그 숫자를 rank 에 담는다(신규는 entries.rank, 기존 일정 순위 변경은 updates.rank). "1위/3등/순위 2" 등에서 숫자만 뽑아 넣고, 순위 언급이 없으면 entries 에선 생략·updates 에선 null. 기존 일정 순위 변경 요청이면 위 현재 일정 목록에서 키워드·업체·날짜로 대상을 찾아 그 id 로 updates 에 담는다.',
@@ -242,7 +255,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 확실하지 않은 정보를 지어내지 말 것. 모르면 reply 에서 추가 정보를 요청.',
     '',
     `로그인한 본인(담당자 미지정 시 기본 담당자 · "나/내가"가 가리키는 사람): ${currentUser || '(알 수 없음)'}`,
-    `담당자 목록: ${managers.join(', ') || '(없음)'}`,
+    `담당자 목록(이름): ${managerNames.join(', ') || '(없음)'}`,
+    '담당자 명단(이름 · 팀 · 직함 · 직책) — 아래 "직책/직함/팀으로 사람 지목" 규칙의 근거:',
+    rosterLines || '(등록된 담당자 없음)',
     `업체 목록: ${clientNames.join(', ') || '(없음)'}`,
     '업체 상세(연락처·예산·계약 포함 · 수정/삭제 시 id 사용 · reportAnchorDate=월간 보고 기준 시작일):',
     JSON.stringify(clients.map(c => ({

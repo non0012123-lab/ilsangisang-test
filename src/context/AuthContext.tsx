@@ -29,6 +29,8 @@ interface ProfileRow {
   email: string | null;
   role: string | null;
   department: string | null;
+  title: string | null;
+  position: string | null;
   client_id: string | null;
   status: string | null;
 }
@@ -40,6 +42,8 @@ function toAuthUser(row: ProfileRow, fallbackEmail?: string): AuthUser {
     email: row.email ?? fallbackEmail ?? '',
     role: (row.role as UserRole) ?? 'pending',
     department: row.department ?? undefined,
+    title: row.title ?? undefined,
+    position: row.position ?? undefined,
     clientId: row.client_id ?? undefined,
     status: (row.status as AccountStatus) ?? 'active',
   };
@@ -54,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!supabase || !session?.user) { setUser(null); return; }
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, name, email, role, department, client_id, status')
+      .select('*') // '*' 로 조회해 title/position 컬럼이 아직 없어도(마이그레이션 전) 쿼리가 실패하지 않게 함
       .eq('id', session.user.id)
       .single();
     if (error || !data) {
