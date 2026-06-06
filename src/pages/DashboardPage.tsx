@@ -1,5 +1,5 @@
 import { CheckCircle2, Clock, Calendar, ArrowUpRight, Plus, TrendingUp, Users, Flame, Pencil, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
@@ -40,6 +40,13 @@ export default function DashboardPage() {
 
   // 대시보드에서 바로 일정 추가/수정/삭제 (일일 스케줄 페이지와 동일한 ScheduleModal 재사용)
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
+  // 스켈레톤은 로딩이 약 0.4초를 넘길 때만 띄운다 → 빠른 응답에선 깜빡임 없이 곧장 화면이 뜸.
+  const [showSkeleton, setShowSkeleton] = useState(false);
+  useEffect(() => {
+    if (!dataLoading) { setShowSkeleton(false); return; }
+    const t = setTimeout(() => setShowSkeleton(true), 400);
+    return () => clearTimeout(t);
+  }, [dataLoading]);
   const handleSave = (entry: ScheduleEntry) => { saveEntry(entry); setModal({ open: false }); };
   const handleDelete = (id: string) => { if (confirm('이 일정을 삭제하시겠습니까?')) removeEntry(id); };
   const rowActions = (entry: ScheduleEntry) => (
@@ -97,38 +104,43 @@ export default function DashboardPage() {
     return (
       <Layout>
         <Header title="내 대시보드" subtitle={`${user?.name}님의 작업 현황`} />
-        <div className="flex-1 p-6 space-y-5 animate-pulse">
-          <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-5 h-[88px] opacity-80" />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[0, 1, 2, 3].map(i => (
-              <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-2">
-                <div className="w-9 h-9 rounded-xl bg-gray-100" />
-                <div className="h-6 w-12 bg-gray-200 rounded" />
-                <div className="h-3 w-16 bg-gray-100 rounded" />
-              </div>
-            ))}
-          </div>
-          <div className="grid lg:grid-cols-5 gap-5">
-            <div className="lg:col-span-3 space-y-3">
-              <div className="h-5 w-24 bg-gray-200 rounded" />
-              <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-4">
+        <div className="flex-1 p-6 space-y-5">
+          {/* 0.4초 안에 응답하면 이 영역은 비어 있다가 바로 실데이터로 채워짐(스켈레톤 미표시) */}
+          {showSkeleton && (
+            <div className="space-y-5 animate-pulse">
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-5 h-[88px] opacity-80" />
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[0, 1, 2, 3].map(i => (
-                  <div key={i} className="flex items-center gap-3">
-                    <div className="h-4 w-12 bg-gray-100 rounded shrink-0" />
-                    <div className="h-4 flex-1 bg-gray-100 rounded" />
-                    <div className="h-4 w-16 bg-gray-100 rounded shrink-0" />
+                  <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-2">
+                    <div className="w-9 h-9 rounded-xl bg-gray-100" />
+                    <div className="h-6 w-12 bg-gray-200 rounded" />
+                    <div className="h-3 w-16 bg-gray-100 rounded" />
                   </div>
                 ))}
               </div>
-            </div>
-            <div className="lg:col-span-2 space-y-3">
-              <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-4">
-                <div className="h-5 w-20 bg-gray-200 rounded" />
-                {[0, 1, 2].map(i => <div key={i} className="h-10 bg-gray-100 rounded" />)}
+              <div className="grid lg:grid-cols-5 gap-5">
+                <div className="lg:col-span-3 space-y-3">
+                  <div className="h-5 w-24 bg-gray-200 rounded" />
+                  <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-4">
+                    {[0, 1, 2, 3].map(i => (
+                      <div key={i} className="flex items-center gap-3">
+                        <div className="h-4 w-12 bg-gray-100 rounded shrink-0" />
+                        <div className="h-4 flex-1 bg-gray-100 rounded" />
+                        <div className="h-4 w-16 bg-gray-100 rounded shrink-0" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="lg:col-span-2 space-y-3">
+                  <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-4">
+                    <div className="h-5 w-20 bg-gray-200 rounded" />
+                    {[0, 1, 2].map(i => <div key={i} className="h-10 bg-gray-100 rounded" />)}
+                  </div>
+                </div>
               </div>
+              <p className="text-center text-sm text-gray-400">불러오는 중…</p>
             </div>
-          </div>
-          <p className="text-center text-sm text-gray-400">불러오는 중…</p>
+          )}
         </div>
       </Layout>
     );

@@ -94,8 +94,33 @@ const lsLoad = <T,>(key: string): T[] => {
   try { const s = localStorage.getItem(key); return s ? (JSON.parse(s) as T[]) : []; }
   catch { return []; }
 };
+// 캐시 중요도(클수록 보존). 일정·업체는 대시보드 핵심이라 가장 높게, AI기획·보고서는 낮게.
+const lsImportance = (key: string): number => {
+  if (key.includes('schedule')) return 100;
+  if (key.includes('clients')) return 90;
+  if (key.includes('vendors')) return 80;
+  if (key.includes('accounts')) return 70;
+  if (key.includes('site')) return 60;
+  if (key.includes('handover')) return 50;
+  if (key.includes('notif')) return 40;
+  if (key.includes('reports')) return 20;
+  if (key.includes('aiplans')) return 10;
+  return 30;
+};
+// 저장 실패(용량 초과 추정) 시, 나보다 덜 중요한 ilsangisang.* 캐시를 큰 영향 순서로 비우고 재시도한다.
+// → 일정·업체 같은 핵심 캐시는 큰 데이터(AI기획 텍스트 등)에 밀려 저장 실패하는 일이 없도록 보장.
 const lsSave = (key: string, list: unknown) => {
-  try { localStorage.setItem(key, JSON.stringify(list)); } catch { /* 용량 초과 등은 무시 */ }
+  const data = JSON.stringify(list);
+  try { localStorage.setItem(key, data); return; } catch { /* 아래에서 공간 정리 후 재시도 */ }
+  const mine = lsImportance(key);
+  const victims = Object.keys(localStorage)
+    .filter(k => k.startsWith('ilsangisang.') && k !== key && lsImportance(k) < mine)
+    .sort((a, b) => lsImportance(a) - lsImportance(b)); // 가장 덜 중요한 것부터
+  for (const v of victims) {
+    try { localStorage.removeItem(v); } catch { /* 무시 */ }
+    try { localStorage.setItem(key, data); return; } catch { /* 계속 정리 */ }
+  }
+  // 그래도 안 들어가면 포기(메모리 상태로는 정상 동작)
 };
 const VENDORS_LS_KEY = 'ilsangisang.vendors.v1';
 const ACCOUNTS_LS_KEY = 'ilsangisang.accounts.v1';
