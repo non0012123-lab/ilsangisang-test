@@ -903,60 +903,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // user 가 바뀔 때(로그인/로그아웃)마다 담당자 목록을 다시 불러온다.
   useEffect(() => { reloadMembers(); }, [user?.id, reloadMembers]);
 
-  // 로그인 시 업무 데이터를 Supabase 에서 로드. 테이블이 비어 있으면 목업으로 1회 시드.
+  // 로그인 시 업무 데이터를 Supabase 에서 로드한다(빈 테이블이어도 목업 시드는 하지 않음).
   useEffect(() => {
     if (!supabase || !uid) return;
     const sb = supabase;
     let active = true;
-    (async () => {
-      const load = async <T,>(table: string): Promise<T[] | null> => {
-        const { data, error } = await sb.from(table).select('id, data');
-        if (error) { console.error(`[${table}] 로드 실패:`, error.message); return null; }
-        return (data ?? []).map(r => r.data as T);
-      };
-      // 9개 테이블을 병렬로 조회한다(직렬 await 사슬이면 왕복이 줄줄이 더해져 느림).
-      const [c0, e0, h0, v, acc, sites, rep, plans, convs] = await Promise.all([
-        load<Client>('clients'),
-        load<ScheduleEntry>('schedule_entries'),
-        load<HandoverDoc>('handover_docs'),
-        load<Vendor>('vendors'),
-        load<AccountEntry>('accounts'),
-        load<SiteEntry>('site_entries'),
-        load<Report>('reports'),
-        load<AiPlanResult>('ai_plans'),
-        load<AssistantConversation>('assistant_conversations'), // RLS 로 본인 것만 조회됨
-      ]);
-      // 빈 테이블이어도 목업을 시드하지 않는다(예시 데이터가 실DB·화면에 유입되는 것 방지). 원격을 그대로 반영.
-      if (!active) return;
-      if (c0) setClients(c0);
-      if (e0) setEntries(e0);
-      if (h0) setHandoverDocs(h0);
-      // vendors/accounts/site_entries: 로컬 캐시 + Supabase 동기화.
-      //  • 로드 null  = 테이블 없음(마이그레이션 미실행) → 로컬 캐시 유지, 업로드 시도 안 함.
-      //  • 원격 데이터 있음 = 공유본 사용.
-      //  • 원격 비어 있음 + 로컬에 데이터 있음 = 테이블을 뒤늦게 만든 경우.
-      //    로컬 캐시를 한 번 올려서(backfill) 다른 기기(모바일 등)와도 공유되게 한다.
-      const syncLocalFirst = <T extends { id: string }>(
-        table: string, remote: T[] | null, local: T[], setLocal: (v: T[]) => void,
-      ) => {
-        if (remote && remote.length) { setLocal(remote); return; }
-        if (remote && remote.length === 0 && local.length) persistMany(table, local);
-        // remote === null(테이블 없음) 또는 원격·로컬 모두 비어 있으면 그대로 둔다.
-      };
-      syncLocalFirst('vendors', v, vendorsRef.current, setVendors);
-      syncLocalFirst('accounts', acc, accountsRef.current, setAccounts);
-      syncLocalFirst('site_entries', sites, siteEntriesRef.current, setSiteEntries);
-      syncLocalFirst('reports', rep, reportsRef.current, setReports);
-      // ai_plans: 원격에 있으면 그걸 우선(공유본), 원격이 비었고 로컬에만 있으면 backfill(다른 데이터와 동일).
+    const load = async <T,>(table: string): Promise<T[] | null> => {
+      const { data, error } = await sb.from(table).select('id, data');
+      if (error) { console.error(`[${table}] 로드 실패:`, error.message); return null; }
+      return (data ?? []).map(r => r.data as T);
+    };
+    // 도착한 데이터만 반영(언마운트/유저변경 시 무시). 각 쿼리가 끝나는 즉시 화면을 그린다.
+    const guard = <T,>(fn: (v: T) => void) => (v: T) => { if (active) fn(v); };
+    // vendors/accounts/site_entries/reports: 로컬 캐시 + Supabase 동기화.
+    //  • 로드 null = 테이블 없음(마이그레이션 미실행) → 로컬 캐시 유지, 업로드 안 함.
+    //  • 원격 있음 = 공유본 사용. 원격 비었고 로컬에 데이터 있음 = 늦게 만든 테이블 → 캐시 1회 backfill.
+    const syncLocalFirst = <T extends { id: string }>(
+      table: string, remote: T[] | null, local: T[], setLocal: (v: T[]) => void,
+    ) => {
+      if (remote && remote.length) { setLocal(remote); return; }
+      if (remote && remote.length === 0 && local.length) persistMany(table, local);
+    };
+    // 9개 테이블을 병렬로 조회하되, await Promise.all 로 한꺼번에 기다리지 않는다.
+    // 각자 도착하는 즉시 state 를 채워, 대시보드 임계 경로(schedule_entries)가 무거운
+    // reports/ai_plans 등을 기다리지 않고 곧바로 그려지게 한다(첫 실데이터 표시 지연 최소화).
+    load<ScheduleEntry>('schedule_entries').then(guard(e0 => { if (e0) setEntries(e0); }));
+    load<Client>('clients').then(guard(c0 => { if (c0) setClients(c0); }));
+    load<HandoverDoc>('handover_docs').then(guard(h0 => { if (h0) setHandoverDocs(h0); }));
+    load<Vendor>('vendors').then(guard(v => syncLocalFirst('vendors', v, vendorsRef.current, setVendors)));
+    load<AccountEntry>('accounts').then(guard(acc => syncLocalFirst('accounts', acc, accountsRef.current, setAccounts)));
+    load<SiteEntry>('site_entries').then(guard(sites => syncLocalFirst('site_entries', sites, siteEntriesRef.current, setSiteEntries)));
+    load<Report>('reports').then(guard(rep => syncLocalFirst('reports', rep, reportsRef.current, setReports)));
+    // ai_plans: 원격에 있으면 우선(공유본), 비었고 로컬에만 있으면 backfill.
+    load<AiPlanResult>('ai_plans').then(guard(plans => {
       if (plans && plans.length) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
       else if (plans && plans.length === 0 && aiHistoryRef.current.length) persistMany('ai_plans', aiHistoryRef.current);
-      // 어시스턴트 대화: 최신순으로 정렬, 가장 최근 대화를 활성화(없으면 빈 상태 → 첫 전송 시 자동 생성)
-      if (convs) {
-        const sorted = [...convs].sort((a, b) => b.updatedAt - a.updatedAt);
-        setConversations(sorted);
-        setActiveConversationId(sorted[0]?.id ?? null);
-      }
-    })();
+    }));
+    // 어시스턴트 대화: 최신순 정렬 후 가장 최근 대화 활성화(RLS 로 본인 것만 조회됨).
+    load<AssistantConversation>('assistant_conversations').then(guard(convs => {
+      if (!convs) return;
+      const sorted = [...convs].sort((a, b) => b.updatedAt - a.updatedAt);
+      setConversations(sorted);
+      setActiveConversationId(sorted[0]?.id ?? null);
+    }));
     return () => { active = false; };
   }, [uid]);
 
