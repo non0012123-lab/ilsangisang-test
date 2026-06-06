@@ -71,6 +71,9 @@ interface AppContextType {
   confirmRequest: (id: string) => void;
   completeRequest: (id: string) => void;
   removeRequest: (id: string) => void;
+  // 내가 보낸 요청이 확인/완료됐을 때 요청자 화면에 잠깐 띄우는 스티커(휘발성, 닫으면 사라짐)
+  outgoingAlerts: WorkRequest[];
+  dismissOutgoingAlert: (id: string) => void;
   // 알림(종 아이콘) — 내 스케줄 등록·AI 완료를 모아 보여주고, 다른 탭일 땐 데스크톱 알림도 띄움
   notifications: AppNotification[];
   unreadCount: number;
@@ -184,6 +187,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [conversations, activeConversationId],
   );
   const [requests, setRequests] = useState<WorkRequest[]>(() => lsLoad<WorkRequest>(REQUESTS_LS_KEY));
+  // 보낸 요청의 상태변화(확인/완료) 알림 스티커 — 휘발성(새로고침하면 사라지고 종 알림엔 남음)
+  const [outgoingAlerts, setOutgoingAlerts] = useState<WorkRequest[]>([]);
+  const dismissOutgoingAlert = useCallback((id: string) => setOutgoingAlerts(prev => prev.filter(r => r.id !== id)), []);
   const [notifications, setNotifications] = useState<AppNotification[]>(() => lsLoad<AppNotification>(NOTIFS_LS_KEY));
   // 기본 켜짐 — 사용자가 명시적으로 끈('0') 경우에만 꺼진 상태로 시작
   const [desktopNotifyEnabled, setDesktopNotifyEnabled] = useState<boolean>(() => {
@@ -1106,10 +1112,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           pushNotification({ type: 'request', title: `${r.fromName || '동료'}님이 업무 요청을 보냈어요`, body: r.title, link: '/requests' });
           return;
         }
-        // 내가 보낸 요청의 상태가 바뀜(담당자가 확인/완료) — 요청자에게 알림.
-        if (r.fromUid === uid && prev && prev.status !== r.status) {
-          if (r.status === 'confirmed') pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 확인했어요`, body: r.title, link: '/requests' });
-          else if (r.status === 'done') pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 완료했어요`, body: r.title, link: '/requests' });
+        // 내가 보낸 요청의 상태가 바뀜(담당자가 확인/완료) — 요청자 화면에 스티커 + 종/PC 알림.
+        if (r.fromUid === uid && prev && prev.status !== r.status && (r.status === 'confirmed' || r.status === 'done')) {
+          setOutgoingAlerts(list => [r, ...list.filter(x => x.id !== r.id)]);
+          const verb = r.status === 'confirmed' ? '확인했어요' : '완료했어요';
+          pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 ${verb}`, body: r.title, link: '/requests' });
         }
       })
       .subscribe();
@@ -1125,7 +1132,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
-      requests, sendRequest, confirmRequest, completeRequest, removeRequest,
+      requests, sendRequest, confirmRequest, completeRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,
       desktopNotifyEnabled, enableDesktopNotify,
     }}>

@@ -27,3 +27,9 @@ create policy "requests_all_auth" on public.requests
 -- 요청 생성·상태변경을 새로고침 없이 상대 화면에 반영하기 위해 realtime 발행에 추가.
 -- (이미 추가돼 있으면 "already member of publication" 에러 — 그러면 무시하세요.)
 alter publication supabase_realtime add table public.requests;
+
+-- ★ UPDATE/DELETE 이벤트 전달에 필수.
+--  • RLS 가 켜진 테이블에서 realtime 이 UPDATE/DELETE 를 클라이언트로 보내려면 이전 행(old)
+--    전체가 필요한데, 기본 REPLICA IDENTITY 는 PK 만 담아 이벤트가 누락된다(INSERT 는 영향 없음).
+--  • 이게 없으면 "확인/완료(status 변경)" 알림이 요청자에게 도착하지 않는다.
+alter table public.requests replica identity full;

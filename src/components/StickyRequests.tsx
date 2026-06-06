@@ -11,19 +11,42 @@ const MAX = 3;
 
 export default function StickyRequests() {
   const { user } = useAuth();
-  const { requests, confirmRequest, completeRequest } = useApp();
+  const { requests, confirmRequest, completeRequest, outgoingAlerts, dismissOutgoingAlert } = useApp();
   const navigate = useNavigate();
   const [dismissed, setDismissed] = useState<string[]>([]);
   const uid = user?.id;
 
   const pending = requests.filter(r => r.toUid === uid && r.status === 'pending' && !dismissed.includes(r.id));
-  if (pending.length === 0) return null;
+  if (pending.length === 0 && outgoingAlerts.length === 0) return null;
 
   const shown = pending.slice(0, MAX);
   const more = pending.length - shown.length;
 
   return (
     <div className="fixed bottom-4 right-4 z-40 flex flex-col gap-2 w-[19rem] max-w-[calc(100vw-2rem)]">
+      {/* 내가 보낸 요청이 확인/완료됨 — 요청자에게 보여주는 스티커 */}
+      {outgoingAlerts.map(r => {
+        const done = r.status === 'done';
+        return (
+          <div key={`out-${r.id}`} className={`bg-white rounded-xl shadow-lg p-3.5 border ring-1 ${done ? 'border-emerald-200 ring-emerald-100' : 'border-blue-200 ring-blue-100'}`}>
+            <div className="flex items-start justify-between gap-2">
+              <span className={`flex items-center gap-1.5 text-[11px] font-bold ${done ? 'text-emerald-600' : 'text-blue-600'}`}>
+                {done ? <CheckCheck size={13} /> : <Check size={13} />} 요청 {done ? '완료' : '확인'}
+              </span>
+              <button onClick={() => dismissOutgoingAlert(r.id)} className="p-0.5 -mr-1 -mt-1 text-gray-300 hover:text-gray-500" title="닫기">
+                <X size={14} />
+              </button>
+            </div>
+            <button onClick={() => { dismissOutgoingAlert(r.id); navigate('/requests'); }} className="block text-left w-full">
+              <p className="text-sm text-gray-800 mt-1 break-words">
+                <span className="font-bold">{r.toName || '담당자'}</span>님이 <span className="font-bold">‘{r.title}’</span>{done ? '을(를) 완료했어요' : ' 요청을 확인했어요'}
+              </p>
+            </button>
+          </div>
+        );
+      })}
+
+      {/* 내가 받은 미확인 요청 스티커 */}
       {shown.map(r => (
         <div key={r.id} className="bg-white rounded-xl shadow-lg border border-amber-200 ring-1 ring-amber-100 p-3.5">
           <div className="flex items-start justify-between gap-2">
