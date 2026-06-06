@@ -1,7 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "기본 권한 — 모든 네이티브 동작은 Rust 에서 처리하므로 원격 웹 콘텐츠에는 IPC 권한을 주지 않는다.",
+  "description": "기본 권한 — 원격 웹(배포 사이트)이 네이티브 알림만 호출하도록 허용.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "remote": {
+    "urls": ["https://ilsangisang-test.pages.dev"]
+  },
+  "permissions": [
+    "core:default",
+    "notification:default"
+  ]
 }

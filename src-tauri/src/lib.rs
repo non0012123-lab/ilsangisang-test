@@ -30,6 +30,8 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         // 셸 자동 업데이트
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // 네이티브 알림(웹뷰 웹알림 대신 OS 알림) — 원격 웹 페이지가 IPC 로 호출
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // 자동 실행 기본값 ON (사용자가 OS 설정에서 끄기 전까지)
             let _ = app.autolaunch().enable();
