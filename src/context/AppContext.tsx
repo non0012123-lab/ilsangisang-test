@@ -234,20 +234,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
   const unreadCount = useMemo(() => notifications.reduce((a, n) => a + (n.read ? 0 : 1), 0), [notifications]);
 
-  // PC 알림은 기본 켜짐 — 로그인하면 권한을 자동 요청한다(브라우저 권한 팝업은 사용자가 한 번 "허용"해야 함).
-  // 일부 브라우저(Firefox/Safari)는 사용자 제스처 없이는 요청이 막힐 수 있어, 그 경우 알림함의 "PC 알림 켜기"가 대체 수단이 된다.
+  // 권한 상태만 동기화한다. 권한 요청(requestPermission)은 절대 자동으로 하지 않는다 —
+  // 페이지 로드 시 자동 요청은 사용자 제스처가 아니라서 Firefox/Safari 는 무조건 차단되고,
+  // Chrome 도 무시하거나 "조용한 알림" 페널티를 줘서 결과적으로 권한이 'default' 에 묶여 한 개도 안 뜬다.
+  // 정식 경로는 알림함의 "PC 알림 켜기" 버튼(사용자 클릭=제스처)뿐이다.
   useEffect(() => {
     if (!uid || !isNotifySupported()) return;
-    if (Notification.permission === 'granted') { setDesktopNotifyEnabled(true); return; }
-    if (Notification.permission === 'default' && desktopNotifyEnabled) {
-      requestNotifyPermission().then(perm => {
-        const granted = perm === 'granted';
-        setDesktopNotifyEnabled(granted);
-        try { localStorage.setItem(DESKTOP_NOTIFY_LS_KEY, granted ? '1' : '0'); } catch { /* 무시 */ }
-        if (granted) fireDesktop('PC 알림이 켜졌어요', '이제 새 스케줄·AI 완료 알림을 데스크톱에서 받아요.');
-      });
-    }
-  }, [uid, desktopNotifyEnabled]);
+    if (Notification.permission === 'granted') setDesktopNotifyEnabled(true);
+  }, [uid]);
 
   // ── Supabase 영속화 헬퍼 (있으면 비동기로 반영, 실패는 콘솔에만) ──
   const persistOne = (table: string, row: { id: string }) => {

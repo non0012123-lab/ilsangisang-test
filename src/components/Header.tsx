@@ -3,7 +3,7 @@ import { Bell, Check, FileText, Image as ImageIcon, CalendarClock, Monitor, Spar
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
-import { isNotifySupported, notifyPermission } from '../utils/notifications';
+import { isNotifySupported, notifyPermission, fireDesktop } from '../utils/notifications';
 import type { AppNotification } from '../types';
 
 interface Props {
@@ -126,13 +126,28 @@ export default function Header({ title, subtitle }: Props) {
                 {!supported ? (
                   <p className="text-xs text-gray-400 flex items-center gap-1.5"><Monitor size={13} /> 이 브라우저는 PC 알림을 지원하지 않습니다.</p>
                 ) : blocked ? (
-                  <p className="text-xs text-gray-500 flex items-center gap-1.5"><Monitor size={13} /> PC 알림이 차단됨 — 브라우저 주소창의 알림 설정에서 허용해 주세요.</p>
+                  <p className="text-xs text-gray-500 flex items-start gap-1.5"><Monitor size={13} className="mt-0.5 shrink-0" /> <span>PC 알림이 차단돼 있어요. 주소창 왼쪽 자물쇠 🔒 → 알림 → ‘허용’으로 바꾼 뒤 새로고침해 주세요.</span></p>
                 ) : desktopOn ? (
-                  <p className="text-xs text-green-600 flex items-center gap-1.5"><Check size={13} /> PC 알림이 켜져 있어요 (항상 표시)</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-green-600 flex items-center gap-1.5"><Check size={13} /> PC 알림이 켜져 있어요</p>
+                    <button
+                      onClick={() => {
+                        const ok = fireDesktop('테스트 알림', '이 알림이 보이면 정상이에요. 안 보이면 OS 알림 설정(집중 모드·방해 금지)을 확인해 주세요.');
+                        if (!ok) alert('알림 생성에 실패했어요. 브라우저/OS 알림 설정을 확인해 주세요.');
+                      }}
+                      className="text-xs font-semibold text-blue-600 hover:underline shrink-0">
+                      테스트 알림
+                    </button>
+                  </div>
                 ) : (
                   <button onClick={enableDesktopNotify} className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1.5">
-                    <Monitor size={13} /> PC 알림 켜기
+                    <Monitor size={13} /> PC 알림 켜기 (클릭 후 ‘허용’)
                   </button>
+                )}
+                {desktopOn && (
+                  <p className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">
+                    알림이 안 뜨면: ① OS 집중 모드/방해 금지 해제 ② (Win) 설정&gt;알림에서 브라우저 켜기 / (Mac) 시스템 설정&gt;알림에서 브라우저 허용. 앱 탭을 닫으면 알림은 오지 않아요.
+                  </p>
                 )}
               </div>
             </div>
