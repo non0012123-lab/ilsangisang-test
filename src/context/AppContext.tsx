@@ -565,6 +565,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message, history, today: todayStr(),
+          currentUser: u?.name ?? '', // 로그인한 본인 — 담당자 미지정 시 기본 담당자, "나/내가" 표현 매핑용
           managers: membersRef.current.map(m => m.name),
           clients: activeClients.map(c => ({
             id: c.id, name: c.name, industry: c.industry, categories: c.categories,

@@ -61,6 +61,7 @@ interface AssistantRequest {
   message?: string;
   history?: { role: 'user' | 'assistant'; text: string }[];
   today?: string;
+  currentUser?: string; // 로그인한 본인 이름 — 담당자 미지정 시 기본 담당자, "나/내가" 매핑용
   managers?: string[];
   clients?: {
     id?: string; name?: string; industry?: string; categories?: string[]; reportAnchorDate?: string; status?: string;
@@ -114,6 +115,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   if (!req.message || !req.message.trim()) return json({ error: '입력 메시지가 비어 있습니다.' }, 400);
 
   const today = req.today || new Date().toISOString().slice(0, 10);
+  const currentUser = (req.currentUser || '').trim();
   const managers = req.managers ?? [];
   const clients = (Array.isArray(req.clients) ? req.clients : []).filter(c => c && c.name);
   const clientNames = clients.map(c => c.name as string);
@@ -230,12 +232,14 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 아이디 목록 항목은 구분(platform: 블로그/SNS/유튜브/기타)과 소유(ownership: client=업체소유, inhouse=사내)를 가진다. 추가/수정 시 사용자 표현에 맞게 채우고, "유튜브 계정 목록", "사내 계정 알려줘" 같은 조회는 이 값으로 필터해 해당 id 들을 accountLookups 에 담는다.',
     '- 블로그(platform=블로그)는 등급(grade)을 가진다: 준최2/준최3/준최4/준최5/준최6, 최적1/최적2/최적3/최적4. "최적3 블로그 보여줘", "준최 블로그 목록" 같은 조회는 grade 로 필터해 accountLookups 에 담고, 추가/수정 시 grade 를 채운다. 블로그가 아니면 grade 는 비운다.',
     '- accounts/sites 의 추가/수정/삭제를 제안할 때는 reply 에 무엇을 할지 요약하고 "적용"을 안내한다. 조회·답변만 할 때는 모든 액션 배열을 비운다.',
-    '- managerName 은 아래 "담당자 목록" 중 가장 가까운 값, clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
+    `- managerName(담당자): 사용자가 담당자를 명시적으로 지정했을 때만(예: "철수한테", "영희 담당으로") "담당자 목록" 중 가장 가까운 값을 넣는다. 담당자 언급이 전혀 없으면 절대 임의로 고르지 말고 managerName 을 빈 문자열("")로 둔다 — 그러면 시스템이 로그인한 본인을 자동 담당자로 넣는다. "나/내가/나한테/제가/저한테" 같은 1인칭 표현은 로그인 본인(${currentUser || '본인'})을 가리키므로 이때도 managerName 은 빈 문자열로 둔다.`,
+    '- clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
     '- 기간 작업이 아니면 endDate 는 null. status 미지정이면 "pending".',
     '- 순위(rank): "신사피부과 3위로 등록해줘", "○○ 키워드 5위" 처럼 순위를 말하면 그 숫자를 rank 에 담는다(신규는 entries.rank, 기존 일정 순위 변경은 updates.rank). "1위/3등/순위 2" 등에서 숫자만 뽑아 넣고, 순위 언급이 없으면 entries 에선 생략·updates 에선 null. 기존 일정 순위 변경 요청이면 위 현재 일정 목록에서 키워드·업체·날짜로 대상을 찾아 그 id 로 updates 에 담는다.',
     '- 액션(entries/updates/clients/handovers)을 제안할 때 reply 에는 무엇을 제안하는지 요약하고, 사용자가 "적용" 버튼을 눌러야 실제 반영된다는 뉘앙스로 안내한다.',
     '- 확실하지 않은 정보를 지어내지 말 것. 모르면 reply 에서 추가 정보를 요청.',
     '',
+    `로그인한 본인(담당자 미지정 시 기본 담당자 · "나/내가"가 가리키는 사람): ${currentUser || '(알 수 없음)'}`,
     `담당자 목록: ${managers.join(', ') || '(없음)'}`,
     `업체 목록: ${clientNames.join(', ') || '(없음)'}`,
     '업체 상세(연락처·예산·계약 포함 · 수정/삭제 시 id 사용 · reportAnchorDate=월간 보고 기준 시작일):',
