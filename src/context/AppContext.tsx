@@ -843,14 +843,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
     // AI 어시스턴트로 반영된 변경도 알림(일정·업체·계정 등 종류 무관). 대시보드에서 작업해도 떠야 하므로 직접 푸시.
     if (count > 0) {
-      const bits: string[] = [];
-      if (newEntries.length) bits.push(`일정 ${newEntries.length}건`);
-      const others = count - newEntries.length;
-      if (others > 0) bits.push(`그 외 ${others}건`);
+      // 대표 1건(업체명 + 키워드/카테고리) + 외 N건 으로 핵심 내용을 보여준다.
+      const head = newEntries[0];
+      const label = head ? `${head.clientName} ${head.keyword || head.category}`.trim() : '';
+      const rest = count - 1;
+      const body = label
+        ? `${label} 일정${rest > 0 ? ` 외 ${rest}건` : ''}이 반영됐어요`
+        : `${count}건이 반영됐어요`;
       pushNotification({
         type: 'assistant',
         title: 'AI 어시스턴트 적용 완료',
-        body: `${bits.join(' · ') || `${count}건`}이 반영됐어요`,
+        body,
         link: '/schedule/daily',
       });
     }
