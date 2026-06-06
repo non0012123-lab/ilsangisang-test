@@ -73,7 +73,8 @@ export interface AssistantProposalHandover { clientName?: string; overview?: str
 // 다른 담당자에게 보낼 업무 요청 (예: "방두환한테 디자인 제작 요청해줘")
 export interface AssistantProposalRequest { toName?: string; title?: string; body?: string }
 // 사내 내부 일정 (예: "내일 3시 디자인팀 회의 잡아줘", "금요일 면접 일정")
-export interface AssistantProposalInternal { title?: string; category?: string; date?: string; endDate?: string | null; startTime?: string; endTime?: string; participantNames?: string[]; location?: string; notes?: string; reminder?: string }
+// op:'update' + id 면 기존 내부 일정 수정(참여자는 합쳐 추가). 생략/add 면 신규.
+export interface AssistantProposalInternal { op?: 'add' | 'update'; id?: string; title?: string; category?: string; date?: string; endDate?: string | null; startTime?: string; endTime?: string; participantNames?: string[]; location?: string; notes?: string; reminder?: string }
 export interface AssistantProposalVendor { name?: string; services?: string; contactPerson?: string; phone?: string; email?: string; pricing?: string; notes?: string }
 // 아이디 목록/홈페이지 목록은 추가·수정·삭제를 op 로 구분
 export interface AssistantAccountOp { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; platform?: string; grade?: string; ownership?: 'client' | 'inhouse'; username?: string; password?: string; category?: string; ip?: string }
@@ -97,6 +98,7 @@ export interface AssistantUndo {
   siteIds: string[];
   requestIds?: string[];           // 어시스턴트로 생성한 업무 요청(되돌릴 때 삭제)
   internalEventIds?: string[];     // 어시스턴트로 생성한 내부 일정(되돌릴 때 삭제)
+  updatedInternalPrev?: InternalEvent[]; // 어시스턴트로 수정한 내부 일정의 이전 상태(되돌릴 때 복원)
   deletedAccounts: AccountEntry[];
   deletedSites: SiteEntry[];
   updatedAccountsPrev: AccountEntry[];

@@ -205,12 +205,15 @@ export default function DashboardAssistant() {
                         <span><strong>업무 요청</strong> {r.toName || '담당자?'}에게 · {r.title || '내용?'}{r.body ? ` — ${r.body}` : ''}</span>
                       </div>
                     ))}
-                    {(m.internalEvents ?? []).map((iv, i) => (
-                      <div key={`iv${i}`} className="flex items-start gap-2 text-xs text-gray-700">
-                        <CalendarClock size={13} className="text-cyan-500 shrink-0 mt-0.5" />
-                        <span><strong>내부 일정</strong> {iv.date}{iv.startTime ? ` ${iv.startTime}` : ''} · {iv.category || '종류?'} · {iv.title || '제목?'}{iv.location ? ` @${iv.location}` : ''}{iv.participantNames?.length ? ` · ${iv.participantNames.join(', ')}` : ''}{iv.reminder && iv.reminder !== 'off' ? ` · 🔔${REMINDER_TEXT[iv.reminder] ?? iv.reminder}` : ''}</span>
-                      </div>
-                    ))}
+                    {(m.internalEvents ?? []).map((iv, i) => {
+                      const isUpdate = (iv.op ?? (iv.id ? 'update' : 'add')) === 'update';
+                      return (
+                        <div key={`iv${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                          {isUpdate ? <Pencil size={13} className="text-cyan-600 shrink-0 mt-0.5" /> : <CalendarClock size={13} className="text-cyan-500 shrink-0 mt-0.5" />}
+                          <span><strong>내부 일정 {isUpdate ? '수정' : '추가'}</strong> {iv.date ? `${iv.date}` : ''}{iv.startTime ? ` ${iv.startTime}` : ''}{iv.category ? ` · ${iv.category}` : ''} · {iv.title || '제목?'}{iv.location ? ` @${iv.location}` : ''}{iv.participantNames?.length ? ` · ${isUpdate ? '+' : ''}${iv.participantNames.join(', ')}` : ''}{iv.reminder && iv.reminder !== 'off' ? ` · 🔔${REMINDER_TEXT[iv.reminder] ?? iv.reminder}` : ''}</span>
+                        </div>
+                      );
+                    })}
                     {(m.entries ?? []).map((e, i) => (
                       <div key={`e${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                         <CalendarPlus size={13} className="text-purple-500 shrink-0 mt-0.5" />
@@ -248,7 +251,7 @@ export default function DashboardAssistant() {
                         <div className="flex items-center gap-1.5 text-xs font-semibold text-green-600">
                           <Check size={13} /> {m.applied}건 적용됨 — 스케줄·업체·인수인계에 반영되었습니다.
                         </div>
-                        {m.undo && (m.undo.entryIds.length + m.undo.clientIds.length + m.undo.vendorIds.length + m.undo.handoverIds.length + m.undo.deletedEntries.length + m.undo.updatedPrev.length + (m.undo.requestIds?.length ?? 0) + (m.undo.internalEventIds?.length ?? 0)) > 0 && (
+                        {m.undo && (m.undo.entryIds.length + m.undo.clientIds.length + m.undo.vendorIds.length + m.undo.handoverIds.length + m.undo.deletedEntries.length + m.undo.updatedPrev.length + (m.undo.requestIds?.length ?? 0) + (m.undo.internalEventIds?.length ?? 0) + (m.undo.updatedInternalPrev?.length ?? 0)) > 0 && (
                           m.undone ? (
                             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400"><RotateCcw size={12} /> 되돌림 완료</span>
                           ) : (

@@ -746,6 +746,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           })),
           categories: ASSISTANT_CATEGORIES,
           internalCategories: internalCategoriesRef.current.map(c => c.name), // 내부 일정 종류(회의실/미팅/면접/촬영/휴가 등)
+          // 기존 내부 일정(수정 대상 식별용 — id 로 update)
+          internalEvents: internalEventsRef.current.slice(0, 80).map(e => ({
+            id: e.id, title: e.title, category: e.category, date: e.date,
+            startTime: e.startTime ?? null, participantNames: e.participantNames, location: e.location ?? null,
+          })),
           handoverDocs: handoverContext,
           aiPlans: aiPlanContext,
           vendors: vendorContext,
@@ -823,7 +828,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 되돌리기용 스냅샷(생성 id + 삭제/수정 전 원본)
     const undo: AssistantUndo = {
       entryIds: [], clientIds: [], vendorIds: [], handoverIds: [], deletedEntries: [], updatedPrev: [],
-      accountIds: [], siteIds: [], requestIds: [], internalEventIds: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
+      accountIds: [], siteIds: [], requestIds: [], internalEventIds: [], updatedInternalPrev: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
       deletedClients: [], updatedClientsPrev: [], deletedHandovers: [],
     };
 
@@ -1039,28 +1044,59 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // 9) 내부 일정 생성 (회의/미팅/면접/촬영/휴가 등 — 클라이언트로 안 넘어가는 사내 일정)
+    // 9) 내부 일정 생성/수정 (회의/미팅/면접/촬영/휴가 등 — 클라이언트로 안 넘어가는 사내 일정)
     const newInternal: InternalEvent[] = [];
+    const ensureCat = (name?: string, seed = 0) => {
+      const n = (name ?? '').trim();
+      if (n && !internalCategoriesRef.current.some(c => c.name === n)) {
+        const color = CATEGORY_COLORS[internalCategoriesRef.current.length % CATEGORY_COLORS.length];
+        saveInternalCategory({ id: `ic-${Date.now()}-${seed}`, name: n, color });
+      }
+      return n;
+    };
+    const resolveParticipants = (names?: string[]) => {
+      const ids: string[] = []; const nms: string[] = [];
+      (names ?? []).forEach(n => { const mid = matchManager(n); if (mid && !ids.includes(mid)) { ids.push(mid); nms.push(mem.find(m => m.id === mid)?.name ?? n); } });
+      return { ids, nms };
+    };
+    const normReminder = (r?: string) => { const v = (r ?? '').trim(); return (['off', '1h', '30m', '10m', 'onTime'].includes(v) ? v : undefined) as InternalEvent['reminder']; };
     (msg.internalEvents ?? []).forEach((iv, i) => {
+      const op = iv.op ?? (iv.id ? 'update' : 'add');
+      // ── 기존 일정 수정 (참여자는 합쳐서 추가, 제공된 필드만 덮어씀) ──
+      if (op === 'update') {
+        const cur = (iv.id ? internalEventsRef.current.find(e => e.id === iv.id) : undefined)
+          ?? (iv.title ? internalEventsRef.current.find(e => e.title === iv.title!.trim()) : undefined);
+        if (cur) {
+          const { ids: addIds, nms: addNames } = resolveParticipants(iv.participantNames);
+          const mergedIds = [...cur.participantIds]; const mergedNames = [...cur.participantNames];
+          addIds.forEach((id, k) => { if (!mergedIds.includes(id)) { mergedIds.push(id); mergedNames.push(addNames[k]); } });
+          const catName = ensureCat(iv.category, i);
+          const updated: InternalEvent = {
+            ...cur,
+            title: (iv.title ?? '').trim() || cur.title,
+            category: catName || cur.category,
+            date: iv.date || cur.date,
+            endDate: iv.endDate && iv.endDate !== 'null' && iv.date && iv.endDate > iv.date ? iv.endDate : cur.endDate,
+            startTime: iv.startTime || cur.startTime,
+            endTime: iv.endTime || cur.endTime,
+            participantIds: mergedIds, participantNames: mergedNames,
+            location: iv.location || cur.location,
+            notes: iv.notes || cur.notes,
+            reminder: normReminder(iv.reminder) ?? cur.reminder,
+          };
+          undo.updatedInternalPrev!.push({ ...cur });
+          saveInternalEvent(updated);
+          count += 1;
+          return;
+        }
+        // 매칭 실패 → 아래 신규 생성으로 폴백
+      }
+      // ── 신규 생성 ──
       const title = (iv.title ?? '').trim();
       if (!iv.date || !title) return;
-      // 카테고리: 기존과 매칭, 없으면 새 카테고리(색 자동) 생성
-      let catName = (iv.category ?? '').trim();
-      if (catName && !internalCategoriesRef.current.some(c => c.name === catName)) {
-        const color = CATEGORY_COLORS[internalCategoriesRef.current.length % CATEGORY_COLORS.length];
-        saveInternalCategory({ id: `ic-${Date.now()}-${i}`, name: catName, color });
-      }
-      if (!catName) catName = '기타';
-      // 참여자: 이름 → member id 매칭. 아무도 매칭 안 되면 로그인 본인을 기본 담당자로.
-      const pIds: string[] = []; const pNames: string[] = [];
-      (iv.participantNames ?? []).forEach(n => {
-        const mid = matchManager(n);
-        if (mid && !pIds.includes(mid)) { pIds.push(mid); pNames.push(mem.find(m => m.id === mid)?.name ?? n); }
-      });
+      const catName = ensureCat(iv.category, i) || '기타';
+      const { ids: pIds, nms: pNames } = resolveParticipants(iv.participantNames);
       if (pIds.length === 0 && selfId) { pIds.push(selfId); pNames.push(u?.name ?? ''); }
-      // 리마인더: 어시스턴트가 보낸 값을 유효 옵션으로 정규화
-      const remRaw = (iv.reminder ?? '').trim();
-      const reminder = (['off', '1h', '30m', '10m', 'onTime'].includes(remRaw) ? remRaw : undefined) as InternalEvent['reminder'];
       const endDate = iv.endDate && iv.endDate !== 'null' && iv.endDate > iv.date ? iv.endDate : undefined;
       const ev: InternalEvent = {
         id: `ie-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`,
@@ -1068,7 +1104,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         startTime: iv.startTime || undefined, endTime: iv.endTime || undefined,
         participantIds: pIds, participantNames: pNames,
         location: iv.location || undefined, notes: iv.notes || undefined,
-        reminder,
+        reminder: normReminder(iv.reminder),
         createdAt: nowMs(),
       };
       saveInternalEvent(ev);
@@ -1126,9 +1162,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (u.updatedAccountsPrev ?? []).forEach(a => saveAccount(a));
     (u.updatedSitesPrev ?? []).forEach(s => saveSite(s));
     (u.requestIds ?? []).forEach(id => removeRequest(id)); // 보낸 업무 요청 취소
-    (u.internalEventIds ?? []).forEach(id => removeInternalEvent(id)); // 내부 일정 취소
+    (u.internalEventIds ?? []).forEach(id => removeInternalEvent(id)); // 생성한 내부 일정 취소
+    (u.updatedInternalPrev ?? []).forEach(ev => saveInternalEvent(ev)); // 수정한 내부 일정 복원
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, undone: true } : m));
-  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, removeRequest, removeInternalEvent, mutateMessages]);
+  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, removeRequest, removeInternalEvent, saveInternalEvent, mutateMessages]);
 
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
@@ -1281,13 +1318,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const ev = (payload.new as { data?: InternalEvent })?.data;
         if (!ev || !ev.id) return;
         setInternalEvents(prev => prev.some(e => e.id === ev.id) ? prev.map(e => e.id === ev.id ? ev : e) : [ev, ...prev]);
+        const when = `${ev.date}${ev.startTime ? ` ${ev.startTime}` : ''}`;
+        const body = `${ev.category} · ${ev.title} (${when})${ev.location ? ` @${ev.location}` : ''}`;
         // 새로 등록된 내부 일정 → 참여자(본인 포함) 전원에게 PC 알림 + 스티커.
-        //  • INSERT 일 때만(수정은 제외). 본인이 만든 것도 echo 로 한 번 들어오며 참여자면 알린다.
         if (payload.eventType === 'INSERT' && ev.participantIds?.includes(uid)) {
-          const when = `${ev.date}${ev.startTime ? ` ${ev.startTime}` : ''}`;
-          const body = `${ev.category} · ${ev.title} (${when})${ev.location ? ` @${ev.location}` : ''}`;
           pushNotification({ type: 'internal', title: '새 내부 일정이 등록됐어요', body, link: '/internal' });
           pushStickyNotice({ type: 'internal', title: '새 내부 일정', body, link: '/internal' });
+        }
+        // 수정으로 참여자에 "새로 추가된" 사람에게만 알림(REPLICA IDENTITY FULL 로 old 비교).
+        else if (payload.eventType === 'UPDATE') {
+          const oldEv = (payload.old as { data?: InternalEvent })?.data;
+          const wasParticipant = oldEv?.participantIds?.includes(uid) ?? false;
+          if (!wasParticipant && ev.participantIds?.includes(uid)) {
+            pushNotification({ type: 'internal', title: '내부 일정에 참여자로 추가됐어요', body, link: '/internal' });
+            pushStickyNotice({ type: 'internal', title: '내부 일정 참여 추가', body, link: '/internal' });
+          }
         }
       })
       .subscribe();

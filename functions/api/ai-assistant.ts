@@ -70,6 +70,7 @@ interface AssistantRequest {
   }[];
   categories?: string[];
   internalCategories?: string[];  // 내부 일정 종류(회의실/미팅/면접/촬영/휴가 등)
+  internalEvents?: { id?: string; title?: string; category?: string; date?: string; startTime?: string | null; participantNames?: string[]; location?: string | null }[]; // 기존 내부 일정(수정 대상)
   entries?: CtxEntry[];
   handoverDocs?: CtxHandover[];
   aiPlans?: CtxAiPlan[];
@@ -134,6 +135,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const clientNames = clients.map(c => c.name as string);
   const categories = req.categories ?? [];
   const internalCategories = (Array.isArray(req.internalCategories) ? req.internalCategories : []).filter(Boolean);
+  const existingInternal = (Array.isArray(req.internalEvents) ? req.internalEvents : []).slice(0, 80);
+  const internalEventsContext = existingInternal
+    .map(e => e.title ? `■ id=${e.id ?? '?'} | ${e.date ?? ''}${e.startTime ? ` ${e.startTime}` : ''} | ${e.category ?? ''} | ${e.title}${Array.isArray(e.participantNames) && e.participantNames.length ? ` | 참여자:${e.participantNames.join(',')}` : ''}${e.location ? ` | 장소:${e.location}` : ''}` : '')
+    .filter(Boolean).join('\n');
   const entries = (Array.isArray(req.entries) ? req.entries : []).slice(0, 400);
   const handoverDocs = (Array.isArray(req.handoverDocs) ? req.handoverDocs : []).slice(0, 60);
   const aiPlans = (Array.isArray(req.aiPlans) ? req.aiPlans : []).slice(0, 20);
@@ -216,7 +221,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  "accounts": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "platform":"블로그|SNS|유튜브|기타", "grade":"블로그 등급(준최2~준최6/최적1~최적4)", "ownership":"client|inhouse", "username":"", "password":"", "category":"", "ip":"" } ],',
     '  "sites": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "url":"", "username":"", "password":"", "description":"" } ],',
     '  "requests": [ { "toName":"요청 받을 담당자 이름", "title":"요청 내용 한 줄(예: 디자인 제작)", "body":"상세 설명(없으면 생략)" } ],',
-    '  "internalEvents": [ { "title":"일정 제목", "category":"내부 일정 종류", "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "startTime":"HH:MM(없으면 생략)", "endTime":"HH:MM(없으면 생략)", "participantNames":["참여자 이름"], "location":"장소(없으면 생략)", "notes":"메모(없으면 생략)", "reminder":"off|1h|30m|10m|onTime" } ],',
+    '  "internalEvents": [ { "op":"add|update", "id":"수정 시 기존 내부일정 id", "title":"일정 제목", "category":"내부 일정 종류", "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "startTime":"HH:MM(없으면 생략)", "endTime":"HH:MM(없으면 생략)", "participantNames":["참여자 이름"], "location":"장소(없으면 생략)", "notes":"메모(없으면 생략)", "reminder":"off|1h|30m|10m|onTime" } ],',
     '  "accountLookups": [ "조회 질문일 때 답으로 보여줄 아이디 목록 id" ],',
     '  "siteLookups": [ "조회 질문일 때 답으로 보여줄 홈페이지 id" ],',
     '  "keywords": [ "조회수를 조회할 키워드" ]',
@@ -232,7 +237,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  · 클라이언트 업무(entries): "특정 업체의 콘텐츠/마케팅 제작·관리 작업"(블로그·SNS·영상·디자인·여론 등 실제 산출물 작업)일 때만 entries 에 담는다(clientName 필수). 단순히 업체명이 나왔다고 entries 로 가지 말 것 — 위 미팅/회의류면 internalEvents.',
     '  · 판단 기준: "무엇을 제작/관리"하는 작업이면 entries, "언제 만나/모이/쉰다"는 일정이면 internalEvents. 정 모르면 reply 에서 되묻고 액션 배열은 비운다.',
     `  · 참여자 미지정: 내부 일정에서 참여자를 안 밝히면 participantNames 를 빈 배열로 둔다 — 시스템이 로그인 본인(${currentUser || '본인'})을 기본 참여자로 넣는다. "나/내가/우리팀" 같은 1인칭도 빈 배열로 두면 본인이 들어간다(특정 팀원을 콕 집었을 때만 그 이름을 넣는다).`,
-    '  · 사전 알림(reminder): "1시간 전 알림"→"1h", "30분 전"→"30m", "10분 전"→"10m", "정각/시작할 때 알림"→"onTime", 언급 없거나 "알림 없이"→"off". 예: "오늘 영상 촬영 오후 6시 등록하고 1시간 전 알림해줘" → internalEvents:[{title:"영상 촬영", category:"촬영", date:오늘, startTime:"18:00", reminder:"1h"}]. reminder 는 startTime 이 있을 때만 의미가 있으니 시간을 같이 채운다.',
+    '  · 사전 알림(reminder): "1시간 전 알림"→"1h", "30분 전"→"30m", "10분 전"→"10m", "정각/시작할 때 알림"→"onTime", 언급 없거나 "알림 없이"→"off". 예: "오늘 영상 촬영 오후 6시 등록하고 1시간 전 알림해줘" → internalEvents:[{op:"add", title:"영상 촬영", category:"촬영", date:오늘, startTime:"18:00", reminder:"1h"}]. reminder 는 startTime 이 있을 때만 의미가 있으니 시간을 같이 채운다.',
+    '  · ★ 수정 vs 신규: "방금 그 일정에 ○○도 참여자로 추가해줘", "그 회의 시간 4시로 바꿔줘"처럼 "이미 있는 일정"을 바꾸는 요청이면 새로 만들지 말고 op:"update" + 아래 "현재 내부 일정"에서 가장 잘 맞는 일정의 id 를 넣는다(직전 대화에서 만든 일정이면 보통 가장 최근/제목이 일치하는 것). 바꿀 필드만 채우면 된다 — 참여자(participantNames)는 기존에 "더해서 추가"되고, 시간·장소·종류 등 채운 필드는 교체된다. 새로운 별개의 일정일 때만 op:"add". 어느 일정인지 모호하면 되묻는다.',
     '- "배분/재배치/나눠줘" 요청이면, 아래 현재 일정을 참고해 날짜·담당자를 합리적으로 분산한다. 기존 일정을 옮기는 것은 updates(그 일정의 id 사용), 새로 만드는 것은 entries 에 담는다. 변경하지 않는 필드는 null.',
     '- 스케줄 링크(작업 결과/키워드 URL) 추가·수정·삭제: "오늘 한 ○○ 키워드 링크는 https://... 야 추가해줘", "△△ 일정에 이 링크 넣어줘/바꿔줘", "□□ 링크 지워줘" 같은 요청이면, 아래 현재 일정 목록에서 날짜·업체·카테고리·키워드로 가장 잘 맞는 일정을 찾아 그 id 로 updates 에 담고 link 필드를 채운다. 추가/수정은 link 에 URL 문자열, 삭제는 link 에 빈 문자열("")을 넣는다. 링크 외 다른 필드는 null(변경 안 함). 어느 일정인지 모호하면 바꾸지 말고 reply 에서 되묻는다. URL 은 사용자가 준 값을 그대로 쓰고 지어내지 않는다.',
     '- 일정 삭제/취소("6/10 현대자동차 블로그관리 삭제해줘", "○○ 일정 취소해줘", "방금 추가한 거 삭제" 등): 아래 현재 일정 목록에서 날짜·업체·카테고리·키워드로 가장 잘 맞는 일정을 찾아 그 id 를 deletes 배열에 담는다. 여러 건이 맞으면 모두 담는다. 일치하는 게 없거나 어느 것인지 모호하면 삭제하지 말고 reply 에서 어떤 일정인지 되묻는다. 삭제는 되돌리기 어려우니, reply 에 무엇을 삭제할지 명확히 적고 "적용"을 눌러야 반영된다고 안내한다.',
@@ -283,6 +289,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '',
     '현재 등록된 일정(JSON, id 포함 — updates 에 이 id 사용):',
     JSON.stringify(entries),
+    '',
+    '현재 내부 일정(수정 시 op:"update" 에 이 id 사용):',
+    internalEventsContext || '(등록된 내부 일정 없음)',
     '',
     '업체 가이드라인(인수인계 문서 — 가이드라인 질문의 1차 근거):',
     guidelineContext || '(등록된 인수인계 가이드라인 없음)',
