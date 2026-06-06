@@ -307,7 +307,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const pushNotification = useCallback((n: Omit<AppNotification, 'id' | 'createdAt' | 'read'>): boolean => {
     const notif: AppNotification = { ...n, id: `ntf-${nowMs()}-${Math.random().toString(36).slice(2, 7)}`, createdAt: nowMs(), read: false };
     setNotifications(prev => [notif, ...prev].slice(0, NOTIFS_MAX));
-    return fireDesktop(notif.title, notif.body, notif.type); // 데스크톱 알림이 실제로 떴는지
+    // tag 는 알림별 고유 id — 같은 타입이라도 매번 새 OS 알림으로 떠야 함(타입을 tag 로 쓰면
+    // requireInteraction 으로 남은 이전 알림을 조용히 교체해 새 알림이 안 뜨는 문제가 있었음).
+    return fireDesktop(notif.title, notif.body, notif.id); // 데스크톱 알림이 실제로 떴는지
   }, []);
   const markAllNotificationsRead = useCallback(() => setNotifications(prev => prev.map(n => n.read ? n : { ...n, read: true })), []);
   const markNotificationRead = useCallback((id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n)), []);

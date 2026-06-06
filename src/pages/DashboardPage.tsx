@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock, Calendar, ArrowUpRight, Plus, TrendingUp, Users, Flame, Pencil, Trash2 } from 'lucide-react';
+import { CheckCircle2, Clock, Calendar, ArrowUpRight, Plus, TrendingUp, Users, Flame, Pencil, Trash2, Plane } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
@@ -24,18 +24,17 @@ function fmtLocal(x: Date) {
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
 }
 
+// 오늘을 시작일로 한 7일 구간(과거 일정이 섞여 헷갈리지 않도록 오늘부터 앞으로 봄)
 function getWeekRange(base: string) {
   const d = new Date(base + 'T00:00:00');
-  const day = d.getDay();
-  const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
-  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-  return { start: fmtLocal(mon), end: fmtLocal(sun) };
+  const end = new Date(d); end.setDate(d.getDate() + 6);
+  return { start: base, end: fmtLocal(end) };
 }
 
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { entries: allEntries, patchEntry, saveEntry, removeEntry, dataLoading } = useApp();
+  const { entries: allEntries, internalEvents, patchEntry, saveEntry, removeEntry, dataLoading } = useApp();
   const isAdmin = user?.role === 'admin';
 
   // 대시보드에서 바로 일정 추가/수정/삭제 (일일 스케줄 페이지와 동일한 ScheduleModal 재사용)
@@ -87,6 +86,14 @@ export default function DashboardPage() {
 
   // Team stats (admin only)
   const teamToday = allEntries.filter(e => coversDate(e, TODAY));
+
+  // 팀 휴가 현황: 내부 일정 중 '휴가' — 오늘부터 약 한 달 안에 걸치는 것
+  const monthAhead = (() => { const d = new Date(TODAY + 'T00:00:00'); d.setDate(d.getDate() + 30); return fmtLocal(d); })();
+  const vacations = internalEvents
+    .filter(e => e.category === '휴가' && overlapsRange(e, TODAY, monthAhead))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const md = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });
+  const vacRange = (v: { date: string; endDate?: string }) => v.endDate && v.endDate > v.date ? `${md(v.date)} ~ ${md(v.endDate)}` : md(v.date);
 
   const updateEntry = (id: string, patch: Partial<typeof allEntries[0]>) =>
     patchEntry(id, patch);
@@ -389,6 +396,27 @@ export default function DashboardPage() {
                 </div>
               </div>
             )}
+
+            {/* 팀 휴가 현황 (오늘부터 한 달) */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
+              <div className="px-5 py-4 border-b border-gray-50 flex items-center gap-2">
+                <Plane size={15} className="text-emerald-500" />
+                <h3 className="font-bold text-gray-900 text-sm">팀 휴가 현황</h3>
+                <span className="ml-auto text-xs text-gray-400">앞으로 30일</span>
+              </div>
+              <div className="p-4 space-y-2">
+                {vacations.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-3">예정된 휴가가 없습니다.</p>
+                ) : vacations.map(v => (
+                  <button key={v.id} onClick={() => navigate('/internal')}
+                    className="w-full flex items-center gap-2 text-sm text-left hover:bg-gray-50 rounded-lg px-2 py-1.5 -mx-1 transition-colors">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                    <span className="font-medium text-gray-800 truncate">{v.participantNames.length ? v.participantNames.join(', ') : v.title}</span>
+                    <span className="ml-auto text-xs text-gray-500 shrink-0">{vacRange(v)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
