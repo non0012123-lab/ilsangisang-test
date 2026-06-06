@@ -628,9 +628,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
       const keywords: string[] = Array.isArray(data.keywords) ? data.keywords.filter((k: unknown) => typeof k === 'string' && k.trim()) : [];
+      // 후처리(안전장치): 담당자 미지정(빈 managerName)으로 만든 새 일정이 있으면, 답변 문장의
+      // "담당자?"·"담당자 미정/미지정" 류 미정 표현을 로그인 본인 이름으로 치환한다(적용 시 본인이 담당자가 되므로).
+      const selfName = (u?.name ?? '').trim();
+      const hasUnassignedEntry = (Array.isArray(data.entries) ? data.entries : [])
+        .some((e: { managerName?: string }) => !e.managerName || !String(e.managerName).trim());
+      let replyText: string = data.reply || '(응답이 비어 있습니다)';
+      if (selfName && hasUnassignedEntry) {
+        replyText = replyText
+          .replace(/담당자\s*[:：]?\s*[?？]/g, `담당자: ${selfName}`)
+          .replace(/담당자\s*(?:미정|미지정|없음|안\s*정함)/g, `담당자: ${selfName}`);
+      }
       mutateMessages(convId, prev => [...prev, {
         role: 'assistant',
-        text: data.reply || '(응답이 비어 있습니다)',
+        text: replyText,
         entries: Array.isArray(data.entries) ? data.entries : [],
         updates: Array.isArray(data.updates) ? data.updates : [],
         clients: Array.isArray(data.clients) ? data.clients : [],
