@@ -69,6 +69,7 @@ interface AssistantRequest {
     monthlyBudget?: string; budgetItems?: { product?: string; amount?: number; notes?: string }[];
   }[];
   categories?: string[];
+  internalCategories?: string[];  // 내부 일정 종류(회의실/미팅/면접/촬영/휴가 등)
   entries?: CtxEntry[];
   handoverDocs?: CtxHandover[];
   aiPlans?: CtxAiPlan[];
@@ -132,6 +133,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const clients = (Array.isArray(req.clients) ? req.clients : []).filter(c => c && c.name);
   const clientNames = clients.map(c => c.name as string);
   const categories = req.categories ?? [];
+  const internalCategories = (Array.isArray(req.internalCategories) ? req.internalCategories : []).filter(Boolean);
   const entries = (Array.isArray(req.entries) ? req.entries : []).slice(0, 400);
   const handoverDocs = (Array.isArray(req.handoverDocs) ? req.handoverDocs : []).slice(0, 60);
   const aiPlans = (Array.isArray(req.aiPlans) ? req.aiPlans : []).slice(0, 20);
@@ -214,6 +216,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  "accounts": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "platform":"블로그|SNS|유튜브|기타", "grade":"블로그 등급(준최2~준최6/최적1~최적4)", "ownership":"client|inhouse", "username":"", "password":"", "category":"", "ip":"" } ],',
     '  "sites": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "url":"", "username":"", "password":"", "description":"" } ],',
     '  "requests": [ { "toName":"요청 받을 담당자 이름", "title":"요청 내용 한 줄(예: 디자인 제작)", "body":"상세 설명(없으면 생략)" } ],',
+    '  "internalEvents": [ { "title":"일정 제목", "category":"내부 일정 종류", "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "startTime":"HH:MM(없으면 생략)", "endTime":"HH:MM(없으면 생략)", "participantNames":["참여자 이름"], "location":"장소(없으면 생략)", "notes":"메모(없으면 생략)" } ],',
     '  "accountLookups": [ "조회 질문일 때 답으로 보여줄 아이디 목록 id" ],',
     '  "siteLookups": [ "조회 질문일 때 답으로 보여줄 홈페이지 id" ],',
     '  "keywords": [ "조회수를 조회할 키워드" ]',
@@ -223,6 +226,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     `- 오늘 날짜는 ${today}. "오늘/내일/이번주/다음주 월요일/0월 0일" 등 상대·축약 표현은 이 날짜 기준 절대 날짜(YYYY-MM-DD)로 변환.`,
     '- 사용자가 새 일정을 말하면("오늘 스케줄은 ~~~ 있어" 등) 해당 일정을 entries 배열에 담는다. 한 문장에 여러 건이면 모두.',
     '- 단순 질문·조언("시간 분배 어떻게 효율적일까?" 등)이면 모든 액션 배열은 비우고 reply 에만 구체적이고 실용적으로 답한다. 현재 일정 목록을 근거로 답할 것.',
+    '- ★ 클라이언트 업무 일정(entries) vs 사내 내부 일정(internalEvents) 구분: 사용자가 일정을 말하면 성격을 판단해 정확한 배열에 담는다.',
+    '  · 내부 일정(internalEvents): 회의·미팅·면접·촬영·휴가·워크숍·회식·회의실 예약처럼 "클라이언트(업체)와 무관한 사내 일정"이면 internalEvents 에 담는다. category 는 아래 "내부 일정 종류" 중 가장 가까운 것을 쓰고, 마땅한 게 없으면 새 종류 이름을 직접 만들어 넣는다(예: "워크숍"). 날짜/시간(startTime·endTime "오후 3시"→"15:00")·장소·참여자(이름은 담당자 명단에서 매칭)를 채운다. 이때 entries/clientName 은 비운다.',
+    '  · 클라이언트 업무(entries): 특정 업체의 콘텐츠/마케팅 작업(블로그·SNS·영상·디자인 등)이면 기존처럼 entries 에 담는다(clientName 필수).',
+    '  · 애매하면(업체가 명시됐는지로 판단) 업체가 있으면 entries, 없고 사내 행사 성격이면 internalEvents. 정 모르면 reply 에서 어느 쪽인지 되묻는다.',
     '- "배분/재배치/나눠줘" 요청이면, 아래 현재 일정을 참고해 날짜·담당자를 합리적으로 분산한다. 기존 일정을 옮기는 것은 updates(그 일정의 id 사용), 새로 만드는 것은 entries 에 담는다. 변경하지 않는 필드는 null.',
     '- 스케줄 링크(작업 결과/키워드 URL) 추가·수정·삭제: "오늘 한 ○○ 키워드 링크는 https://... 야 추가해줘", "△△ 일정에 이 링크 넣어줘/바꿔줘", "□□ 링크 지워줘" 같은 요청이면, 아래 현재 일정 목록에서 날짜·업체·카테고리·키워드로 가장 잘 맞는 일정을 찾아 그 id 로 updates 에 담고 link 필드를 채운다. 추가/수정은 link 에 URL 문자열, 삭제는 link 에 빈 문자열("")을 넣는다. 링크 외 다른 필드는 null(변경 안 함). 어느 일정인지 모호하면 바꾸지 말고 reply 에서 되묻는다. URL 은 사용자가 준 값을 그대로 쓰고 지어내지 않는다.',
     '- 일정 삭제/취소("6/10 현대자동차 블로그관리 삭제해줘", "○○ 일정 취소해줘", "방금 추가한 거 삭제" 등): 아래 현재 일정 목록에서 날짜·업체·카테고리·키워드로 가장 잘 맞는 일정을 찾아 그 id 를 deletes 배열에 담는다. 여러 건이 맞으면 모두 담는다. 일치하는 게 없거나 어느 것인지 모호하면 삭제하지 말고 reply 에서 어떤 일정인지 되묻는다. 삭제는 되돌리기 어려우니, reply 에 무엇을 삭제할지 명확히 적고 "적용"을 눌러야 반영된다고 안내한다.',
@@ -268,7 +275,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       monthlyBudget: c.monthlyBudget || null,
       budgetItems: Array.isArray(c.budgetItems) ? c.budgetItems.map(b => ({ product: b.product, amount: b.amount, notes: b.notes })) : [],
     }))),
-    `카테고리 목록: ${categories.join(', ')}`,
+    `카테고리 목록(클라이언트 업무 entries 용): ${categories.join(', ')}`,
+    `내부 일정 종류(internalEvents 용 — 없으면 새로 만들어도 됨): ${internalCategories.join(', ') || '회의실, 미팅, 면접, 촬영, 휴가'}`,
     '',
     '현재 등록된 일정(JSON, id 포함 — updates 에 이 id 사용):',
     JSON.stringify(entries),
@@ -325,7 +333,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const data = await aiRes.json();
   const content = extractText(data);
-  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; accountLookups?: unknown; siteLookups?: unknown };
+  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; internalEvents?: unknown; accountLookups?: unknown; siteLookups?: unknown };
   try {
     parsed = JSON.parse(content);
   } catch {
@@ -342,6 +350,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     accounts: Array.isArray(parsed?.accounts) ? parsed.accounts : [],
     sites: Array.isArray(parsed?.sites) ? parsed.sites : [],
     requests: Array.isArray(parsed?.requests) ? parsed.requests : [],
+    internalEvents: Array.isArray(parsed?.internalEvents) ? parsed.internalEvents : [],
     accountLookups: Array.isArray(parsed?.accountLookups) ? parsed.accountLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
     siteLookups: Array.isArray(parsed?.siteLookups) ? parsed.siteLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
     keywords: Array.isArray(parsed?.keywords) ? parsed.keywords.filter((k: unknown) => typeof k === 'string' && k.trim()).slice(0, 20) : [],

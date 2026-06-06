@@ -1,4 +1,5 @@
-import type { ScheduleEntry } from '../types';
+// 날짜 구간을 가진 모든 객체(스케줄·내부 일정 등)에 공통 적용
+export interface DateRangeItem { date: string; endDate?: string }
 
 // 로컬 날짜 기준 YYYY-MM-DD (toISOString의 UTC 변환 오프바이원 방지)
 export function fmtLocal(d: Date): string {
@@ -6,17 +7,17 @@ export function fmtLocal(d: Date): string {
 }
 
 // 작업의 종료일 (없으면 시작일과 동일)
-export function entryEnd(entry: ScheduleEntry): string {
+export function entryEnd(entry: DateRangeItem): string {
   return entry.endDate && entry.endDate >= entry.date ? entry.endDate : entry.date;
 }
 
 // 해당 날짜(dateStr)가 작업 기간 [date, endDate]에 포함되는가
-export function coversDate(entry: ScheduleEntry, dateStr: string): boolean {
+export function coversDate(entry: DateRangeItem, dateStr: string): boolean {
   return dateStr >= entry.date && dateStr <= entryEnd(entry);
 }
 
 // 작업 기간이 [from, to] 구간과 겹치는가 (둘 중 하나가 비면 무시)
-export function overlapsRange(entry: ScheduleEntry, from?: string, to?: string): boolean {
+export function overlapsRange(entry: DateRangeItem, from?: string, to?: string): boolean {
   const start = entry.date;
   const end = entryEnd(entry);
   if (from && end < from) return false;
@@ -25,12 +26,12 @@ export function overlapsRange(entry: ScheduleEntry, from?: string, to?: string):
 }
 
 // 작업이 기간 작업인지 (마감일이 시작일보다 뒤)
-export function isMultiDay(entry: ScheduleEntry): boolean {
+export function isMultiDay(entry: DateRangeItem): boolean {
   return !!entry.endDate && entry.endDate > entry.date;
 }
 
 // 시작일~종료일 사이의 모든 날짜 문자열 배열 (특정 월 prefix로 제한 가능)
-export function enumerateDays(entry: ScheduleEntry, monthPrefix?: string): string[] {
+export function enumerateDays(entry: DateRangeItem, monthPrefix?: string): string[] {
   const days: string[] = [];
   const start = new Date(entry.date + 'T00:00:00');
   const end = new Date(entryEnd(entry) + 'T00:00:00');

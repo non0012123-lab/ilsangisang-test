@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory } from '../types';
 import { USERS } from '../data/mockData';
+import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS } from '../data/internalCategories';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
 import { fireDesktop, requestNotifyPermission, isNotifySupported } from '../utils/notifications';
@@ -65,6 +66,13 @@ interface AppContextType {
   removeSite: (id: string) => void;
   saveReport: (report: Report) => void;
   removeReport: (id: string) => void;
+  // 내부 일정(사내 전용 — 회의실/미팅/면접/촬영/휴가 등). 종류는 internalCategories 로 확장 가능.
+  internalEvents: InternalEvent[];
+  internalCategories: InternalCategory[];
+  saveInternalEvent: (ev: InternalEvent) => void;
+  removeInternalEvent: (id: string) => void;
+  saveInternalCategory: (cat: InternalCategory) => void;
+  removeInternalCategory: (id: string) => void;
   // 업무 요청(요청함) — 다른 담당자에게 보낸/받은 요청. realtime 으로 상대 화면에 반영됨.
   requests: WorkRequest[];
   sendRequest: (toId: string, title: string, body?: string) => void;
@@ -112,6 +120,7 @@ const lsImportance = (key: string): number => {
   if (key.includes('schedule')) return 100;
   if (key.includes('clients')) return 90;
   if (key.includes('request')) return 85; // 다른 담당자와 주고받는 업무 요청 — 핵심에 가깝게 보존
+  if (key.includes('internal')) return 75; // 내부 일정 — 업무 데이터급으로 보존
   if (key.includes('vendors')) return 80;
   if (key.includes('accounts')) return 70;
   if (key.includes('site')) return 60;
@@ -142,6 +151,8 @@ const SITES_LS_KEY = 'ilsangisang.sites.v1';
 const REPORTS_LS_KEY = 'ilsangisang.reports.v1';
 const AI_PLANS_LS_KEY = 'ilsangisang.aiplans.v1';
 const REQUESTS_LS_KEY = 'ilsangisang.requests.v1';
+const INTERNAL_EVENTS_LS_KEY = 'ilsangisang.internalEvents.v1';
+const INTERNAL_CATS_LS_KEY = 'ilsangisang.internalCategories.v1';
 const NOTIFS_LS_KEY = 'ilsangisang.notifications.v1';
 const DESKTOP_NOTIFY_LS_KEY = 'ilsangisang.notify.desktop.v1';
 const NOTIFS_MAX = 50; // 알림은 최근 50개까지만 보관
@@ -191,6 +202,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [conversations, activeConversationId],
   );
   const [requests, setRequests] = useState<WorkRequest[]>(() => lsLoad<WorkRequest>(REQUESTS_LS_KEY));
+  // 내부 일정 + 종류(카테고리). 카테고리는 캐시가 비면 기본값으로 시드.
+  const [internalEvents, setInternalEvents] = useState<InternalEvent[]>(() => lsLoad<InternalEvent>(INTERNAL_EVENTS_LS_KEY));
+  const [internalCategories, setInternalCategories] = useState<InternalCategory[]>(() => {
+    const cached = lsLoad<InternalCategory>(INTERNAL_CATS_LS_KEY);
+    return cached.length ? cached : DEFAULT_INTERNAL_CATEGORIES;
+  });
   // 보낸 요청의 상태변화(확인/완료) 알림 스티커 — 휘발성(새로고침하면 사라지고 종 알림엔 남음)
   const [outgoingAlerts, setOutgoingAlerts] = useState<WorkRequest[]>([]);
   const dismissOutgoingAlert = useCallback((id: string) => setOutgoingAlerts(prev => prev.filter(r => r.id !== id)), []);
@@ -263,6 +280,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const requestsRef = useRef(requests);
   useEffect(() => { requestsRef.current = requests; }, [requests]);
   useEffect(() => { lsSave(REQUESTS_LS_KEY, requests); }, [requests]);
+  // 내부 일정 / 카테고리
+  const internalEventsRef = useRef(internalEvents);
+  useEffect(() => { internalEventsRef.current = internalEvents; }, [internalEvents]);
+  useEffect(() => { lsSave(INTERNAL_EVENTS_LS_KEY, internalEvents); }, [internalEvents]);
+  const internalCategoriesRef = useRef(internalCategories);
+  useEffect(() => { internalCategoriesRef.current = internalCategories; }, [internalCategories]);
+  useEffect(() => { lsSave(INTERNAL_CATS_LS_KEY, internalCategories); }, [internalCategories]);
   // 알림은 기기별 — localStorage 에만 저장(Supabase 동기화 안 함)
   useEffect(() => { lsSave(NOTIFS_LS_KEY, notifications); }, [notifications]);
   const conversationsRef = useRef(conversations);
@@ -406,6 +430,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeRequest = useCallback((id: string) => {
     setRequests(prev => prev.filter(r => r.id !== id));
     persistDelete('requests', id);
+  }, []);
+
+  // ── 내부 일정 ──
+  const saveInternalEvent = useCallback((ev: InternalEvent) => {
+    setInternalEvents(prev => prev.some(e => e.id === ev.id) ? prev.map(e => e.id === ev.id ? ev : e) : [ev, ...prev]);
+    persistOne('internal_events', ev);
+  }, []);
+  const removeInternalEvent = useCallback((id: string) => {
+    setInternalEvents(prev => prev.filter(e => e.id !== id));
+    persistDelete('internal_events', id);
+  }, []);
+  const saveInternalCategory = useCallback((cat: InternalCategory) => {
+    setInternalCategories(prev => prev.some(c => c.id === cat.id) ? prev.map(c => c.id === cat.id ? cat : c) : [...prev, cat]);
+    persistOne('internal_categories', cat);
+  }, []);
+  const removeInternalCategory = useCallback((id: string) => {
+    setInternalCategories(prev => prev.filter(c => c.id !== id));
+    persistDelete('internal_categories', id);
   }, []);
 
   // ── 클라이언트 ──
@@ -699,6 +741,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             budgetItems: (c.budgetItems ?? []).map(b => ({ product: b.product, amount: b.amount, notes: b.notes })),
           })),
           categories: ASSISTANT_CATEGORIES,
+          internalCategories: internalCategoriesRef.current.map(c => c.name), // 내부 일정 종류(회의실/미팅/면접/촬영/휴가 등)
           handoverDocs: handoverContext,
           aiPlans: aiPlanContext,
           vendors: vendorContext,
@@ -730,6 +773,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         accounts: Array.isArray(data.accounts) ? data.accounts : [],
         sites: Array.isArray(data.sites) ? data.sites : [],
         requests: Array.isArray(data.requests) ? data.requests : [],
+        internalEvents: Array.isArray(data.internalEvents) ? data.internalEvents : [],
         accountLookups: Array.isArray(data.accountLookups) ? data.accountLookups.filter((x: unknown) => typeof x === 'string') : [],
         siteLookups: Array.isArray(data.siteLookups) ? data.siteLookups.filter((x: unknown) => typeof x === 'string') : [],
         deletes: Array.isArray(data.deletes) ? data.deletes.filter((d: unknown) => typeof d === 'string') : [],
@@ -775,7 +819,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 되돌리기용 스냅샷(생성 id + 삭제/수정 전 원본)
     const undo: AssistantUndo = {
       entryIds: [], clientIds: [], vendorIds: [], handoverIds: [], deletedEntries: [], updatedPrev: [],
-      accountIds: [], siteIds: [], requestIds: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
+      accountIds: [], siteIds: [], requestIds: [], internalEventIds: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
       deletedClients: [], updatedClientsPrev: [], deletedHandovers: [],
     };
 
@@ -991,16 +1035,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    // 9) 내부 일정 생성 (회의/미팅/면접/촬영/휴가 등 — 클라이언트로 안 넘어가는 사내 일정)
+    const newInternal: InternalEvent[] = [];
+    (msg.internalEvents ?? []).forEach((iv, i) => {
+      const title = (iv.title ?? '').trim();
+      if (!iv.date || !title) return;
+      // 카테고리: 기존과 매칭, 없으면 새 카테고리(색 자동) 생성
+      let catName = (iv.category ?? '').trim();
+      if (catName && !internalCategoriesRef.current.some(c => c.name === catName)) {
+        const color = CATEGORY_COLORS[internalCategoriesRef.current.length % CATEGORY_COLORS.length];
+        saveInternalCategory({ id: `ic-${Date.now()}-${i}`, name: catName, color });
+      }
+      if (!catName) catName = '기타';
+      // 참여자: 이름 → member id 매칭
+      const pIds: string[] = []; const pNames: string[] = [];
+      (iv.participantNames ?? []).forEach(n => {
+        const mid = matchManager(n);
+        if (mid && !pIds.includes(mid)) { pIds.push(mid); pNames.push(mem.find(m => m.id === mid)?.name ?? n); }
+      });
+      const endDate = iv.endDate && iv.endDate !== 'null' && iv.endDate > iv.date ? iv.endDate : undefined;
+      const ev: InternalEvent = {
+        id: `ie-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`,
+        title, category: catName, date: iv.date, endDate,
+        startTime: iv.startTime || undefined, endTime: iv.endTime || undefined,
+        participantIds: pIds, participantNames: pNames,
+        location: iv.location || undefined, notes: iv.notes || undefined,
+        createdAt: nowMs(),
+      };
+      saveInternalEvent(ev);
+      undo.internalEventIds!.push(ev.id);
+      newInternal.push(ev);
+      count += 1;
+    });
+
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
     // AI 어시스턴트로 반영된 변경도 알림. 무엇을 했는지 핵심을 보여준다(일정 → 요청 → 그 외 순).
     if (count > 0) {
       const rest = count - 1;
       const head = newEntries[0];
       const reqHead = newRequests[0];
+      const intHead = newInternal[0];
       let body: string, link = '/schedule/daily';
       if (head) {
         const label = `${head.clientName} ${head.keyword || head.category}`.trim();
         body = `${label} 일정${rest > 0 ? ` 외 ${rest}건` : ''}이 반영됐어요`;
+      } else if (intHead) {
+        body = `내부 일정 ‘${intHead.title}’(${intHead.category})${rest > 0 ? ` 외 ${rest}건` : ''}이 등록됐어요`;
+        link = '/internal';
       } else if (reqHead) {
         body = `${reqHead.toName || '담당자'}에게 ‘${reqHead.title}’ 요청${rest > 0 ? ` 외 ${rest}건` : ''}을 보냈어요`;
         link = '/requests';
@@ -1009,7 +1090,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       pushNotification({ type: 'assistant', title: 'AI 어시스턴트 적용 완료', body, link });
     }
-  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, pushNotification, pushStickyNotice, mutateMessages]);
+  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, saveInternalEvent, saveInternalCategory, pushNotification, pushStickyNotice, mutateMessages]);
 
   // 직전 적용을 되돌린다(생성한 레코드 제거 + 삭제/수정한 일정 복원)
   const undoAssistantProposal = useCallback((index: number) => {
@@ -1036,8 +1117,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (u.updatedAccountsPrev ?? []).forEach(a => saveAccount(a));
     (u.updatedSitesPrev ?? []).forEach(s => saveSite(s));
     (u.requestIds ?? []).forEach(id => removeRequest(id)); // 보낸 업무 요청 취소
+    (u.internalEventIds ?? []).forEach(id => removeInternalEvent(id)); // 내부 일정 취소
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, undone: true } : m));
-  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, removeRequest, mutateMessages]);
+  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, removeRequest, removeInternalEvent, mutateMessages]);
 
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
@@ -1094,6 +1176,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     load<SiteEntry>('site_entries').then(guard(sites => syncLocalFirst('site_entries', sites, siteEntriesRef.current, setSiteEntries)));
     load<Report>('reports').then(guard(rep => syncLocalFirst('reports', rep, reportsRef.current, setReports)));
     load<WorkRequest>('requests').then(guard(reqs => syncLocalFirst('requests', reqs, requestsRef.current, setRequests)));
+    load<InternalEvent>('internal_events').then(guard(evs => syncLocalFirst('internal_events', evs, internalEventsRef.current, setInternalEvents)));
+    // 카테고리: 원격에 있으면 사용, 없으면 기본값(로컬 상태) 1회 backfill
+    load<InternalCategory>('internal_categories').then(guard(cats => syncLocalFirst('internal_categories', cats, internalCategoriesRef.current, setInternalCategories)));
     // ai_plans: 원격에 있으면 우선(공유본), 비었고 로컬에만 있으면 backfill.
     load<AiPlanResult>('ai_plans').then(guard(plans => {
       if (plans && plans.length) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
@@ -1172,6 +1257,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { sb.removeChannel(channel); };
   }, [uid, pushNotification]);
 
+  // 내부 일정 실시간 구독: 다른 사람이 등록/수정/삭제하면 새로고침 없이 목록 반영(알림은 없음 — 조회용).
+  useEffect(() => {
+    if (!supabase || !uid) return;
+    const sb = supabase;
+    const channel = sb
+      .channel(`rt-internal-${uid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'internal_events' }, payload => {
+        if (payload.eventType === 'DELETE') {
+          const oldId = (payload.old as { id?: string })?.id;
+          if (oldId) setInternalEvents(prev => prev.filter(e => e.id !== oldId));
+          return;
+        }
+        const ev = (payload.new as { data?: InternalEvent })?.data;
+        if (!ev || !ev.id) return;
+        setInternalEvents(prev => prev.some(e => e.id === ev.id) ? prev.map(e => e.id === ev.id ? ev : e) : [ev, ...prev]);
+      })
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [uid]);
+
   return (
     <AppContext.Provider value={{
       entries, clients, handoverDocs, dataLoading, vendors, accounts, siteEntries, reports, members: orderedMembers, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
@@ -1181,6 +1286,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
+      internalEvents, internalCategories, saveInternalEvent, removeInternalEvent, saveInternalCategory, removeInternalCategory,
       requests, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
       stickyNotices, dismissStickyNotice,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,

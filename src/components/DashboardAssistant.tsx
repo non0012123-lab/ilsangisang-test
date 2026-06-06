@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { AssistantMessage } from '../types';
@@ -25,6 +25,7 @@ const EXAMPLES = [
   '내일 스타벅스 SNS 신메뉴 키워드 작업 등록해줘',
   '6월 2일부터 6월 6일까지 네이버 블로그 5건 담당자별로 배분해줘',
   '방두환한테 디자인 제작 요청해줘',
+  '내일 오후 3시 디자인팀 회의 잡아줘 (회의실 A)',
   '6/10 현대자동차 블로그관리 일정 삭제해줘',
   '새 업체 "그린마취통증의학과" 등록하고 인수인계 문서도 만들어줘',
 ];
@@ -76,7 +77,7 @@ export default function DashboardAssistant() {
   };
 
   const proposalCount = (m: AssistantMessage) =>
-    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0);
+    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0) + (m.internalEvents?.length ?? 0);
 
   const opLabel = (op?: string) => op === 'delete' ? '삭제' : op === 'update' ? '수정' : '추가';
 
@@ -203,6 +204,12 @@ export default function DashboardAssistant() {
                         <span><strong>업무 요청</strong> {r.toName || '담당자?'}에게 · {r.title || '내용?'}{r.body ? ` — ${r.body}` : ''}</span>
                       </div>
                     ))}
+                    {(m.internalEvents ?? []).map((iv, i) => (
+                      <div key={`iv${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                        <CalendarClock size={13} className="text-cyan-500 shrink-0 mt-0.5" />
+                        <span><strong>내부 일정</strong> {iv.date}{iv.startTime ? ` ${iv.startTime}` : ''} · {iv.category || '종류?'} · {iv.title || '제목?'}{iv.location ? ` @${iv.location}` : ''}{iv.participantNames?.length ? ` · ${iv.participantNames.join(', ')}` : ''}</span>
+                      </div>
+                    ))}
                     {(m.entries ?? []).map((e, i) => (
                       <div key={`e${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                         <CalendarPlus size={13} className="text-purple-500 shrink-0 mt-0.5" />
@@ -240,7 +247,7 @@ export default function DashboardAssistant() {
                         <div className="flex items-center gap-1.5 text-xs font-semibold text-green-600">
                           <Check size={13} /> {m.applied}건 적용됨 — 스케줄·업체·인수인계에 반영되었습니다.
                         </div>
-                        {m.undo && (m.undo.entryIds.length + m.undo.clientIds.length + m.undo.vendorIds.length + m.undo.handoverIds.length + m.undo.deletedEntries.length + m.undo.updatedPrev.length + (m.undo.requestIds?.length ?? 0)) > 0 && (
+                        {m.undo && (m.undo.entryIds.length + m.undo.clientIds.length + m.undo.vendorIds.length + m.undo.handoverIds.length + m.undo.deletedEntries.length + m.undo.updatedPrev.length + (m.undo.requestIds?.length ?? 0) + (m.undo.internalEventIds?.length ?? 0)) > 0 && (
                           m.undone ? (
                             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400"><RotateCcw size={12} /> 되돌림 완료</span>
                           ) : (

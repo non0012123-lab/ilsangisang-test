@@ -72,6 +72,8 @@ export interface AssistantProposalClient { op?: 'add' | 'update' | 'delete'; id?
 export interface AssistantProposalHandover { clientName?: string; overview?: string }
 // 다른 담당자에게 보낼 업무 요청 (예: "방두환한테 디자인 제작 요청해줘")
 export interface AssistantProposalRequest { toName?: string; title?: string; body?: string }
+// 사내 내부 일정 (예: "내일 3시 디자인팀 회의 잡아줘", "금요일 면접 일정")
+export interface AssistantProposalInternal { title?: string; category?: string; date?: string; endDate?: string | null; startTime?: string; endTime?: string; participantNames?: string[]; location?: string; notes?: string }
 export interface AssistantProposalVendor { name?: string; services?: string; contactPerson?: string; phone?: string; email?: string; pricing?: string; notes?: string }
 // 아이디 목록/홈페이지 목록은 추가·수정·삭제를 op 로 구분
 export interface AssistantAccountOp { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; platform?: string; grade?: string; ownership?: 'client' | 'inhouse'; username?: string; password?: string; category?: string; ip?: string }
@@ -94,6 +96,7 @@ export interface AssistantUndo {
   accountIds: string[];
   siteIds: string[];
   requestIds?: string[];           // 어시스턴트로 생성한 업무 요청(되돌릴 때 삭제)
+  internalEventIds?: string[];     // 어시스턴트로 생성한 내부 일정(되돌릴 때 삭제)
   deletedAccounts: AccountEntry[];
   deletedSites: SiteEntry[];
   updatedAccountsPrev: AccountEntry[];
@@ -110,6 +113,7 @@ export interface AssistantMessage {
   accounts?: AssistantAccountOp[];  // 아이디 목록 추가/수정/삭제
   sites?: AssistantSiteOp[];        // 홈페이지 목록 추가/수정/삭제
   requests?: AssistantProposalRequest[]; // 다른 담당자에게 보낼 업무 요청
+  internalEvents?: AssistantProposalInternal[]; // 사내 내부 일정
   accountLookups?: string[];        // 조회 답변에 복사 카드로 표시할 아이디 목록 id
   siteLookups?: string[];           // 조회 답변에 복사 카드로 표시할 홈페이지 id
   deletes?: string[];         // 삭제할 기존 일정 id
@@ -303,6 +307,28 @@ export interface WorkRequest {
   confirmedAt?: number;
   doneAt?: number;
   returnedAt?: number;
+}
+
+// ── 내부 일정 ─────────────────────────────────────────
+// 클라이언트로 넘어가지 않는 사내 일정(회의실·미팅·면접·촬영·휴가 등). 종류(카테고리)는 확장 가능.
+export interface InternalCategory {
+  id: string;
+  name: string;
+  color: string;   // hex
+}
+export interface InternalEvent {
+  id: string;
+  title: string;
+  category: string;            // InternalCategory.name
+  date: string;                // 시작일 YYYY-MM-DD
+  endDate?: string;            // 종료일 (기간일 때)
+  startTime?: string;          // HH:MM (선택)
+  endTime?: string;            // HH:MM (선택)
+  participantIds: string[];    // 담당자/참여자 (members id)
+  participantNames: string[];
+  location?: string;           // 장소(회의실 등)
+  notes?: string;
+  createdAt: number;
 }
 
 // 클라이언트별 수동 지정 보고 기간 (자동 주기와 별개로 추가 가능)
