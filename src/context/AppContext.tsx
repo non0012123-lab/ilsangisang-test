@@ -78,7 +78,7 @@ interface AppContextType {
   requests: WorkRequest[];
   sendRequest: (toId: string, title: string, body?: string) => void;
   confirmRequest: (id: string) => void;
-  completeRequest: (id: string) => void;
+  completeRequest: (id: string, note?: string) => void;  // note: 결과물 경로 등 선택 메모(요청자에게 전달)
   returnRequest: (id: string) => void;   // 요청자가 잘못 보낸 요청을 회수/반려
   removeRequest: (id: string) => void;
   // 내가 보낸 요청이 확인/완료됐을 때 요청자 화면에 잠깐 띄우는 스티커(휘발성, 닫으면 사라짐)
@@ -405,7 +405,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!userRef.current?.id || r.fromUid !== userRef.current.id) return;
     setOutgoingAlerts(list => [r, ...list.filter(x => x.id !== r.id)]);
     const verb = r.status === 'done' ? '완료했어요' : '확인했어요';
-    pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 ${verb}`, body: r.title, link: '/requests' });
+    const body = `${r.title}${r.status === 'done' && r.doneNote ? `\n📎 ${r.doneNote}` : ''}`;
+    pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 ${verb}`, body, link: '/requests' });
   };
   // 담당자가 "확인" — 대기중 요청만 확인됨으로. realtime UPDATE 로 요청자에게 알림이 간다.
   const confirmRequest = useCallback((id: string) => {
@@ -416,11 +417,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     persistOne('requests', updated);
     selfNotifyRequester(updated);
   }, [pushNotification]);
-  // 담당자가 "완료" — 확인/대기 상태에서 완료로. realtime UPDATE 로 요청자에게 알림이 간다.
-  const completeRequest = useCallback((id: string) => {
+  // 담당자가 "완료" — 확인/대기 상태에서 완료로. note(결과물 경로 등)는 요청자에게 함께 전달된다.
+  const completeRequest = useCallback((id: string, note?: string) => {
     const cur = requestsRef.current.find(r => r.id === id);
     if (!cur || cur.status === 'done') return;
-    const updated: WorkRequest = { ...cur, status: 'done', doneAt: nowMs(), confirmedAt: cur.confirmedAt ?? nowMs() };
+    const updated: WorkRequest = { ...cur, status: 'done', doneAt: nowMs(), confirmedAt: cur.confirmedAt ?? nowMs(), doneNote: note?.trim() || undefined };
     setRequests(prev => prev.map(r => r.id === id ? updated : r));
     persistOne('requests', updated);
     selfNotifyRequester(updated);
@@ -1299,7 +1300,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (r.fromUid === uid && prev && prev.status !== r.status && (r.status === 'confirmed' || r.status === 'done')) {
           setOutgoingAlerts(list => [r, ...list.filter(x => x.id !== r.id)]);
           const verb = r.status === 'confirmed' ? '확인했어요' : '완료했어요';
-          pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 ${verb}`, body: r.title, link: '/requests' });
+          const body = `${r.title}${r.status === 'done' && r.doneNote ? `\n📎 ${r.doneNote}` : ''}`;
+          pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 ${verb}`, body, link: '/requests' });
         }
       })
       .subscribe();

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Inbox, Send, Plus, X, Check, CheckCheck, Clock, Trash2, ArrowRight, Undo2, Archive } from 'lucide-react';
+import { Inbox, Send, Plus, X, Check, CheckCheck, Clock, Trash2, ArrowRight, Undo2, Archive, Copy } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -45,6 +45,10 @@ export default function RequestsPage() {
   const [toId, setToId] = useState('');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [completing, setCompleting] = useState<WorkRequest | null>(null); // 완료 메모 모달 대상
+  const [doneNote, setDoneNote] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyNote = (id: string, text: string) => { navigator.clipboard.writeText(text); setCopiedId(id); setTimeout(() => setCopiedId(c => c === id ? null : c), 1500); };
 
   const sortReqs = (list: WorkRequest[]) => [...list].sort((a, b) => b.createdAt - a.createdAt); // 최신순
 
@@ -121,6 +125,15 @@ export default function RequestsPage() {
                     </div>
                     <h3 className="font-bold text-gray-900 break-words">{r.title}</h3>
                     {r.body && <p className="text-sm text-gray-500 mt-0.5 whitespace-pre-wrap break-words">{r.body}</p>}
+                    {r.doneNote && (
+                      <div className="mt-1.5 flex items-start gap-1.5 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1.5">
+                        <span className="text-xs text-emerald-700 font-semibold shrink-0 mt-0.5">📎 완료</span>
+                        <span className="text-xs text-gray-700 break-all flex-1 whitespace-pre-wrap">{r.doneNote}</span>
+                        <button onClick={() => copyNote(r.id, r.doneNote!)} className={`shrink-0 p-0.5 rounded transition-colors ${copiedId === r.id ? 'text-green-600' : 'text-gray-400 hover:text-blue-600'}`} title="복사">
+                          {copiedId === r.id ? <Check size={13} /> : <Copy size={13} />}
+                        </button>
+                      </div>
+                    )}
                     <p className="text-xs text-gray-400 mt-1.5 flex items-center gap-1">
                       {tab === 'received'
                         ? <>요청한 사람: <span className="font-medium text-gray-600">{r.fromName || '?'}</span></>
@@ -137,7 +150,7 @@ export default function RequestsPage() {
                             <Check size={13} /> 확인
                           </button>
                         )}
-                        <button onClick={() => completeRequest(r.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors">
+                        <button onClick={() => { setDoneNote(''); setCompleting(r); }} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors">
                           <CheckCheck size={13} /> 완료
                         </button>
                       </>
@@ -199,6 +212,34 @@ export default function RequestsPage() {
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
               <button onClick={() => setShowForm(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">취소</button>
               <button onClick={handleSend} disabled={candidates.length === 0} className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 rounded-lg transition-colors">요청 보내기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 완료 메모 모달 (선택) */}
+      {completing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white"><CheckCheck size={16} /></div>
+                <h2 className="text-base font-bold text-gray-900">요청 완료</h2>
+              </div>
+              <button onClick={() => setCompleting(null)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18} /></button>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <p className="text-sm text-gray-500"><span className="font-semibold text-gray-700">‘{completing.title}’</span> 요청을 완료합니다.</p>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">완료 메모 <span className="text-gray-400 font-normal">(선택 — 요청자에게 함께 전달)</span></label>
+                <textarea value={doneNote} onChange={e => setDoneNote(e.target.value)} rows={3} autoFocus
+                  placeholder="예: 결과물 경로 \\NAS\디자인\오르가나_시안  또는  공유 링크"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
+              <button onClick={() => { completeRequest(completing.id); setCompleting(null); }} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">메모 없이 완료</button>
+              <button onClick={() => { completeRequest(completing.id, doneNote); setCompleting(null); }} className="px-5 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors">완료 + 메모 전달</button>
             </div>
           </div>
         </div>

@@ -68,6 +68,7 @@ export default function StickyRequests() {
               <p className="text-sm text-gray-800 mt-1 break-words">
                 <span className="font-bold">{r.toName || '담당자'}</span>님이 <span className="font-bold">‘{r.title}’</span>{done ? '을(를) 완료했어요' : ' 요청을 확인했어요'}
               </p>
+              {done && r.doneNote && <p className="text-xs text-gray-500 mt-1 break-words bg-gray-50 rounded-md px-2 py-1">📎 {r.doneNote}</p>}
             </button>
           </div>
         );
@@ -91,7 +92,8 @@ export default function StickyRequests() {
             <button onClick={() => confirmRequest(r.id)} className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors">
               <Check size={13} /> 확인
             </button>
-            <button onClick={() => completeRequest(r.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors">
+            <button onClick={() => { const note = window.prompt('완료 메모 (선택 — 예: 결과물 NAS 경로). 비워두면 메모 없이 완료됩니다. 취소하면 완료 안 함.'); if (note !== null) completeRequest(r.id, note); }}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors">
               <CheckCheck size={13} /> 완료
             </button>
           </div>

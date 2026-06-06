@@ -308,6 +308,7 @@ export interface WorkRequest {
   createdAt: number;
   confirmedAt?: number;
   doneAt?: number;
+  doneNote?: string;   // 완료 시 담당자가 남기는 선택 메모(결과물 NAS 경로 등) → 요청자에게 전달
   returnedAt?: number;
 }
 
