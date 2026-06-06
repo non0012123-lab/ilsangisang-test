@@ -23,10 +23,12 @@ export async function requestNotifyPermission(): Promise<NotificationPermission>
 
 // OS 데스크톱 알림을 띄운다. 권한이 없거나 미지원이면 아무것도 하지 않는다(탭 포커스 여부와 무관하게 항상 표시).
 // 실제로 알림을 생성했으면 true, (권한 없음/미지원/생성 실패) 면 false 를 반환한다.
+// requireInteraction: 자동으로 사라지지 않고 사용자가 클릭/닫을 때까지 화면에 유지 — 담당자가
+//   자리를 비웠다 돌아와도 놓치지 않도록(데스크톱 Chrome/Edge에서 동작, macOS/모바일은 OS 정책상 제한).
 export function fireDesktop(title: string, body?: string, tag?: string): boolean {
   if (!isNotifySupported() || Notification.permission !== 'granted') return false;
   try {
-    const n = new Notification(title, { body, tag, icon: '/favicon.ico' });
+    const n = new Notification(title, { body, tag, icon: '/favicon.ico', requireInteraction: true });
     n.onclick = () => { try { window.focus(); } catch { /* noop */ } n.close(); };
     return true;
   } catch (e) {
