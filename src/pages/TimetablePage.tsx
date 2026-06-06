@@ -100,10 +100,11 @@ export default function TimetablePage() {
     });
   };
 
-  const MAX_LANES = 4;   // 한 칸에 보여줄 최대 막대 줄 수
-  const BAR_H = 19;      // 막대 높이(px)
-  const BAR_GAP = 3;     // 막대 간격(px)
-  const NUM_AREA = 32;   // 날짜 숫자 영역 높이(px)
+  const MAX_LANES = 6;   // 한 칸에 보여줄 최대 막대 줄 수(여러 기간 작업이 겹쳐도 보이게)
+  const BAR_H = 14;      // 막대 높이(px) — 얇게 해 여러 개가 한눈에 보이도록
+  const BAR_GAP = 2;     // 막대 간격(px)
+  const NUM_AREA = 34;   // 날짜 숫자 영역 높이(px)
+  const WEEK_MIN_H = 132; // 한 주(행) 최소 높이(px) — 달력 칸을 더 크게
 
   const handleSave = (entry: ScheduleEntry) => {
     saveEntry(entry);
@@ -185,7 +186,7 @@ export default function TimetablePage() {
                 const placed = placeWeek(week);
                 const shown = placed.filter(p => p.lane < MAX_LANES);
                 const usedLanes = Math.min(MAX_LANES, placed.reduce((m, p) => Math.max(m, p.lane + 1), 0));
-                const weekMinH = Math.max(NUM_AREA + usedLanes * (BAR_H + BAR_GAP) + 10, 96);
+                const weekMinH = Math.max(NUM_AREA + usedLanes * (BAR_H + BAR_GAP) + 10, WEEK_MIN_H);
                 return (
                   <div key={wi} className="relative grid grid-cols-7 border-b border-gray-200 last:border-b-0 min-w-[680px]"
                     style={{ minHeight: weekMinH }}>
@@ -244,7 +245,7 @@ export default function TimetablePage() {
                           <div key={e.id + '-' + wi}
                             onClick={ev => { ev.stopPropagation(); setModal({ open: true, entry: e }); }}
                             title={`${e.opinionTitle ?? e.keyword ?? e.category}${isMultiDay(e) ? ` (${e.date}~${e.endDate})` : ''}`}
-                            className={`pointer-events-auto absolute flex items-center gap-1 px-1.5 text-white text-[11px] font-medium leading-none cursor-pointer hover:brightness-110 transition-all ${
+                            className={`pointer-events-auto absolute flex items-center gap-1 px-1.5 text-white text-[10px] font-medium leading-none cursor-pointer hover:brightness-110 transition-all ${
                               contPrev ? '' : 'rounded-l'
                             } ${contNext ? '' : 'rounded-r'}`}
                             style={{
