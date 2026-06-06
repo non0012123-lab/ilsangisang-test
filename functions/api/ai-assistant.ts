@@ -70,7 +70,7 @@ interface AssistantRequest {
   }[];
   categories?: string[];
   internalCategories?: string[];  // 내부 일정 종류(회의실/미팅/면접/촬영/휴가 등)
-  internalEvents?: { id?: string; title?: string; category?: string; date?: string; startTime?: string | null; participantNames?: string[]; location?: string | null }[]; // 기존 내부 일정(수정 대상)
+  internalEvents?: { id?: string; title?: string; category?: string; date?: string; endDate?: string | null; startTime?: string | null; participantNames?: string[]; location?: string | null }[]; // 기존 내부 일정(수정 대상)
   entries?: CtxEntry[];
   handoverDocs?: CtxHandover[];
   aiPlans?: CtxAiPlan[];
@@ -137,7 +137,11 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const internalCategories = (Array.isArray(req.internalCategories) ? req.internalCategories : []).filter(Boolean);
   const existingInternal = (Array.isArray(req.internalEvents) ? req.internalEvents : []).slice(0, 80);
   const internalEventsContext = existingInternal
-    .map(e => e.title ? `■ id=${e.id ?? '?'} | ${e.date ?? ''}${e.startTime ? ` ${e.startTime}` : ''} | ${e.category ?? ''} | ${e.title}${Array.isArray(e.participantNames) && e.participantNames.length ? ` | 참여자:${e.participantNames.join(',')}` : ''}${e.location ? ` | 장소:${e.location}` : ''}` : '')
+    .map(e => {
+      if (!e.title) return '';
+      const period = e.endDate && e.endDate !== 'null' && e.endDate > (e.date ?? '') ? `${e.date}~${e.endDate}` : (e.date ?? '');
+      return `■ id=${e.id ?? '?'} | ${period}${e.startTime ? ` ${e.startTime}` : ''} | ${e.category ?? ''} | ${e.title}${Array.isArray(e.participantNames) && e.participantNames.length ? ` | 참여자:${e.participantNames.join(',')}` : ''}${e.location ? ` | 장소:${e.location}` : ''}`;
+    })
     .filter(Boolean).join('\n');
   const entries = (Array.isArray(req.entries) ? req.entries : []).slice(0, 400);
   const handoverDocs = (Array.isArray(req.handoverDocs) ? req.handoverDocs : []).slice(0, 60);
@@ -243,6 +247,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  · 수정 규칙: 바꾸는 필드만 포함한다(안 바꾸는 필드는 생략 → 기존값 유지). 어떤 필드를 비우려면(예: 장소·메모 삭제, 알림 끔) 빈 문자열 "" 또는 reminder 는 "off" 로 보낸다. title/category/date/endDate/startTime/endTime/location/notes/reminder 모두 수정 가능.',
     '  · 참여자 수정: participantNames 는 항상 "수정 후 최종 전체 명단"으로 보낸다(교체 방식). 추가면 기존 참여자 + 새 사람을 모두 포함, 제거면 뺀 사람만 빼고 나머지 전원 포함, 교체면 새 명단만. 현재 참여자는 위 "현재 내부 일정"의 참여자 항목을 참고한다. 참여자를 안 바꾸면 participantNames 를 생략한다.',
     '  · 새로운 별개의 일정일 때만 op:"add". 어느 일정인지 모호하면 되묻는다.',
+    '  · category 는 일정의 "주된 활동/주제"를 따른다(사유가 아니라). 예: "개인사정으로 촬영 불가", "촬영 가능일", "촬영 불가" 처럼 촬영에 관한 것이면 category 는 "촬영"이고, 사유(개인사정 등)와 "불가/가능"은 title 또는 notes 에 적는다 → 절대 "휴가"로 분류하지 않는다(휴가는 사람이 실제로 휴가를 쓰는 일정일 때만). 회의/미팅/면접도 같은 원칙(사유가 아닌 주제로 분류).',
+    '  · 기간 일정(date~endDate)은 그 전체 구간이 점유된 것이다. "촬영 가능한 날 언제야?", "○○ 비는 날", "회의실 빈 시간" 같은 가용일/충돌 질문에는 위 "현재 내부 일정"의 각 일정을 [시작일~종료일] 전 구간 점유로 보고 답한다(시작일 하루만 보지 말 것). 예: 촬영 6/10~15, 촬영불가 6/16~18 이 있으면 6/10~18 전체가 막힌 것으로 판단한다. 이런 조회 질문이면 액션 배열은 비우고 reply 로만 답한다.',
     '- "배분/재배치/나눠줘" 요청이면, 아래 현재 일정을 참고해 날짜·담당자를 합리적으로 분산한다. 기존 일정을 옮기는 것은 updates(그 일정의 id 사용), 새로 만드는 것은 entries 에 담는다. 변경하지 않는 필드는 null.',
     '- 스케줄 링크(작업 결과/키워드 URL) 추가·수정·삭제: "오늘 한 ○○ 키워드 링크는 https://... 야 추가해줘", "△△ 일정에 이 링크 넣어줘/바꿔줘", "□□ 링크 지워줘" 같은 요청이면, 아래 현재 일정 목록에서 날짜·업체·카테고리·키워드로 가장 잘 맞는 일정을 찾아 그 id 로 updates 에 담고 link 필드를 채운다. 추가/수정은 link 에 URL 문자열, 삭제는 link 에 빈 문자열("")을 넣는다. 링크 외 다른 필드는 null(변경 안 함). 어느 일정인지 모호하면 바꾸지 말고 reply 에서 되묻는다. URL 은 사용자가 준 값을 그대로 쓰고 지어내지 않는다.',
     '- 일정 삭제/취소("6/10 현대자동차 블로그관리 삭제해줘", "○○ 일정 취소해줘", "방금 추가한 거 삭제" 등): 아래 현재 일정 목록에서 날짜·업체·카테고리·키워드로 가장 잘 맞는 일정을 찾아 그 id 를 deletes 배열에 담는다. 여러 건이 맞으면 모두 담는다. 일치하는 게 없거나 어느 것인지 모호하면 삭제하지 말고 reply 에서 어떤 일정인지 되묻는다. 삭제는 되돌리기 어려우니, reply 에 무엇을 삭제할지 명확히 적고 "적용"을 눌러야 반영된다고 안내한다.',

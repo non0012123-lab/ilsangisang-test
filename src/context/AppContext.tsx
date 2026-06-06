@@ -746,9 +746,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           })),
           categories: ASSISTANT_CATEGORIES,
           internalCategories: internalCategoriesRef.current.map(c => c.name), // 내부 일정 종류(회의실/미팅/면접/촬영/휴가 등)
-          // 기존 내부 일정(수정 대상 식별용 — id 로 update)
+          // 기존 내부 일정(수정 대상 식별 + 기간/가용일 질의용 — date~endDate 전체가 점유)
           internalEvents: internalEventsRef.current.slice(0, 80).map(e => ({
-            id: e.id, title: e.title, category: e.category, date: e.date,
+            id: e.id, title: e.title, category: e.category, date: e.date, endDate: e.endDate ?? null,
             startTime: e.startTime ?? null, participantNames: e.participantNames, location: e.location ?? null,
           })),
           handoverDocs: handoverContext,
