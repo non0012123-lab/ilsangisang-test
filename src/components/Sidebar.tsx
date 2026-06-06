@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, CalendarDays, Users, LogOut,
   Hash, PlayCircle, Globe, Video, Paintbrush, ChevronDown, ChevronRight,
-  BarChart3, MessageSquare, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound,
+  BarChart3, MessageSquare, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound, Inbox,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -36,7 +36,9 @@ export default function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: 
   const [catOpen, setCatOpen] = useState(false);
   const [cliOpen, setCliOpen] = useState(false);
   const { user, logout } = useAuth();
-  const { clients } = useApp();
+  const { clients, requests } = useApp();
+  // 받은 요청 중 아직 확인 안 한(대기중) 건수 — 사이드바 뱃지
+  const pendingReqCount = requests.filter(r => r.toUid === user?.id && r.status === 'pending').length;
   // 활성 클라이언트는 등록 즉시 자동으로 이 목록에 표시·연동됨
   const navClients = clients.filter(c => c.status !== 'inactive');
 
@@ -76,6 +78,17 @@ export default function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: 
             }
           >{item.icon}{item.label}</NavLink>
         ))}
+
+        {/* 요청함 (받은 요청 대기 건수 뱃지) */}
+        <NavLink to="/requests" onClick={onClose}
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
+          }
+        ><Inbox size={18} />요청함
+          {pendingReqCount > 0 && (
+            <span className="ml-auto text-xs font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-full">{pendingReqCount > 9 ? '9+' : pendingReqCount}</span>
+          )}
+        </NavLink>
 
         {/* Category section */}
         <div className="pt-2">

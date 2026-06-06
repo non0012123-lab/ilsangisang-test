@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest } from '../types';
 import { USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
@@ -65,6 +65,12 @@ interface AppContextType {
   removeSite: (id: string) => void;
   saveReport: (report: Report) => void;
   removeReport: (id: string) => void;
+  // 업무 요청(요청함) — 다른 담당자에게 보낸/받은 요청. realtime 으로 상대 화면에 반영됨.
+  requests: WorkRequest[];
+  sendRequest: (toId: string, title: string, body?: string) => void;
+  confirmRequest: (id: string) => void;
+  completeRequest: (id: string) => void;
+  removeRequest: (id: string) => void;
   // 알림(종 아이콘) — 내 스케줄 등록·AI 완료를 모아 보여주고, 다른 탭일 땐 데스크톱 알림도 띄움
   notifications: AppNotification[];
   unreadCount: number;
@@ -98,6 +104,7 @@ const lsLoad = <T,>(key: string): T[] => {
 const lsImportance = (key: string): number => {
   if (key.includes('schedule')) return 100;
   if (key.includes('clients')) return 90;
+  if (key.includes('request')) return 85; // 다른 담당자와 주고받는 업무 요청 — 핵심에 가깝게 보존
   if (key.includes('vendors')) return 80;
   if (key.includes('accounts')) return 70;
   if (key.includes('site')) return 60;
@@ -127,6 +134,7 @@ const ACCOUNTS_LS_KEY = 'ilsangisang.accounts.v1';
 const SITES_LS_KEY = 'ilsangisang.sites.v1';
 const REPORTS_LS_KEY = 'ilsangisang.reports.v1';
 const AI_PLANS_LS_KEY = 'ilsangisang.aiplans.v1';
+const REQUESTS_LS_KEY = 'ilsangisang.requests.v1';
 const NOTIFS_LS_KEY = 'ilsangisang.notifications.v1';
 const DESKTOP_NOTIFY_LS_KEY = 'ilsangisang.notify.desktop.v1';
 const NOTIFS_MAX = 50; // 알림은 최근 50개까지만 보관
@@ -175,6 +183,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     () => conversations.find(c => c.id === activeConversationId)?.messages ?? [],
     [conversations, activeConversationId],
   );
+  const [requests, setRequests] = useState<WorkRequest[]>(() => lsLoad<WorkRequest>(REQUESTS_LS_KEY));
   const [notifications, setNotifications] = useState<AppNotification[]>(() => lsLoad<AppNotification>(NOTIFS_LS_KEY));
   // 기본 켜짐 — 사용자가 명시적으로 끈('0') 경우에만 꺼진 상태로 시작
   const [desktopNotifyEnabled, setDesktopNotifyEnabled] = useState<boolean>(() => {
@@ -234,6 +243,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const reportsRef = useRef(reports);
   useEffect(() => { reportsRef.current = reports; }, [reports]);
   useEffect(() => { lsSave(REPORTS_LS_KEY, reports); }, [reports]);
+  // 업무 요청: 공유 데이터라 Supabase 가 소스지만, 로컬 캐시로 새로고침·일시 네트워크 문제에도 즉시 표시
+  const requestsRef = useRef(requests);
+  useEffect(() => { requestsRef.current = requests; }, [requests]);
+  useEffect(() => { lsSave(REQUESTS_LS_KEY, requests); }, [requests]);
   // 알림은 기기별 — localStorage 에만 저장(Supabase 동기화 안 함)
   useEffect(() => { lsSave(NOTIFS_LS_KEY, notifications); }, [notifications]);
   const conversationsRef = useRef(conversations);
@@ -316,6 +329,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeEntry = useCallback((id: string) => {
     setEntries(prev => prev.filter(e => e.id !== id));
     persistDelete('schedule_entries', id);
+  }, []);
+
+  // ── 업무 요청(요청함) ──
+  // 다른 담당자에게 요청을 보낸다(일정과 무관하게 "이거 해줘/확인해줘"). 상대 화면엔 realtime 으로 뜬다.
+  const sendRequest = useCallback((toId: string, title: string, body?: string) => {
+    const u = userRef.current;
+    const text = title.trim();
+    if (!u || !toId || !text) return;
+    const to = membersRef.current.find(m => m.id === toId);
+    const req: WorkRequest = {
+      id: `rq-${nowMs()}-${Math.random().toString(36).slice(2, 6)}`,
+      fromUid: u.id, fromName: u.name,
+      toUid: toId, toName: to?.name ?? '',
+      title: text, body: body?.trim() || undefined,
+      status: 'pending', createdAt: nowMs(),
+    };
+    setRequests(prev => [req, ...prev]);
+    persistOne('requests', req);
+  }, []);
+  // 담당자가 "확인" — 대기중 요청만 확인됨으로. realtime UPDATE 로 요청자에게 알림이 간다.
+  const confirmRequest = useCallback((id: string) => {
+    const cur = requestsRef.current.find(r => r.id === id);
+    if (!cur || cur.status !== 'pending') return;
+    const updated: WorkRequest = { ...cur, status: 'confirmed', confirmedAt: nowMs() };
+    setRequests(prev => prev.map(r => r.id === id ? updated : r));
+    persistOne('requests', updated);
+  }, []);
+  // 담당자가 "완료" — 확인/대기 상태에서 완료로. realtime UPDATE 로 요청자에게 알림이 간다.
+  const completeRequest = useCallback((id: string) => {
+    const cur = requestsRef.current.find(r => r.id === id);
+    if (!cur || cur.status === 'done') return;
+    const updated: WorkRequest = { ...cur, status: 'done', doneAt: nowMs(), confirmedAt: cur.confirmedAt ?? nowMs() };
+    setRequests(prev => prev.map(r => r.id === id ? updated : r));
+    persistOne('requests', updated);
+  }, []);
+  const removeRequest = useCallback((id: string) => {
+    setRequests(prev => prev.filter(r => r.id !== id));
+    persistDelete('requests', id);
   }, []);
 
   // ── 클라이언트 ──
@@ -638,6 +689,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         vendors: Array.isArray(data.vendors) ? data.vendors : [],
         accounts: Array.isArray(data.accounts) ? data.accounts : [],
         sites: Array.isArray(data.sites) ? data.sites : [],
+        requests: Array.isArray(data.requests) ? data.requests : [],
         accountLookups: Array.isArray(data.accountLookups) ? data.accountLookups.filter((x: unknown) => typeof x === 'string') : [],
         siteLookups: Array.isArray(data.siteLookups) ? data.siteLookups.filter((x: unknown) => typeof x === 'string') : [],
         deletes: Array.isArray(data.deletes) ? data.deletes.filter((d: unknown) => typeof d === 'string') : [],
@@ -683,7 +735,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 되돌리기용 스냅샷(생성 id + 삭제/수정 전 원본)
     const undo: AssistantUndo = {
       entryIds: [], clientIds: [], vendorIds: [], handoverIds: [], deletedEntries: [], updatedPrev: [],
-      accountIds: [], siteIds: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
+      accountIds: [], siteIds: [], requestIds: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
       deletedClients: [], updatedClientsPrev: [], deletedHandovers: [],
     };
 
@@ -871,6 +923,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    // 8) 다른 담당자에게 업무 요청 보내기 ("방두환한테 디자인 제작 요청해줘")
+    (msg.requests ?? []).forEach(r => {
+      const toId = matchManager(r.toName);
+      const title = (r.title ?? '').trim();
+      if (!toId || !title) return;
+      const reqId = `rq-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const to = mem.find(m => m.id === toId);
+      const wr: WorkRequest = {
+        id: reqId, fromUid: u?.id ?? '', fromName: u?.name ?? '',
+        toUid: toId, toName: to?.name ?? '', title, body: r.body?.trim() || undefined,
+        status: 'pending', createdAt: nowMs(),
+      };
+      setRequests(prev => [wr, ...prev]);
+      persistOne('requests', wr);
+      undo.requestIds!.push(reqId);
+      count += 1;
+    });
+
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
     // AI 어시스턴트로 반영된 변경도 알림(일정·업체·계정 등 종류 무관). 대시보드에서 작업해도 떠야 하므로 직접 푸시.
     if (count > 0) {
@@ -914,8 +984,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (u.deletedSites ?? []).forEach(s => saveSite(s));
     (u.updatedAccountsPrev ?? []).forEach(a => saveAccount(a));
     (u.updatedSitesPrev ?? []).forEach(s => saveSite(s));
+    (u.requestIds ?? []).forEach(id => removeRequest(id)); // 보낸 업무 요청 취소
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, undone: true } : m));
-  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, mutateMessages]);
+  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, removeRequest, mutateMessages]);
 
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
@@ -969,6 +1040,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     load<AccountEntry>('accounts').then(guard(acc => syncLocalFirst('accounts', acc, accountsRef.current, setAccounts)));
     load<SiteEntry>('site_entries').then(guard(sites => syncLocalFirst('site_entries', sites, siteEntriesRef.current, setSiteEntries)));
     load<Report>('reports').then(guard(rep => syncLocalFirst('reports', rep, reportsRef.current, setReports)));
+    load<WorkRequest>('requests').then(guard(reqs => syncLocalFirst('requests', reqs, requestsRef.current, setRequests)));
     // ai_plans: 원격에 있으면 우선(공유본), 비었고 로컬에만 있으면 backfill.
     load<AiPlanResult>('ai_plans').then(guard(plans => {
       if (plans && plans.length) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
@@ -1009,6 +1081,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { sb.removeChannel(channel); };
   }, [uid, pushNotification]);
 
+  // 업무 요청 실시간 구독: 다른 담당자가 보낸/확인/완료한 요청을 새로고침 없이 반영 + 알림.
+  //  • 0012_requests.sql 로 requests 가 realtime publication 에 추가돼 있어야 한다.
+  //  • 받은 요청(INSERT, toUid=나): 스티커메모 + 종/PC 알림.
+  //  • 내가 보낸 요청의 상태변화(UPDATE, fromUid=나): "확인했어요 / 완료했어요" 알림.
+  //  • 본인이 일으킨 변경은 이미 로컬에 반영돼 있어(prev 의 상태가 같음) 중복 알림이 안 뜬다.
+  useEffect(() => {
+    if (!supabase || !uid) return;
+    const sb = supabase;
+    const channel = sb
+      .channel(`rt-requests-${uid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, payload => {
+        if (payload.eventType === 'DELETE') {
+          const oldId = (payload.old as { id?: string })?.id;
+          if (oldId) setRequests(prev => prev.filter(r => r.id !== oldId));
+          return;
+        }
+        const r = (payload.new as { data?: WorkRequest })?.data;
+        if (!r || !r.id) return;
+        const prev = requestsRef.current.find(x => x.id === r.id);
+        setRequests(list => list.some(x => x.id === r.id) ? list.map(x => x.id === r.id ? r : x) : [r, ...list]);
+        // 나에게 새로 들어온 요청 — 스티커메모는 화면에서 자동으로 뜨고, 여기선 종/PC 알림.
+        if (r.toUid === uid && !prev) {
+          pushNotification({ type: 'request', title: `${r.fromName || '동료'}님이 업무 요청을 보냈어요`, body: r.title, link: '/requests' });
+          return;
+        }
+        // 내가 보낸 요청의 상태가 바뀜(담당자가 확인/완료) — 요청자에게 알림.
+        if (r.fromUid === uid && prev && prev.status !== r.status) {
+          if (r.status === 'confirmed') pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 확인했어요`, body: r.title, link: '/requests' });
+          else if (r.status === 'done') pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 완료했어요`, body: r.title, link: '/requests' });
+        }
+      })
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [uid, pushNotification]);
+
   return (
     <AppContext.Provider value={{
       entries, clients, handoverDocs, dataLoading, vendors, accounts, siteEntries, reports, members: orderedMembers, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
@@ -1018,6 +1125,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
+      requests, sendRequest, confirmRequest, completeRequest, removeRequest,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,
       desktopNotifyEnabled, enableDesktopNotify,
     }}>

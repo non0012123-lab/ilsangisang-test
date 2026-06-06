@@ -68,6 +68,8 @@ export interface AssistantProposalUpdate { id?: string; date?: string | null; en
 // 클라이언트는 추가/수정/삭제를 op 로 구분 (수정·삭제는 id 사용). reportAnchorDate = 월간 보고 기준 시작일.
 export interface AssistantProposalClient { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; industry?: string; categories?: string[]; contactPerson?: string; phone?: string; email?: string; status?: 'active' | 'inactive' | 'pending'; reportAnchorDate?: string }
 export interface AssistantProposalHandover { clientName?: string; overview?: string }
+// 다른 담당자에게 보낼 업무 요청 (예: "방두환한테 디자인 제작 요청해줘")
+export interface AssistantProposalRequest { toName?: string; title?: string; body?: string }
 export interface AssistantProposalVendor { name?: string; services?: string; contactPerson?: string; phone?: string; email?: string; pricing?: string; notes?: string }
 // 아이디 목록/홈페이지 목록은 추가·수정·삭제를 op 로 구분
 export interface AssistantAccountOp { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; platform?: string; grade?: string; ownership?: 'client' | 'inhouse'; username?: string; password?: string; category?: string; ip?: string }
@@ -89,6 +91,7 @@ export interface AssistantUndo {
   // 아이디 목록/홈페이지 목록
   accountIds: string[];
   siteIds: string[];
+  requestIds?: string[];           // 어시스턴트로 생성한 업무 요청(되돌릴 때 삭제)
   deletedAccounts: AccountEntry[];
   deletedSites: SiteEntry[];
   updatedAccountsPrev: AccountEntry[];
@@ -104,6 +107,7 @@ export interface AssistantMessage {
   vendors?: AssistantProposalVendor[];
   accounts?: AssistantAccountOp[];  // 아이디 목록 추가/수정/삭제
   sites?: AssistantSiteOp[];        // 홈페이지 목록 추가/수정/삭제
+  requests?: AssistantProposalRequest[]; // 다른 담당자에게 보낼 업무 요청
   accountLookups?: string[];        // 조회 답변에 복사 카드로 표시할 아이디 목록 id
   siteLookups?: string[];           // 조회 답변에 복사 카드로 표시할 홈페이지 id
   deletes?: string[];         // 삭제할 기존 일정 id
@@ -258,12 +262,31 @@ export interface Report {
 // localStorage(기기별)에만 저장하고 Supabase 동기화는 하지 않는다.
 export interface AppNotification {
   id: string;
-  type: 'schedule' | 'ai-plan' | 'ai-image' | 'assistant';
+  type: 'schedule' | 'ai-plan' | 'ai-image' | 'assistant' | 'request';
   title: string;
   body?: string;
   link?: string;        // 클릭 시 이동할 라우트 (예: '/ai-results', '/schedule/daily')
   createdAt: number;
   read: boolean;
+}
+
+// ── 업무 요청(요청함) ──────────────────────────────────
+// 다른 담당자에게 보내는 "이것 좀 해줘" 요청. 일정과 별개로 일정 없이도 가능.
+// 흐름: pending(대기) → confirmed(담당자 확인) → done(완료).
+// 사내 공유 데이터라 localStorage 캐시 + Supabase 영속 + realtime 으로 상대 화면에 반영.
+export type RequestStatus = 'pending' | 'confirmed' | 'done';
+export interface WorkRequest {
+  id: string;
+  fromUid: string;     // 요청자 (로그인 사용자 id)
+  fromName: string;
+  toUid: string;       // 담당자 (members 의 id = profiles.id)
+  toName: string;
+  title: string;       // 요청 내용 한 줄 (예: "디자인 제작")
+  body?: string;       // 상세 설명 (선택)
+  status: RequestStatus;
+  createdAt: number;
+  confirmedAt?: number;
+  doneAt?: number;
 }
 
 // 클라이언트별 수동 지정 보고 기간 (자동 주기와 별개로 추가 가능)

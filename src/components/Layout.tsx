@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Menu, BarChart3 } from 'lucide-react';
 import Sidebar from './Sidebar';
+import StickyRequests from './StickyRequests';
 
 export default function Layout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -22,6 +23,8 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
         {children}
       </main>
+      {/* 받은 미확인 요청을 어느 페이지에서든 우하단 스티커메모로 알림 */}
+      <StickyRequests />
     </div>
   );
 }

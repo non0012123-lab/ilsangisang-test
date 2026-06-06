@@ -201,6 +201,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  "vendors": [ { "name":"", "services":"", "contactPerson":"", "phone":"", "email":"", "pricing":"", "notes":"" } ],',
     '  "accounts": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "platform":"블로그|SNS|유튜브|기타", "grade":"블로그 등급(준최2~준최6/최적1~최적4)", "ownership":"client|inhouse", "username":"", "password":"", "category":"", "ip":"" } ],',
     '  "sites": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "url":"", "username":"", "password":"", "description":"" } ],',
+    '  "requests": [ { "toName":"요청 받을 담당자 이름", "title":"요청 내용 한 줄(예: 디자인 제작)", "body":"상세 설명(없으면 생략)" } ],',
     '  "accountLookups": [ "조회 질문일 때 답으로 보여줄 아이디 목록 id" ],',
     '  "siteLookups": [ "조회 질문일 때 답으로 보여줄 홈페이지 id" ],',
     '  "keywords": [ "조회수를 조회할 키워드" ]',
@@ -232,6 +233,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 아이디 목록 항목은 구분(platform: 블로그/SNS/유튜브/기타)과 소유(ownership: client=업체소유, inhouse=사내)를 가진다. 추가/수정 시 사용자 표현에 맞게 채우고, "유튜브 계정 목록", "사내 계정 알려줘" 같은 조회는 이 값으로 필터해 해당 id 들을 accountLookups 에 담는다.',
     '- 블로그(platform=블로그)는 등급(grade)을 가진다: 준최2/준최3/준최4/준최5/준최6, 최적1/최적2/최적3/최적4. "최적3 블로그 보여줘", "준최 블로그 목록" 같은 조회는 grade 로 필터해 accountLookups 에 담고, 추가/수정 시 grade 를 채운다. 블로그가 아니면 grade 는 비운다.',
     '- accounts/sites 의 추가/수정/삭제를 제안할 때는 reply 에 무엇을 할지 요약하고 "적용"을 안내한다. 조회·답변만 할 때는 모든 액션 배열을 비운다.',
+    '- 다른 담당자에게 업무 요청 보내기("방두환한테 디자인 제작 요청해줘", "○○한테 △△ 확인해달라고 해줘", "□□에게 이거 부탁해"): requests 배열에 담는다. toName 은 "담당자 목록" 중 가장 가까운 이름, title 은 요청 내용을 한 줄로(예: "디자인 제작"), 상세 내용이 있으면 body 에. 이것은 일정 등록이 아니라 "확인/처리 요청"이므로 entries 에는 담지 않는다(일정도 같이 만들라고 명시하면 그때만 entries 추가). reply 에는 누구에게 무엇을 요청할지 요약하고 "적용"하면 그 담당자 화면에 알림이 뜬다고 안내한다. 받는 담당자를 특정할 수 없으면 requests 를 비우고 reply 에서 누구에게 보낼지 되묻는다.',
     `- managerName(담당자): 사용자가 담당자를 명시적으로 지정했을 때만(예: "철수한테", "영희 담당으로") "담당자 목록" 중 가장 가까운 값을 넣는다. 담당자 언급이 전혀 없으면 절대 임의로 고르지 말고 managerName 을 빈 문자열("")로 둔다 — 그러면 시스템이 로그인한 본인을 자동 담당자로 넣는다. "나/내가/나한테/제가/저한테" 같은 1인칭 표현은 로그인 본인(${currentUser || '본인'})을 가리키므로 이때도 managerName 은 빈 문자열로 둔다.`,
     '- clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
     '- 기간 작업이 아니면 endDate 는 null. status 미지정이면 "pending".',
@@ -308,7 +310,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const data = await aiRes.json();
   const content = extractText(data);
-  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; accountLookups?: unknown; siteLookups?: unknown };
+  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; accountLookups?: unknown; siteLookups?: unknown };
   try {
     parsed = JSON.parse(content);
   } catch {
@@ -324,6 +326,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     vendors: Array.isArray(parsed?.vendors) ? parsed.vendors : [],
     accounts: Array.isArray(parsed?.accounts) ? parsed.accounts : [],
     sites: Array.isArray(parsed?.sites) ? parsed.sites : [],
+    requests: Array.isArray(parsed?.requests) ? parsed.requests : [],
     accountLookups: Array.isArray(parsed?.accountLookups) ? parsed.accountLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
     siteLookups: Array.isArray(parsed?.siteLookups) ? parsed.siteLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
     keywords: Array.isArray(parsed?.keywords) ? parsed.keywords.filter((k: unknown) => typeof k === 'string' && k.trim()).slice(0, 20) : [],

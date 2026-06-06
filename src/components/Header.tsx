@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, Check, FileText, Image as ImageIcon, CalendarClock, Monitor, Sparkles } from 'lucide-react';
+import { Bell, Check, FileText, Image as ImageIcon, CalendarClock, Monitor, Sparkles, Inbox } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
@@ -29,6 +29,7 @@ const TYPE_ICON: Record<AppNotification['type'], React.ReactNode> = {
   'ai-plan': <FileText size={15} className="text-purple-500" />,
   'ai-image': <ImageIcon size={15} className="text-pink-500" />,
   assistant: <Sparkles size={15} className="text-amber-500" />,
+  request: <Inbox size={15} className="text-emerald-500" />,
 };
 
 export default function Header({ title, subtitle }: Props) {

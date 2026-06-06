@@ -17,6 +17,7 @@ import AIResultsPage from './pages/AIResultsPage';
 import KeywordToolPage from './pages/KeywordToolPage';
 import AccountListPage from './pages/AccountListPage';
 import SiteListPage from './pages/SiteListPage';
+import RequestsPage from './pages/RequestsPage';
 import PendingApprovalPage from './pages/PendingApprovalPage';
 import SuspendedPage from './pages/SuspendedPage';
 import ApprovalsPage from './pages/ApprovalsPage';
@@ -95,6 +96,7 @@ function AppRoutes() {
       <Route path="/keyword-tool" element={<ProtectedRoute><KeywordToolPage /></ProtectedRoute>} />
       <Route path="/accounts" element={<ProtectedRoute><AccountListPage /></ProtectedRoute>} />
       <Route path="/sites" element={<ProtectedRoute><SiteListPage /></ProtectedRoute>} />
+      <Route path="/requests" element={<ProtectedRoute><RequestsPage /></ProtectedRoute>} />
       {/* 인수인계는 클라이언트 관리로 통합됨 — 기존 링크/북마크 호환용 리다이렉트 */}
       <Route path="/handover" element={<Navigate to="/clients" replace />} />
 
