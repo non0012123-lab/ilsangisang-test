@@ -35,7 +35,7 @@ function getWeekRange(base: string) {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { entries: allEntries, patchEntry, saveEntry, removeEntry } = useApp();
+  const { entries: allEntries, patchEntry, saveEntry, removeEntry, dataLoading } = useApp();
   const isAdmin = user?.role === 'admin';
 
   // 대시보드에서 바로 일정 추가/수정/삭제 (일일 스케줄 페이지와 동일한 ScheduleModal 재사용)
@@ -90,6 +90,49 @@ export default function DashboardPage() {
     if (h < 18) return '안녕하세요';
     return '오늘도 수고하셨어요';
   };
+
+  // 첫 로딩(캐시 없음)에서 Supabase 응답 전: 빈 화면("작업 없음")이 잠깐 뜨는 대신 스켈레톤을 보여
+  // "불러오는 중"임을 명확히 한다 → 멈춘 듯한 체감 제거. 캐시가 있으면 dataLoading=false 라 건너뜀.
+  if (dataLoading) {
+    return (
+      <Layout>
+        <Header title="내 대시보드" subtitle={`${user?.name}님의 작업 현황`} />
+        <div className="flex-1 p-6 space-y-5 animate-pulse">
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-5 h-[88px] opacity-80" />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-2">
+                <div className="w-9 h-9 rounded-xl bg-gray-100" />
+                <div className="h-6 w-12 bg-gray-200 rounded" />
+                <div className="h-3 w-16 bg-gray-100 rounded" />
+              </div>
+            ))}
+          </div>
+          <div className="grid lg:grid-cols-5 gap-5">
+            <div className="lg:col-span-3 space-y-3">
+              <div className="h-5 w-24 bg-gray-200 rounded" />
+              <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-4">
+                {[0, 1, 2, 3].map(i => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="h-4 w-12 bg-gray-100 rounded shrink-0" />
+                    <div className="h-4 flex-1 bg-gray-100 rounded" />
+                    <div className="h-4 w-16 bg-gray-100 rounded shrink-0" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="lg:col-span-2 space-y-3">
+              <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-4">
+                <div className="h-5 w-20 bg-gray-200 rounded" />
+                {[0, 1, 2].map(i => <div key={i} className="h-10 bg-gray-100 rounded" />)}
+              </div>
+            </div>
+          </div>
+          <p className="text-center text-sm text-gray-400">불러오는 중…</p>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
