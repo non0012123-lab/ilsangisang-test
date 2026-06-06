@@ -270,6 +270,16 @@ export interface AppNotification {
   read: boolean;
 }
 
+// 화면 우하단에 잠깐 띄우는 스티커 알림(휘발성) — PC/종 알림과 별개로 "눈에 보이는" 확인용.
+// 새 스케줄 등록처럼 놓치기 쉬운 알림을 이중으로 보여줄 때 사용.
+export interface StickyNotice {
+  id: string;
+  type: AppNotification['type'];
+  title: string;
+  body?: string;
+  link?: string;
+}
+
 // ── 업무 요청(요청함) ──────────────────────────────────
 // 다른 담당자에게 보내는 "이것 좀 해줘" 요청. 일정과 별개로 일정 없이도 가능.
 // 흐름: pending(대기) → confirmed(담당자 확인) → done(완료).

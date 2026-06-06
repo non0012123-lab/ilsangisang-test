@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice } from '../types';
 import { USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
@@ -74,6 +74,9 @@ interface AppContextType {
   // 내가 보낸 요청이 확인/완료됐을 때 요청자 화면에 잠깐 띄우는 스티커(휘발성, 닫으면 사라짐)
   outgoingAlerts: WorkRequest[];
   dismissOutgoingAlert: (id: string) => void;
+  // 새 스케줄 등록 등 일반 알림을 PC/종 알림과 함께 우하단 스티커로도 보여준다(휘발성)
+  stickyNotices: StickyNotice[];
+  dismissStickyNotice: (id: string) => void;
   // 알림(종 아이콘) — 내 스케줄 등록·AI 완료를 모아 보여주고, 다른 탭일 땐 데스크톱 알림도 띄움
   notifications: AppNotification[];
   unreadCount: number;
@@ -190,6 +193,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // 보낸 요청의 상태변화(확인/완료) 알림 스티커 — 휘발성(새로고침하면 사라지고 종 알림엔 남음)
   const [outgoingAlerts, setOutgoingAlerts] = useState<WorkRequest[]>([]);
   const dismissOutgoingAlert = useCallback((id: string) => setOutgoingAlerts(prev => prev.filter(r => r.id !== id)), []);
+  // 일반 스티커 알림(새 스케줄 등) — 최근 5개까지 유지, 닫으면 사라짐(휘발성)
+  const [stickyNotices, setStickyNotices] = useState<StickyNotice[]>([]);
+  const dismissStickyNotice = useCallback((id: string) => setStickyNotices(prev => prev.filter(n => n.id !== id)), []);
+  const pushStickyNotice = useCallback((n: Omit<StickyNotice, 'id'>) => {
+    setStickyNotices(prev => [{ ...n, id: `stk-${nowMs()}-${Math.random().toString(36).slice(2, 6)}` }, ...prev].slice(0, 5));
+  }, []);
   const [notifications, setNotifications] = useState<AppNotification[]>(() => lsLoad<AppNotification>(NOTIFS_LS_KEY));
   // 기본 켜짐 — 사용자가 명시적으로 끈('0') 경우에만 꺼진 상태로 시작
   const [desktopNotifyEnabled, setDesktopNotifyEnabled] = useState<boolean>(() => {
@@ -353,7 +362,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     setRequests(prev => [req, ...prev]);
     persistOne('requests', req);
-  }, []);
+    // self-request(나→나): realtime INSERT 는 prev 존재로 dedup 되어 "받은" 알림이 안 뜨므로 직접 띄운다.
+    if (u.id === toId) {
+      pushNotification({ type: 'request', title: `${u.name}님이 업무 요청을 보냈어요`, body: text, link: '/requests' });
+    }
+  }, [pushNotification]);
   // 본인이 보낸 요청을 본인이 확인/완료한 경우(self-request) — realtime 변화감지 dedup 에 걸려
   // 요청자 알림이 안 뜨므로, 여기서 직접 스티커+종 알림을 띄운다(혼자서도 테스트/사용 가능).
   // 두 사람이 쓸 땐 확인자(toUid)와 요청자(fromUid)가 달라 이 분기에 안 걸리고 realtime 이 처리한다.
@@ -1087,16 +1100,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setEntries(prev => prev.some(x => x.id === e.id) ? prev : [e, ...prev]); // 목록 중복만 방지
         // 어시스턴트로 막 만든 일정은 이미 "적용 완료" 요약 알림이 떴으므로 여기선 건너뜀
         if (assistantEntryIdsRef.current.has(e.id)) { assistantEntryIdsRef.current.delete(e.id); return; }
-        pushNotification({
-          type: 'schedule',
-          title: '새 스케줄이 등록됐어요',
-          body: `${e.date} · ${e.category}${e.keyword ? ` · ${e.keyword}` : ''}`,
-          link: '/schedule/daily',
-        });
+        const body = `${e.date} · ${e.category}${e.keyword ? ` · ${e.keyword}` : ''}`;
+        pushNotification({ type: 'schedule', title: '새 스케줄이 등록됐어요', body, link: '/schedule/daily' });
+        pushStickyNotice({ type: 'schedule', title: '새 스케줄이 등록됐어요', body, link: '/schedule/daily' }); // PC/종 알림과 함께 스티커로도
       })
       .subscribe();
     return () => { sb.removeChannel(channel); };
-  }, [uid, pushNotification]);
+  }, [uid, pushNotification, pushStickyNotice]);
 
   // 업무 요청 실시간 구독: 다른 담당자가 보낸/확인/완료한 요청을 새로고침 없이 반영 + 알림.
   //  • 0012_requests.sql 로 requests 가 realtime publication 에 추가돼 있어야 한다.
@@ -1144,6 +1154,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
       requests, sendRequest, confirmRequest, completeRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
+      stickyNotices, dismissStickyNotice,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,
       desktopNotifyEnabled, enableDesktopNotify,
     }}>
