@@ -34,3 +34,10 @@ dist-ssr
 
 # 참고 자료(대용량 PDF)는 커밋 제외
 *.pdf
+
+# Tauri updater private signing key (절대 커밋 금지 — GitHub Secret 으로만)
+src-tauri/.updater-private-key
+
+# Tauri (Rust) build output + generated
+src-tauri/target/
+src-tauri/gen/

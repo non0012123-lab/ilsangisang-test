@@ -13,10 +13,17 @@
     "deploy": "npm run build && gh-pages -d dist",
     "cf:dev": "npm run build && wrangler pages dev",
     "cf:preview": "npm run build && wrangler pages deploy --branch preview",
-    "cf:deploy": "npm run build && wrangler pages deploy"
+    "cf:deploy": "npm run build && wrangler pages deploy",
+    "tauri": "tauri",
+    "app:build": "tauri build"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-autostart": "^2.5.1",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "gh-pages": "^6.3.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
@@ -29,6 +36,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.0",
+    "@tauri-apps/cli": "^2.11.2",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
