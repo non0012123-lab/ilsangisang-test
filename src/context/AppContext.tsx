@@ -70,6 +70,7 @@ interface AppContextType {
   sendRequest: (toId: string, title: string, body?: string) => void;
   confirmRequest: (id: string) => void;
   completeRequest: (id: string) => void;
+  returnRequest: (id: string) => void;   // 요청자가 잘못 보낸 요청을 회수/반려
   removeRequest: (id: string) => void;
   // 내가 보낸 요청이 확인/완료됐을 때 요청자 화면에 잠깐 띄우는 스티커(휘발성, 닫으면 사라짐)
   outgoingAlerts: WorkRequest[];
@@ -394,6 +395,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     persistOne('requests', updated);
     selfNotifyRequester(updated);
   }, [pushNotification]);
+  // 요청자가 "반려"(회수) — 대기/확인 상태의 내가 보낸 요청을 취소. 담당자 화면에선 사라진다.
+  const returnRequest = useCallback((id: string) => {
+    const cur = requestsRef.current.find(r => r.id === id);
+    if (!cur || cur.status === 'done' || cur.status === 'returned') return;
+    const updated: WorkRequest = { ...cur, status: 'returned', returnedAt: nowMs() };
+    setRequests(prev => prev.map(r => r.id === id ? updated : r));
+    persistOne('requests', updated);
+  }, []);
   const removeRequest = useCallback((id: string) => {
     setRequests(prev => prev.filter(r => r.id !== id));
     persistDelete('requests', id);
@@ -1147,6 +1156,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           pushNotification({ type: 'request', title: `${r.fromName || '동료'}님이 업무 요청을 보냈어요`, body: r.title, link: '/requests' });
           return;
         }
+        // 내가 받은 요청을 요청자가 반려(회수)함 — 받은 요청함에서 사라지므로 알려준다.
+        if (r.toUid === uid && prev && prev.status !== r.status && r.status === 'returned') {
+          pushNotification({ type: 'request', title: `${r.fromName || '요청자'}님이 요청을 회수했어요`, body: r.title, link: '/requests' });
+          return;
+        }
         // 내가 보낸 요청의 상태가 바뀜(담당자가 확인/완료) — 요청자 화면에 스티커 + 종/PC 알림.
         if (r.fromUid === uid && prev && prev.status !== r.status && (r.status === 'confirmed' || r.status === 'done')) {
           setOutgoingAlerts(list => [r, ...list.filter(x => x.id !== r.id)]);
@@ -1167,7 +1181,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
-      requests, sendRequest, confirmRequest, completeRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
+      requests, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
       stickyNotices, dismissStickyNotice,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,
       desktopNotifyEnabled, enableDesktopNotify,

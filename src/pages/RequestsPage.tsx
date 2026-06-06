@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Inbox, Send, Plus, X, Check, CheckCheck, Clock, Trash2, ArrowRight } from 'lucide-react';
+import { Inbox, Send, Plus, X, Check, CheckCheck, Clock, Trash2, ArrowRight, Undo2, Archive } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -17,12 +17,15 @@ const relTime = (ts: number): string => {
   return new Date(ts).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' });
 };
 
-// 상태 뱃지 (대기중=amber / 확인함=blue / 완료=green)
+// 상태 뱃지 (대기중=amber / 확인함=blue / 완료=green / 반려=rose)
 const STATUS_META: Record<RequestStatus, { label: string; cls: string; icon: React.ReactNode }> = {
-  pending:   { label: '대기중', cls: 'bg-amber-100 text-amber-700',   icon: <Clock size={12} /> },
-  confirmed: { label: '확인함', cls: 'bg-blue-100 text-blue-700',     icon: <Check size={12} /> },
+  pending:   { label: '대기중', cls: 'bg-amber-100 text-amber-700',     icon: <Clock size={12} /> },
+  confirmed: { label: '확인함', cls: 'bg-blue-100 text-blue-700',       icon: <Check size={12} /> },
   done:      { label: '완료',   cls: 'bg-emerald-100 text-emerald-700', icon: <CheckCheck size={12} /> },
+  returned:  { label: '반려',   cls: 'bg-rose-100 text-rose-700',       icon: <Undo2 size={12} /> },
 };
+
+type Tab = 'received' | 'sent' | 'done' | 'returned';
 
 function StatusBadge({ status }: { status: RequestStatus }) {
   const m = STATUS_META[status];
@@ -35,24 +38,23 @@ function StatusBadge({ status }: { status: RequestStatus }) {
 
 export default function RequestsPage() {
   const { user } = useAuth();
-  const { requests, members, sendRequest, confirmRequest, completeRequest, removeRequest } = useApp();
+  const { requests, members, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest } = useApp();
   const uid = user?.id;
-  const [tab, setTab] = useState<'received' | 'sent'>('received');
+  const [tab, setTab] = useState<Tab>('received');
   const [showForm, setShowForm] = useState(false);
   const [toId, setToId] = useState('');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
 
-  // 대기중 → 확인함 → 완료 순서가 아니라, 처리할 게 위로 오도록 최신순 + 미완료 우선
-  const sortReqs = (list: WorkRequest[]) =>
-    [...list].sort((a, b) => {
-      const ad = a.status === 'done' ? 1 : 0, bd = b.status === 'done' ? 1 : 0;
-      if (ad !== bd) return ad - bd;            // 완료는 아래로
-      return b.createdAt - a.createdAt;          // 그 안에서 최신순
-    });
+  const sortReqs = (list: WorkRequest[]) => [...list].sort((a, b) => b.createdAt - a.createdAt); // 최신순
 
-  const received = useMemo(() => sortReqs(requests.filter(r => r.toUid === uid)), [requests, uid]);
-  const sent = useMemo(() => sortReqs(requests.filter(r => r.fromUid === uid)), [requests, uid]);
+  // 진행 중(대기·확인) 만 받은/보낸 탭에 — 완료·반려는 각자 탭으로 빠진다.
+  const isActive = (s: RequestStatus) => s === 'pending' || s === 'confirmed';
+  const received = useMemo(() => sortReqs(requests.filter(r => r.toUid === uid && isActive(r.status))), [requests, uid]);
+  const sent = useMemo(() => sortReqs(requests.filter(r => r.fromUid === uid && isActive(r.status))), [requests, uid]);
+  // 완료·반려는 내가 보냈거나 받은 것 모두 모아 보관함처럼 보여준다.
+  const done = useMemo(() => sortReqs(requests.filter(r => (r.toUid === uid || r.fromUid === uid) && r.status === 'done')), [requests, uid]);
+  const returned = useMemo(() => sortReqs(requests.filter(r => (r.toUid === uid || r.fromUid === uid) && r.status === 'returned')), [requests, uid]);
   const pendingReceived = received.filter(r => r.status === 'pending').length;
 
   // 담당자 후보(본인 제외) — 새 요청 대상
@@ -67,7 +69,11 @@ export default function RequestsPage() {
     setTab('sent');
   };
 
-  const list = tab === 'received' ? received : sent;
+  const list = tab === 'received' ? received : tab === 'sent' ? sent : tab === 'done' ? done : returned;
+  const emptyMsg = tab === 'received' ? '받은 요청이 없습니다.'
+    : tab === 'sent' ? '보낸 요청이 없습니다. ‘새 요청’으로 다른 담당자에게 업무를 요청하세요.'
+    : tab === 'done' ? '완료된 요청이 없습니다.'
+    : '반려한 요청이 없습니다.';
 
   return (
     <Layout>
@@ -75,15 +81,23 @@ export default function RequestsPage() {
       <div className="flex-1 p-4 lg:p-6 space-y-4">
         {/* 탭 + 새 요청 */}
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="inline-flex rounded-xl bg-gray-100 p-1">
+          <div className="inline-flex flex-wrap rounded-xl bg-gray-100 p-1 gap-0.5">
             <button onClick={() => setTab('received')}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${tab === 'received' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-colors ${tab === 'received' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               <Inbox size={15} /> 받은 요청
               {pendingReceived > 0 && <span className="ml-0.5 text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-full">{pendingReceived}</span>}
             </button>
             <button onClick={() => setTab('sent')}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${tab === 'sent' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-colors ${tab === 'sent' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               <Send size={15} /> 보낸 요청
+            </button>
+            <button onClick={() => setTab('done')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-colors ${tab === 'done' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              <Archive size={15} /> 완료된 요청
+            </button>
+            <button onClick={() => setTab('returned')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-colors ${tab === 'returned' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              <Undo2 size={15} /> 반려
             </button>
           </div>
           <button onClick={openForm} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors">
@@ -93,7 +107,7 @@ export default function RequestsPage() {
 
         {list.length === 0 ? (
           <div className="bg-white rounded-2xl border border-gray-100 py-16 text-center text-sm text-gray-400">
-            {tab === 'received' ? '받은 요청이 없습니다.' : '보낸 요청이 없습니다. ‘새 요청’으로 다른 담당자에게 업무를 요청하세요.'}
+            {emptyMsg}
           </div>
         ) : (
           <div className="space-y-2.5">
@@ -116,22 +130,28 @@ export default function RequestsPage() {
 
                   {/* 액션 */}
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
-                    {tab === 'received' ? (
+                    {tab === 'received' && (
                       <>
                         {r.status === 'pending' && (
                           <button onClick={() => confirmRequest(r.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors">
                             <Check size={13} /> 확인
                           </button>
                         )}
-                        {r.status !== 'done' && (
-                          <button onClick={() => completeRequest(r.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors">
-                            <CheckCheck size={13} /> 완료
-                          </button>
-                        )}
+                        <button onClick={() => completeRequest(r.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors">
+                          <CheckCheck size={13} /> 완료
+                        </button>
                       </>
-                    ) : (
-                      <button onClick={() => { if (window.confirm('이 요청을 삭제할까요?')) removeRequest(r.id); }} className="p-1.5 text-gray-300 hover:text-red-500 transition-colors" title="요청 삭제">
-                        <Trash2 size={15} />
+                    )}
+                    {tab === 'sent' && (
+                      <button onClick={() => { if (window.confirm('이 요청을 반려(회수)할까요? 받는 사람 요청함에서 사라집니다.')) returnRequest(r.id); }}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors">
+                        <Undo2 size={13} /> 반려
+                      </button>
+                    )}
+                    {(tab === 'done' || tab === 'returned') && (
+                      <button onClick={() => { if (window.confirm('이 요청을 영구 삭제할까요? (되돌릴 수 없음)')) removeRequest(r.id); }}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" title="요청 삭제">
+                        <Trash2 size={13} /> 삭제
                       </button>
                     )}
                   </div>

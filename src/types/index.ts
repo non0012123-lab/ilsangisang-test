@@ -288,7 +288,8 @@ export interface StickyNotice {
 // 다른 담당자에게 보내는 "이것 좀 해줘" 요청. 일정과 별개로 일정 없이도 가능.
 // 흐름: pending(대기) → confirmed(담당자 확인) → done(완료).
 // 사내 공유 데이터라 localStorage 캐시 + Supabase 영속 + realtime 으로 상대 화면에 반영.
-export type RequestStatus = 'pending' | 'confirmed' | 'done';
+// returned = 요청자가 잘못 보낸 요청을 회수/반려한 상태
+export type RequestStatus = 'pending' | 'confirmed' | 'done' | 'returned';
 export interface WorkRequest {
   id: string;
   fromUid: string;     // 요청자 (로그인 사용자 id)
@@ -301,6 +302,7 @@ export interface WorkRequest {
   createdAt: number;
   confirmedAt?: number;
   doneAt?: number;
+  returnedAt?: number;
 }
 
 // 클라이언트별 수동 지정 보고 기간 (자동 주기와 별개로 추가 가능)
