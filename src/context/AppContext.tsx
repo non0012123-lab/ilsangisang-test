@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification } from '../types';
-import { SCHEDULE_ENTRIES, CLIENTS, HANDOVER_DOCS, USERS } from '../data/mockData';
+import { USERS } from '../data/mockData';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
 import { fireDesktop, requestNotifyPermission, isNotifySupported } from '../utils/notifications';
@@ -107,16 +107,13 @@ const NOTIFS_MAX = 50; // 알림은 최근 50개까지만 보관
 const AI_RESULT_PATHS = ['/ai-planning', '/ai-results'];
 const loadLocalVendors = (): Vendor[] => lsLoad<Vendor>(VENDORS_LS_KEY);
 const saveLocalVendors = (list: Vendor[]) => lsSave(VENDORS_LS_KEY, list);
-// clients/schedule/handover 는 원래 첫 화면을 목업으로 그렸다가 Supabase 응답으로 교체돼 깜빡였다.
-// vendors 처럼 로컬 캐시를 붙여, 재방문 시엔 "마지막 실데이터"로 첫 화면을 그린다(교체가 안 보임).
-const CLIENTS_LS_KEY = 'ilsangisang.clients.v1';
-const SCHEDULE_LS_KEY = 'ilsangisang.schedule.v1';
-const HANDOVER_LS_KEY = 'ilsangisang.handover.v1';
-// 캐시가 비어 있으면 목업으로 폴백(진짜 첫 설치 땐 시드 데모 유지).
-const lsLoadOr = <T,>(key: string, fallback: T[]): T[] => {
-  const cached = lsLoad<T>(key);
-  return cached.length ? cached : fallback;
-};
+// clients/schedule/handover: 로컬 캐시(마지막 실데이터)로 첫 화면을 그리고 Supabase 응답으로 갱신한다.
+// 예전엔 캐시가 비면 목업으로 폴백해 첫 화면에 예시(스타벅스·현대차)가 잠깐 떴다가 실데이터로 교체돼
+// 깜빡였다 → 목업 폴백을 제거해, 캐시 있으면 즉시 실데이터, 없으면 빈 화면(예시 안 보임) 후 Supabase 반영.
+// v2: 과거 목업 폴백 시절 캐시에 예시(스타벅스·현대차)가 저장돼 있을 수 있어 키를 올려 낡은 캐시를 버린다.
+const CLIENTS_LS_KEY = 'ilsangisang.clients.v2';
+const SCHEDULE_LS_KEY = 'ilsangisang.schedule.v2';
+const HANDOVER_LS_KEY = 'ilsangisang.handover.v2';
 
 const AppContext = createContext<AppContextType | null>(null);
 
@@ -127,9 +124,9 @@ const MOCK_MEMBERS: TeamMember[] = USERS
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [entries, setEntries] = useState<ScheduleEntry[]>(() => lsLoadOr(SCHEDULE_LS_KEY, SCHEDULE_ENTRIES));
-  const [clients, setClients] = useState<Client[]>(() => lsLoadOr(CLIENTS_LS_KEY, CLIENTS));
-  const [handoverDocs, setHandoverDocs] = useState<HandoverDoc[]>(() => lsLoadOr(HANDOVER_LS_KEY, HANDOVER_DOCS));
+  const [entries, setEntries] = useState<ScheduleEntry[]>(() => lsLoad<ScheduleEntry>(SCHEDULE_LS_KEY));
+  const [clients, setClients] = useState<Client[]>(() => lsLoad<Client>(CLIENTS_LS_KEY));
+  const [handoverDocs, setHandoverDocs] = useState<HandoverDoc[]>(() => lsLoad<HandoverDoc>(HANDOVER_LS_KEY));
   const [vendors, setVendors] = useState<Vendor[]>(loadLocalVendors);
   const [accounts, setAccounts] = useState<AccountEntry[]>(() => lsLoad<AccountEntry>(ACCOUNTS_LS_KEY));
   const [siteEntries, setSiteEntries] = useState<SiteEntry[]>(() => lsLoad<SiteEntry>(SITES_LS_KEY));
@@ -917,9 +914,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (error) { console.error(`[${table}] 로드 실패:`, error.message); return null; }
         return (data ?? []).map(r => r.data as T);
       };
-      const seed = async <T extends { id: string }>(table: string, rows: T[]) => {
-        await sb.from(table).upsert(rows.map(r => ({ id: r.id, data: r })));
-      };
       // 9개 테이블을 병렬로 조회한다(직렬 await 사슬이면 왕복이 줄줄이 더해져 느림).
       const [c0, e0, h0, v, acc, sites, rep, plans, convs] = await Promise.all([
         load<Client>('clients'),
@@ -932,16 +926,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         load<AiPlanResult>('ai_plans'),
         load<AssistantConversation>('assistant_conversations'), // RLS 로 본인 것만 조회됨
       ]);
-      // clients/schedule/handover 는 빈 테이블일 때 목업 시드 후 재할당하므로 let.
-      let c = c0, e = e0, h = h0;
+      // 빈 테이블이어도 목업을 시드하지 않는다(예시 데이터가 실DB·화면에 유입되는 것 방지). 원격을 그대로 반영.
       if (!active) return;
-      if (c && c.length === 0) { await seed('clients', CLIENTS); c = CLIENTS; }
-      if (e && e.length === 0) { await seed('schedule_entries', SCHEDULE_ENTRIES); e = SCHEDULE_ENTRIES; }
-      if (h && h.length === 0) { await seed('handover_docs', HANDOVER_DOCS); h = HANDOVER_DOCS; }
-      if (!active) return;
-      if (c) setClients(c);
-      if (e) setEntries(e);
-      if (h) setHandoverDocs(h);
+      if (c0) setClients(c0);
+      if (e0) setEntries(e0);
+      if (h0) setHandoverDocs(h0);
       // vendors/accounts/site_entries: 로컬 캐시 + Supabase 동기화.
       //  • 로드 null  = 테이블 없음(마이그레이션 미실행) → 로컬 캐시 유지, 업로드 시도 안 함.
       //  • 원격 데이터 있음 = 공유본 사용.
