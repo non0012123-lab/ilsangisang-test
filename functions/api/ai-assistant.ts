@@ -23,6 +23,7 @@ interface CtxEntry {
   keyword?: string;
   status?: string;
   link?: string | null;
+  rank?: number | null;
 }
 
 interface CtxHandover {
@@ -190,8 +191,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '반드시 아래 JSON 객체로만 응답해(코드펜스·설명문 금지):',
     '{',
     '  "reply": "사용자에게 보여줄 자연스러운 한국어 답변",',
-    '  "entries": [ { "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "managerName":"", "clientName":"", "category":"", "keyword":"", "status":"pending|in-progress|completed", "link":"결과/키워드 링크 URL(없으면 생략)" } ],',
-    '  "updates": [ { "id":"기존 일정 id", "date":"YYYY-MM-DD 또는 null", "endDate":"YYYY-MM-DD 또는 null", "managerName":"문자열 또는 null", "status":"상태 또는 null", "link":"링크 URL(추가/수정) 또는 ""(빈문자열=링크 삭제) 또는 null(변경 안 함)" } ],',
+    '  "entries": [ { "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "managerName":"", "clientName":"", "category":"", "keyword":"", "status":"pending|in-progress|completed", "link":"결과/키워드 링크 URL(없으면 생략)", "rank":"순위 숫자(예: 3, 언급 없으면 생략)" } ],',
+    '  "updates": [ { "id":"기존 일정 id", "date":"YYYY-MM-DD 또는 null", "endDate":"YYYY-MM-DD 또는 null", "managerName":"문자열 또는 null", "status":"상태 또는 null", "link":"링크 URL(추가/수정) 또는 ""(빈문자열=링크 삭제) 또는 null(변경 안 함)", "rank":"순위 숫자(변경) 또는 null(변경 안 함)" } ],
     '  "deletes": [ "삭제할 기존 일정 id" ],',
     '  "clients": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 업체 id", "name":"", "industry":"", "categories":[], "contactPerson":"", "phone":"", "email":"", "status":"active|inactive|pending", "reportAnchorDate":"YYYY-MM-DD (월간 보고 기준 시작일)" } ],',
     '  "handovers": [ { "clientName":"", "overview":"" } ],',
@@ -231,6 +232,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- accounts/sites 의 추가/수정/삭제를 제안할 때는 reply 에 무엇을 할지 요약하고 "적용"을 안내한다. 조회·답변만 할 때는 모든 액션 배열을 비운다.',
     '- managerName 은 아래 "담당자 목록" 중 가장 가까운 값, clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
     '- 기간 작업이 아니면 endDate 는 null. status 미지정이면 "pending".',
+    '- 순위(rank): "신사피부과 3위로 등록해줘", "○○ 키워드 5위" 처럼 순위를 말하면 그 숫자를 rank 에 담는다(신규는 entries.rank, 기존 일정 순위 변경은 updates.rank). "1위/3등/순위 2" 등에서 숫자만 뽑아 넣고, 순위 언급이 없으면 entries 에선 생략·updates 에선 null. 기존 일정 순위 변경 요청이면 위 현재 일정 목록에서 키워드·업체·날짜로 대상을 찾아 그 id 로 updates 에 담는다.',
     '- 액션(entries/updates/clients/handovers)을 제안할 때 reply 에는 무엇을 제안하는지 요약하고, 사용자가 "적용" 버튼을 눌러야 실제 반영된다는 뉘앙스로 안내한다.',
     '- 확실하지 않은 정보를 지어내지 말 것. 모르면 reply 에서 추가 정보를 요청.',
     '',
