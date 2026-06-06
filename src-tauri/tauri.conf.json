@@ -2,10 +2,10 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "일상이상",
   "version": "0.1.0",
-  "identifier": "com.ilsangisang.app",
+  "identifier": "com.ilsangisang.desktop",
   "build": {
     "frontendDist": "../dist",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npx vite build"
   },
   "app": {
     "withGlobalTauri": false,
