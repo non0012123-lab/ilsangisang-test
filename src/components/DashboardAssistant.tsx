@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import type { AssistantMessage } from '../types';
 
 const relTime = (ts: number): string => {
@@ -32,6 +33,9 @@ export default function DashboardAssistant() {
     entries, accounts, siteEntries, assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
     conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
   } = useApp();
+  const { user } = useAuth();
+  // 담당자를 명시하지 않은 일정은 적용 시 로그인 본인이 담당자가 되므로, 미리보기에도 본인 이름을 보여준다.
+  const selfName = user?.name ?? '담당자?';
   const [input, setInput] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -196,7 +200,7 @@ export default function DashboardAssistant() {
                       <div key={`e${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                         <CalendarPlus size={13} className="text-purple-500 shrink-0 mt-0.5" />
                         <span>
-                          <strong>신규 일정</strong> {e.date}{e.endDate && e.endDate !== 'null' ? `~${e.endDate}` : ''} · {e.managerName || '담당자?'} · {e.clientName || '업체?'} · {e.category || '기타'}
+                          <strong>신규 일정</strong> {e.date}{e.endDate && e.endDate !== 'null' ? `~${e.endDate}` : ''} · {e.managerName || selfName} · {e.clientName || '업체?'} · {e.category || '기타'}
                           {e.keyword ? ` · ${e.keyword}` : ''}{e.status && e.status !== 'pending' ? ` (${STATUS_LABEL[e.status] ?? e.status})` : ''}{e.link ? ' · 🔗 링크' : ''}
                         </span>
                       </div>
