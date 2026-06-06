@@ -875,7 +875,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
     if (newEntries.length) {
       saveEntries(newEntries); count += newEntries.length; undo.entryIds.push(...newEntries.map(e => e.id));
-      newEntries.forEach(e => assistantEntryIdsRef.current.add(e.id)); // realtime 중복 알림 방지용
+      newEntries.forEach(e => assistantEntryIdsRef.current.add(e.id)); // realtime 중복 "종 알림" 방지용
+      // 단, 스티커는 realtime 에서 스킵되므로(위 dedup) 내 담당 일정은 여기서 직접 띄운다.
+      newEntries.filter(e => e.managerId === selfId).forEach(e => {
+        pushStickyNotice({ type: 'schedule', title: '새 스케줄이 등록됐어요', body: `${e.date} · ${e.category}${e.keyword ? ` · ${e.keyword}` : ''}`, link: '/schedule/daily' });
+      });
     }
 
     // 4) 기존 일정 변경 (배분/재배치)
@@ -954,6 +958,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     // 8) 다른 담당자에게 업무 요청 보내기 ("방두환한테 디자인 제작 요청해줘")
+    const newRequests: WorkRequest[] = [];
     (msg.requests ?? []).forEach(r => {
       const toId = matchManager(r.toName);
       const title = (r.title ?? '').trim();
@@ -968,27 +973,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setRequests(prev => [wr, ...prev]);
       persistOne('requests', wr);
       undo.requestIds!.push(reqId);
+      newRequests.push(wr);
       count += 1;
+      // 나에게 보낸 요청(self)은 realtime 이 dedup 으로 "받은" 알림을 안 띄우므로 여기서 직접 띄운다.
+      if (u?.id && toId === u.id) {
+        pushNotification({ type: 'request', title: `${wr.fromName || '동료'}님이 업무 요청을 보냈어요`, body: wr.title, link: '/requests' });
+      }
     });
 
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
-    // AI 어시스턴트로 반영된 변경도 알림(일정·업체·계정 등 종류 무관). 대시보드에서 작업해도 떠야 하므로 직접 푸시.
+    // AI 어시스턴트로 반영된 변경도 알림. 무엇을 했는지 핵심을 보여준다(일정 → 요청 → 그 외 순).
     if (count > 0) {
-      // 대표 1건(업체명 + 키워드/카테고리) + 외 N건 으로 핵심 내용을 보여준다.
-      const head = newEntries[0];
-      const label = head ? `${head.clientName} ${head.keyword || head.category}`.trim() : '';
       const rest = count - 1;
-      const body = label
-        ? `${label} 일정${rest > 0 ? ` 외 ${rest}건` : ''}이 반영됐어요`
-        : `${count}건이 반영됐어요`;
-      pushNotification({
-        type: 'assistant',
-        title: 'AI 어시스턴트 적용 완료',
-        body,
-        link: '/schedule/daily',
-      });
+      const head = newEntries[0];
+      const reqHead = newRequests[0];
+      let body: string, link = '/schedule/daily';
+      if (head) {
+        const label = `${head.clientName} ${head.keyword || head.category}`.trim();
+        body = `${label} 일정${rest > 0 ? ` 외 ${rest}건` : ''}이 반영됐어요`;
+      } else if (reqHead) {
+        body = `${reqHead.toName || '담당자'}에게 ‘${reqHead.title}’ 요청${rest > 0 ? ` 외 ${rest}건` : ''}을 보냈어요`;
+        link = '/requests';
+      } else {
+        body = `${count}건이 반영됐어요`;
+      }
+      pushNotification({ type: 'assistant', title: 'AI 어시스턴트 적용 완료', body, link });
     }
-  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, pushNotification, mutateMessages]);
+  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, pushNotification, pushStickyNotice, mutateMessages]);
 
   // 직전 적용을 되돌린다(생성한 레코드 제거 + 삭제/수정한 일정 복원)
   const undoAssistantProposal = useCallback((index: number) => {
