@@ -6,7 +6,8 @@
   "homepage": "https://non0012123-lab.github.io/ilsangisang-test",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "check:functions": "esbuild $(find functions -name '*.ts') --outdir=node_modules/.cache/fn-check --format=esm --log-level=error",
+    "build": "tsc -b && npm run check:functions && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "deploy": "npm run build && gh-pages -d dist",
