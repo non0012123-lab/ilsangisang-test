@@ -354,6 +354,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRequests(prev => [req, ...prev]);
     persistOne('requests', req);
   }, []);
+  // 본인이 보낸 요청을 본인이 확인/완료한 경우(self-request) — realtime 변화감지 dedup 에 걸려
+  // 요청자 알림이 안 뜨므로, 여기서 직접 스티커+종 알림을 띄운다(혼자서도 테스트/사용 가능).
+  // 두 사람이 쓸 땐 확인자(toUid)와 요청자(fromUid)가 달라 이 분기에 안 걸리고 realtime 이 처리한다.
+  const selfNotifyRequester = (r: WorkRequest) => {
+    if (!userRef.current?.id || r.fromUid !== userRef.current.id) return;
+    setOutgoingAlerts(list => [r, ...list.filter(x => x.id !== r.id)]);
+    const verb = r.status === 'done' ? '완료했어요' : '확인했어요';
+    pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 ${verb}`, body: r.title, link: '/requests' });
+  };
   // 담당자가 "확인" — 대기중 요청만 확인됨으로. realtime UPDATE 로 요청자에게 알림이 간다.
   const confirmRequest = useCallback((id: string) => {
     const cur = requestsRef.current.find(r => r.id === id);
@@ -361,7 +370,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const updated: WorkRequest = { ...cur, status: 'confirmed', confirmedAt: nowMs() };
     setRequests(prev => prev.map(r => r.id === id ? updated : r));
     persistOne('requests', updated);
-  }, []);
+    selfNotifyRequester(updated);
+  }, [pushNotification]);
   // 담당자가 "완료" — 확인/대기 상태에서 완료로. realtime UPDATE 로 요청자에게 알림이 간다.
   const completeRequest = useCallback((id: string) => {
     const cur = requestsRef.current.find(r => r.id === id);
@@ -369,7 +379,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const updated: WorkRequest = { ...cur, status: 'done', doneAt: nowMs(), confirmedAt: cur.confirmedAt ?? nowMs() };
     setRequests(prev => prev.map(r => r.id === id ? updated : r));
     persistOne('requests', updated);
-  }, []);
+    selfNotifyRequester(updated);
+  }, [pushNotification]);
   const removeRequest = useCallback((id: string) => {
     setRequests(prev => prev.filter(r => r.id !== id));
     persistDelete('requests', id);
