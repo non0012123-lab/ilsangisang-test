@@ -198,7 +198,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // 헬퍼에서 최신 배열을 참조하기 위한 ref (setState 업데이터 내 부수효과 회피)
   const entriesRef = useRef(entries);
   useEffect(() => { entriesRef.current = entries; }, [entries]);
-  useEffect(() => { lsSave(SCHEDULE_LS_KEY, entries); }, [entries]);
+  // 캐시엔 이미지(screenshot·images)를 빼고 가벼운 본만 저장한다. 일정에 base64 이미지가 박혀 있으면
+  // 몇 건만으로 수 MB가 돼 localStorage 용량을 넘겨 캐시 저장이 조용히 실패했다(→ 매번 스켈레톤).
+  // 대시보드는 이미지가 불필요하고, 원본 이미지는 Supabase 가 소스이므로 캐시에서 빼도 무방.
+  useEffect(() => {
+    lsSave(SCHEDULE_LS_KEY, entries.map(e => ({ ...e, screenshot: undefined, images: undefined })));
+  }, [entries]);
   // 어시스턴트 적용으로 막 생성한 일정 id — realtime 에코 때 (요약 알림과) 중복 알림을 막기 위해 추적
   const assistantEntryIdsRef = useRef<Set<string>>(new Set());
   // 전역 이미지 작업이 완료 시 최신 기획 결과를 머지하기 위한 ref
