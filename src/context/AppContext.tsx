@@ -2,7 +2,8 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback, us
 import { useLocation } from 'react-router-dom';
 import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory } from '../types';
 import { USERS } from '../data/mockData';
-import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS } from '../data/internalCategories';
+import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
+import type { ReminderOption } from '../types';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
 import { fireDesktop, requestNotifyPermission, isNotifySupported } from '../utils/notifications';
@@ -153,6 +154,7 @@ const AI_PLANS_LS_KEY = 'ilsangisang.aiplans.v1';
 const REQUESTS_LS_KEY = 'ilsangisang.requests.v1';
 const INTERNAL_EVENTS_LS_KEY = 'ilsangisang.internalEvents.v1';
 const INTERNAL_CATS_LS_KEY = 'ilsangisang.internalCategories.v1';
+const FIRED_REMINDERS_LS_KEY = 'ilsangisang.firedReminders.v1'; // 이미 띄운 내부일정 리마인더(기기별, 중복 방지)
 const NOTIFS_LS_KEY = 'ilsangisang.notifications.v1';
 const DESKTOP_NOTIFY_LS_KEY = 'ilsangisang.notify.desktop.v1';
 const NOTIFS_MAX = 50; // 알림은 최근 50개까지만 보관
@@ -287,6 +289,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const internalCategoriesRef = useRef(internalCategories);
   useEffect(() => { internalCategoriesRef.current = internalCategories; }, [internalCategories]);
   useEffect(() => { lsSave(INTERNAL_CATS_LS_KEY, internalCategories); }, [internalCategories]);
+  // 이미 띄운 리마인더(eventId:reminder) — 기기별 중복 방지
+  const firedRemindersRef = useRef<Set<string>>(new Set(lsLoad<string>(FIRED_REMINDERS_LS_KEY)));
   // 알림은 기기별 — localStorage 에만 저장(Supabase 동기화 안 함)
   useEffect(() => { lsSave(NOTIFS_LS_KEY, notifications); }, [notifications]);
   const conversationsRef = useRef(conversations);
@@ -1047,12 +1051,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         saveInternalCategory({ id: `ic-${Date.now()}-${i}`, name: catName, color });
       }
       if (!catName) catName = '기타';
-      // 참여자: 이름 → member id 매칭
+      // 참여자: 이름 → member id 매칭. 아무도 매칭 안 되면 로그인 본인을 기본 담당자로.
       const pIds: string[] = []; const pNames: string[] = [];
       (iv.participantNames ?? []).forEach(n => {
         const mid = matchManager(n);
         if (mid && !pIds.includes(mid)) { pIds.push(mid); pNames.push(mem.find(m => m.id === mid)?.name ?? n); }
       });
+      if (pIds.length === 0 && selfId) { pIds.push(selfId); pNames.push(u?.name ?? ''); }
+      // 리마인더: 어시스턴트가 보낸 값을 유효 옵션으로 정규화
+      const remRaw = (iv.reminder ?? '').trim();
+      const reminder = (['off', '1h', '30m', '10m', 'onTime'].includes(remRaw) ? remRaw : undefined) as InternalEvent['reminder'];
       const endDate = iv.endDate && iv.endDate !== 'null' && iv.endDate > iv.date ? iv.endDate : undefined;
       const ev: InternalEvent = {
         id: `ie-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`,
@@ -1060,6 +1068,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         startTime: iv.startTime || undefined, endTime: iv.endTime || undefined,
         participantIds: pIds, participantNames: pNames,
         location: iv.location || undefined, notes: iv.notes || undefined,
+        reminder,
         createdAt: nowMs(),
       };
       saveInternalEvent(ev);
@@ -1272,10 +1281,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const ev = (payload.new as { data?: InternalEvent })?.data;
         if (!ev || !ev.id) return;
         setInternalEvents(prev => prev.some(e => e.id === ev.id) ? prev.map(e => e.id === ev.id ? ev : e) : [ev, ...prev]);
+        // 새로 등록된 내부 일정 → 참여자(본인 포함) 전원에게 PC 알림 + 스티커.
+        //  • INSERT 일 때만(수정은 제외). 본인이 만든 것도 echo 로 한 번 들어오며 참여자면 알린다.
+        if (payload.eventType === 'INSERT' && ev.participantIds?.includes(uid)) {
+          const when = `${ev.date}${ev.startTime ? ` ${ev.startTime}` : ''}`;
+          const body = `${ev.category} · ${ev.title} (${when})${ev.location ? ` @${ev.location}` : ''}`;
+          pushNotification({ type: 'internal', title: '새 내부 일정이 등록됐어요', body, link: '/internal' });
+          pushStickyNotice({ type: 'internal', title: '새 내부 일정', body, link: '/internal' });
+        }
       })
       .subscribe();
     return () => { sb.removeChannel(channel); };
-  }, [uid]);
+  }, [uid, pushNotification, pushStickyNotice]);
+
+  // 내부 일정 사전 알림(리마인더): 시작 N분 전에 참여자에게 PC + 스티커. 30초마다 점검.
+  //  • 내가 참여자인 일정만. eventId:reminder 단위로 1회만(기기별 firedReminders).
+  //  • 앱이 늦게 켜져도 시작 1분 후까지는 따라잡아 1회 띄운다(그 이후는 건너뜀).
+  useEffect(() => {
+    if (!uid) return;
+    const tick = () => {
+      const now = Date.now();
+      internalEventsRef.current.forEach(ev => {
+        const rem = ev.reminder;
+        if (!rem || rem === 'off' || !ev.startTime || !ev.participantIds?.includes(uid)) return;
+        const offset = REMINDER_OFFSET_MIN[rem as Exclude<ReminderOption, 'off'>];
+        if (offset === undefined) return;
+        const start = new Date(`${ev.date}T${ev.startTime}:00`).getTime();
+        if (isNaN(start)) return;
+        const target = start - offset * 60000;
+        const key = `${ev.id}:${rem}`;
+        if (firedRemindersRef.current.has(key)) return;
+        if (now >= target && now <= start + 60000) {
+          firedRemindersRef.current.add(key);
+          lsSave(FIRED_REMINDERS_LS_KEY, Array.from(firedRemindersRef.current).slice(-300));
+          const label = REMINDER_LABEL[rem as Exclude<ReminderOption, 'off'>];
+          const body = `${ev.startTime} ${ev.title}${ev.location ? ` @${ev.location}` : ''}`;
+          pushNotification({ type: 'internal', title: `[${label}] ${ev.category}`, body, link: '/internal' });
+          pushStickyNotice({ type: 'internal', title: `[${label}] ${ev.title}`, body, link: '/internal' });
+        }
+      });
+    };
+    tick();
+    const t = setInterval(tick, 30000);
+    return () => clearInterval(t);
+  }, [uid, pushNotification, pushStickyNotice]);
 
   return (
     <AppContext.Provider value={{

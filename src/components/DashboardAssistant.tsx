@@ -14,6 +14,7 @@ const relTime = (ts: number): string => {
 };
 
 const STATUS_LABEL: Record<string, string> = { pending: '대기중', 'in-progress': '진행중', completed: '완료' };
+const REMINDER_TEXT: Record<string, string> = { '1h': '1시간 전', '30m': '30분 전', '10m': '10분 전', onTime: '정각' };
 
 const EXAMPLES = [
   '오늘 스케줄 시간 분배는 어떻게 하는 게 효율적일까?',
@@ -207,7 +208,7 @@ export default function DashboardAssistant() {
                     {(m.internalEvents ?? []).map((iv, i) => (
                       <div key={`iv${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                         <CalendarClock size={13} className="text-cyan-500 shrink-0 mt-0.5" />
-                        <span><strong>내부 일정</strong> {iv.date}{iv.startTime ? ` ${iv.startTime}` : ''} · {iv.category || '종류?'} · {iv.title || '제목?'}{iv.location ? ` @${iv.location}` : ''}{iv.participantNames?.length ? ` · ${iv.participantNames.join(', ')}` : ''}</span>
+                        <span><strong>내부 일정</strong> {iv.date}{iv.startTime ? ` ${iv.startTime}` : ''} · {iv.category || '종류?'} · {iv.title || '제목?'}{iv.location ? ` @${iv.location}` : ''}{iv.participantNames?.length ? ` · ${iv.participantNames.join(', ')}` : ''}{iv.reminder && iv.reminder !== 'off' ? ` · 🔔${REMINDER_TEXT[iv.reminder] ?? iv.reminder}` : ''}</span>
                       </div>
                     ))}
                     {(m.entries ?? []).map((e, i) => (

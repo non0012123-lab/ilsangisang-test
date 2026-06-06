@@ -73,7 +73,7 @@ export interface AssistantProposalHandover { clientName?: string; overview?: str
 // 다른 담당자에게 보낼 업무 요청 (예: "방두환한테 디자인 제작 요청해줘")
 export interface AssistantProposalRequest { toName?: string; title?: string; body?: string }
 // 사내 내부 일정 (예: "내일 3시 디자인팀 회의 잡아줘", "금요일 면접 일정")
-export interface AssistantProposalInternal { title?: string; category?: string; date?: string; endDate?: string | null; startTime?: string; endTime?: string; participantNames?: string[]; location?: string; notes?: string }
+export interface AssistantProposalInternal { title?: string; category?: string; date?: string; endDate?: string | null; startTime?: string; endTime?: string; participantNames?: string[]; location?: string; notes?: string; reminder?: string }
 export interface AssistantProposalVendor { name?: string; services?: string; contactPerson?: string; phone?: string; email?: string; pricing?: string; notes?: string }
 // 아이디 목록/홈페이지 목록은 추가·수정·삭제를 op 로 구분
 export interface AssistantAccountOp { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; platform?: string; grade?: string; ownership?: 'client' | 'inhouse'; username?: string; password?: string; category?: string; ip?: string }
@@ -270,7 +270,7 @@ export interface Report {
 // localStorage(기기별)에만 저장하고 Supabase 동기화는 하지 않는다.
 export interface AppNotification {
   id: string;
-  type: 'schedule' | 'ai-plan' | 'ai-image' | 'assistant' | 'request';
+  type: 'schedule' | 'ai-plan' | 'ai-image' | 'assistant' | 'request' | 'internal';
   title: string;
   body?: string;
   link?: string;        // 클릭 시 이동할 라우트 (예: '/ai-results', '/schedule/daily')
@@ -316,6 +316,8 @@ export interface InternalCategory {
   name: string;
   color: string;   // hex
 }
+// 시작 시각 기준 사전 알림. off=알림 없음, onTime=정각(시작 시각)
+export type ReminderOption = 'off' | '1h' | '30m' | '10m' | 'onTime';
 export interface InternalEvent {
   id: string;
   title: string;
@@ -328,6 +330,7 @@ export interface InternalEvent {
   participantNames: string[];
   location?: string;           // 장소(회의실 등)
   notes?: string;
+  reminder?: ReminderOption;   // 시작 N분 전 PC+스티커 알림 (참여자 전원)
   createdAt: number;
 }
 

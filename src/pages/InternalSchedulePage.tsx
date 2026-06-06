@@ -4,8 +4,8 @@ import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import { CATEGORY_COLORS } from '../data/internalCategories';
-import type { InternalEvent, InternalCategory } from '../types';
+import { CATEGORY_COLORS, REMINDER_OPTIONS } from '../data/internalCategories';
+import type { InternalEvent, InternalCategory, ReminderOption } from '../types';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd } from '../utils/dateRange';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -24,7 +24,7 @@ const padDate = (y: number, m: number, d: number) => `${y}-${String(m + 1).padSt
 
 const EMPTY_FORM = {
   title: '', category: '', date: '', endDate: '', startTime: '', endTime: '',
-  participantIds: [] as string[], location: '', notes: '',
+  participantIds: [] as string[], location: '', notes: '', reminder: 'off' as ReminderOption,
 };
 
 export default function InternalSchedulePage() {
@@ -81,7 +81,7 @@ export default function InternalSchedulePage() {
   const openEdit = (e: InternalEvent) => setForm({
     id: e.id, title: e.title, category: e.category, date: e.date, endDate: e.endDate ?? '',
     startTime: e.startTime ?? '', endTime: e.endTime ?? '', participantIds: [...e.participantIds],
-    location: e.location ?? '', notes: e.notes ?? '',
+    location: e.location ?? '', notes: e.notes ?? '', reminder: e.reminder ?? 'off',
   });
 
   const saveForm = () => {
@@ -99,6 +99,7 @@ export default function InternalSchedulePage() {
       participantNames: form.participantIds.map(id => members.find(m => m.id === id)?.name ?? '').filter(Boolean),
       location: form.location.trim() || undefined,
       notes: form.notes.trim() || undefined,
+      reminder: form.reminder,
       createdAt: form.id ? (internalEvents.find(e => e.id === form.id)?.createdAt ?? Date.now()) : Date.now(),
     });
     setForm(null);
@@ -301,6 +302,14 @@ export default function InternalSchedulePage() {
                   <input type="time" value={form.endTime} onChange={e => setForm(f => f && ({ ...f, endTime: e.target.value }))}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1 flex items-center gap-1"><Clock size={12} /> 사전 알림 <span className="text-gray-400 font-normal">(시작 시간 필요)</span></label>
+                <select value={form.reminder} onChange={e => setForm(f => f && ({ ...f, reminder: e.target.value as ReminderOption }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  {REMINDER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <p className="text-[11px] text-gray-400 mt-1">설정 시 시작 전에 참여자 전원에게 PC·스티커 알림이 떠요(앱이 켜져 있어야 함).</p>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1 flex items-center gap-1"><Users size={12} /> 참여자</label>

@@ -14,3 +14,20 @@ export const CATEGORY_COLORS = [
   '#0ea5e9', '#a855f7', '#f59e0b', '#ef4444', '#22c55e',
   '#ec4899', '#6366f1', '#14b8a6', '#f97316', '#6b7280',
 ];
+
+import type { ReminderOption } from '../types';
+// 사전 알림 옵션 (시작 시각 기준)
+export const REMINDER_OPTIONS: { value: ReminderOption; label: string }[] = [
+  { value: 'off', label: '알림 끔' },
+  { value: '1h', label: '1시간 전' },
+  { value: '30m', label: '30분 전' },
+  { value: '10m', label: '10분 전' },
+  { value: 'onTime', label: '정각' },
+];
+// 옵션 → 시작 전 분(min). onTime=0, off 는 알림 없음(여기 없음)
+export const REMINDER_OFFSET_MIN: Record<Exclude<ReminderOption, 'off'>, number> = {
+  '1h': 60, '30m': 30, '10m': 10, onTime: 0,
+};
+export const REMINDER_LABEL: Record<Exclude<ReminderOption, 'off'>, string> = {
+  '1h': '1시간 후', '30m': '30분 후', '10m': '10분 후', onTime: '지금 시작',
+};

@@ -30,6 +30,7 @@ const TYPE_ICON: Record<AppNotification['type'], React.ReactNode> = {
   'ai-image': <ImageIcon size={15} className="text-pink-500" />,
   assistant: <Sparkles size={15} className="text-amber-500" />,
   request: <Inbox size={15} className="text-emerald-500" />,
+  internal: <CalendarClock size={15} className="text-cyan-500" />,
 };
 
 export default function Header({ title, subtitle }: Props) {

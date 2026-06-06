@@ -17,6 +17,7 @@ const NOTICE_ICON: Record<AppNotification['type'], React.ReactNode> = {
   'ai-image': <ImageIcon size={13} className="text-pink-500" />,
   assistant: <Sparkles size={13} className="text-amber-500" />,
   request: <Inbox size={13} className="text-emerald-500" />,
+  internal: <CalendarClock size={13} className="text-cyan-500" />,
 };
 
 export default function StickyRequests() {
