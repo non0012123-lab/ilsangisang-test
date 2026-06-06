@@ -1067,22 +1067,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const cur = (iv.id ? internalEventsRef.current.find(e => e.id === iv.id) : undefined)
           ?? (iv.title ? internalEventsRef.current.find(e => e.title === iv.title!.trim()) : undefined);
         if (cur) {
-          const { ids: addIds, nms: addNames } = resolveParticipants(iv.participantNames);
-          const mergedIds = [...cur.participantIds]; const mergedNames = [...cur.participantNames];
-          addIds.forEach((id, k) => { if (!mergedIds.includes(id)) { mergedIds.push(id); mergedNames.push(addNames[k]); } });
-          const catName = ensureCat(iv.category, i);
+          // 제공된(키가 있는) 필드만 교체. 참여자는 최종 명단으로 교체(추가/제거/교체 모두 커버).
+          const has = (k: keyof typeof iv) => Object.prototype.hasOwnProperty.call(iv, k);
+          let pIds = cur.participantIds, pNames = cur.participantNames;
+          if (has('participantNames')) { const r = resolveParticipants(iv.participantNames); pIds = r.ids; pNames = r.nms; }
+          const newDate = has('date') && iv.date ? iv.date : cur.date;
           const updated: InternalEvent = {
             ...cur,
-            title: (iv.title ?? '').trim() || cur.title,
-            category: catName || cur.category,
-            date: iv.date || cur.date,
-            endDate: iv.endDate && iv.endDate !== 'null' && iv.date && iv.endDate > iv.date ? iv.endDate : cur.endDate,
-            startTime: iv.startTime || cur.startTime,
-            endTime: iv.endTime || cur.endTime,
-            participantIds: mergedIds, participantNames: mergedNames,
-            location: iv.location || cur.location,
-            notes: iv.notes || cur.notes,
-            reminder: normReminder(iv.reminder) ?? cur.reminder,
+            title: has('title') && (iv.title ?? '').trim() ? iv.title!.trim() : cur.title,
+            category: has('category') && (iv.category ?? '').trim() ? (ensureCat(iv.category, i) || cur.category) : cur.category,
+            date: newDate,
+            endDate: has('endDate') ? (iv.endDate && iv.endDate !== 'null' && iv.endDate > newDate ? iv.endDate : undefined) : cur.endDate,
+            startTime: has('startTime') ? (iv.startTime || undefined) : cur.startTime,
+            endTime: has('endTime') ? (iv.endTime || undefined) : cur.endTime,
+            participantIds: pIds, participantNames: pNames,
+            location: has('location') ? (iv.location?.trim() || undefined) : cur.location,
+            notes: has('notes') ? (iv.notes?.trim() || undefined) : cur.notes,
+            reminder: has('reminder') ? normReminder(iv.reminder) : cur.reminder,
           };
           undo.updatedInternalPrev!.push({ ...cur });
           saveInternalEvent(updated);

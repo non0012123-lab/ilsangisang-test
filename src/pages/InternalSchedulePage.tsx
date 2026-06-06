@@ -179,9 +179,9 @@ export default function InternalSchedulePage() {
                         const contNext = entryEnd(e) > (p.colDate[p.endCol] ?? '');
                         const padL = contPrev ? 0 : 3, padR = contNext ? 0 : 3;
                         return (
-                          <div key={e.id + '-' + wi} onClick={ev => { ev.stopPropagation(); openEdit(e); }}
+                          <div key={e.id + '-' + wi}
                             title={`${e.title}${timeLabel(e) ? ` ${timeLabel(e)}` : ''}${isMultiDay(e) ? ` (${e.date}~${e.endDate})` : ''}`}
-                            className={`pointer-events-auto absolute flex items-center gap-1 px-1.5 text-white text-[10px] font-medium leading-none cursor-pointer hover:brightness-110 transition-all ${contPrev ? '' : 'rounded-l'} ${contNext ? '' : 'rounded-r'}`}
+                            className={`absolute flex items-center gap-1 px-1.5 text-white text-[10px] font-medium leading-none transition-all ${contPrev ? '' : 'rounded-l'} ${contNext ? '' : 'rounded-r'}`}
                             style={{ left: `calc(${p.startCol} * 100% / 7 + ${padL}px)`, width: `calc(${p.span} * 100% / 7 - ${padL + padR}px)`, top: NUM_AREA + p.lane * (BAR_H + BAR_GAP), height: BAR_H, backgroundColor: colorOf(e.category) }}>
                             {contPrev ? <span className="shrink-0 opacity-80">↩</span> : isMultiDay(e) && <CalendarRange size={9} className="shrink-0" />}
                             <span className="truncate">{e.startTime ? `${e.startTime} ` : ''}{e.title}</span>
@@ -219,7 +219,11 @@ export default function InternalSchedulePage() {
                 <div key={e.id} onClick={() => openEdit(e)} className="p-3 rounded-xl border border-gray-100 hover:border-gray-200 transition-colors cursor-pointer">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-semibold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: colorOf(e.category) }}>{e.category}</span>
-                    {timeLabel(e) && <span className="text-xs text-gray-400 flex items-center gap-1"><Clock size={11} /> {timeLabel(e)}</span>}
+                    <div className="flex items-center gap-1.5">
+                      {timeLabel(e) && <span className="text-xs text-gray-400 flex items-center gap-1"><Clock size={11} /> {timeLabel(e)}</span>}
+                      <button onClick={ev => { ev.stopPropagation(); if (window.confirm('이 일정을 삭제할까요? (되돌릴 수 없음)')) removeInternalEvent(e.id); }}
+                        className="p-1 -mr-1 text-gray-300 hover:text-red-500 transition-colors" title="삭제"><Trash2 size={13} /></button>
+                    </div>
                   </div>
                   <p className="text-sm font-semibold text-gray-900 mb-0.5">{e.title}</p>
                   {isMultiDay(e) && <p className="text-xs text-blue-600 flex items-center gap-1"><CalendarRange size={11} /> {e.date} ~ {e.endDate}</p>}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Sparkles, Calendar, X, CalendarRange, ExternalLink } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Sparkles, Calendar, X, CalendarRange, ExternalLink, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -42,7 +42,7 @@ const STATUS_STYLE: Record<string, string> = {
 const STATUS_LABEL: Record<string, string> = { completed: '완료', 'in-progress': '진행중', pending: '대기' };
 
 export default function TimetablePage() {
-  const { entries, saveEntry, saveEntries, clients } = useApp();
+  const { entries, saveEntry, saveEntries, removeEntry, clients } = useApp();
   const [clientId, setClientId] = useState('all');
   const [curDate, setCurDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<number | null>(new Date().getDate());
@@ -243,9 +243,8 @@ export default function TimetablePage() {
                         const padR = contNext ? 0 : 3;
                         return (
                           <div key={e.id + '-' + wi}
-                            onClick={ev => { ev.stopPropagation(); setModal({ open: true, entry: e }); }}
                             title={`${e.opinionTitle ?? e.keyword ?? e.category}${isMultiDay(e) ? ` (${e.date}~${e.endDate})` : ''}`}
-                            className={`pointer-events-auto absolute flex items-center gap-1 px-1.5 text-white text-[10px] font-medium leading-none cursor-pointer hover:brightness-110 transition-all ${
+                            className={`absolute flex items-center gap-1 px-1.5 text-white text-[10px] font-medium leading-none transition-all ${
                               contPrev ? '' : 'rounded-l'
                             } ${contNext ? '' : 'rounded-r'}`}
                             style={{
@@ -308,9 +307,13 @@ export default function TimetablePage() {
                           style={{ backgroundColor: CAT_COLOR[entry.category] ?? '#6b7280' }}>
                           {entry.category}
                         </span>
-                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${STATUS_STYLE[entry.status]}`}>
-                          {STATUS_LABEL[entry.status]}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${STATUS_STYLE[entry.status]}`}>
+                            {STATUS_LABEL[entry.status]}
+                          </span>
+                          <button onClick={ev => { ev.stopPropagation(); if (window.confirm('이 일정을 삭제할까요? (되돌릴 수 없음)')) removeEntry(entry.id); }}
+                            className="p-1 -mr-1 text-gray-300 hover:text-red-500 transition-colors" title="삭제"><Trash2 size={13} /></button>
+                        </div>
                       </div>
                       <p className="text-sm font-semibold text-gray-900 mb-0.5 truncate">
                         {entry.opinionTitle ?? entry.keyword ?? entry.category}
