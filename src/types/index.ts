@@ -337,6 +337,29 @@ export interface InternalEvent {
   createdAt: number;
 }
 
+// ── 단가표 ────────────────────────────────────────────
+// 외부 마케팅 쇼핑몰(shop.gpakorea.com)에서 수집한 패키지/단일 상품 가격표.
+// 소스 상품 1개 = PriceProduct 1개. 그 안에 옵션 그룹(패키지/단일)과 옵션 가격이 담긴다.
+// 다른 업무 데이터와 동일하게 localStorage 캐시 + Supabase(price_table) 로 영속화한다.
+export interface PriceOption {
+  name: string;   // 옵션명(예: "스토어 알림받기 100건")
+  price: number;  // 가격(원)
+}
+export interface PriceGroup {
+  title: string;       // 옵션 그룹명(예: "리워드 트래픽", "[Best] 리뷰+순위부스팅 패키지")
+  isPackage: boolean;  // 패키지 여부(그룹명에 "패키지" 포함)
+  options: PriceOption[];
+}
+export interface PriceProduct {
+  id: string;        // 소스 상품 id(item/view/{id})
+  name: string;      // 상품명
+  category: string;  // 대분류(소스 breadcrumb 첫 단계)
+  url: string;       // 원본 상품 링크
+  repPrice: number;  // 대표가 = 판매중 옵션 중 최저가(메인 화면 "○원~" 와 동일)
+  groups: PriceGroup[];
+  updatedAt: number; // 수집 시각(ms)
+}
+
 // 클라이언트별 수동 지정 보고 기간 (자동 주기와 별개로 추가 가능)
 export interface ReportPeriod {
   id: string;
