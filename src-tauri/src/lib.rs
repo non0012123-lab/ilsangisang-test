@@ -59,9 +59,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         // 내장 브라우저 + 캡처(전체/영역/스크롤) + 저장 명령
         .invoke_handler(tauri::generate_handler![
-            capture::open_internal_browser,
-            capture::capture_browser,
-            capture::capture_browser_scroll,
+            capture::capture_primary_screen,
             capture::save_capture,
             capture::get_save_dir,
             capture::set_save_dir,
@@ -77,25 +75,33 @@ pub fn run() {
             // 자동 실행 기본값 ON (사용자가 OS 설정에서 끄기 전까지)
             let _ = app.autolaunch().enable();
 
-            // 전역 단축키(Ctrl+Shift+Space) → 어시스턴트 퀵바 토글
+            // 전역 단축키: Ctrl+Shift+Space → 어시스턴트 퀵바 토글 / Ctrl+Shift+S → 화면 캡처
             #[cfg(desktop)]
             {
                 use tauri_plugin_global_shortcut::{
                     Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
                 };
                 let toggle_sc = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
-                let sc_for_handler = toggle_sc.clone(); // 핸들러로 move, 등록엔 원본 사용
+                let capture_sc = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS);
+                let toggle_h = toggle_sc.clone();
+                let capture_h = capture_sc.clone();
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
                         .with_handler(move |app, sc, event| {
                             // 눌렀을 때(Pressed)만 처리 — 떼는 이벤트(Released)는 무시
-                            if sc == &sc_for_handler && event.state() == ShortcutState::Pressed {
+                            if event.state() != ShortcutState::Pressed {
+                                return;
+                            }
+                            if sc == &toggle_h {
                                 toggle_assistant(app);
+                            } else if sc == &capture_h {
+                                capture::capture_and_emit(app);
                             }
                         })
                         .build(),
                 )?;
                 app.global_shortcut().register(toggle_sc)?;
+                app.global_shortcut().register(capture_sc)?;
             }
 
             // 트레이 아이콘 + 우클릭 메뉴
