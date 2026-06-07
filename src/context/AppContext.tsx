@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct } from '../types';
 import { USERS } from '../data/mockData';
 import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
 import type { ReminderOption } from '../types';
@@ -74,6 +74,12 @@ interface AppContextType {
   removeInternalEvent: (id: string) => void;
   saveInternalCategory: (cat: InternalCategory) => void;
   removeInternalCategory: (id: string) => void;
+  // 단가표(외부 마케팅 쇼핑몰에서 수집한 패키지/단일 상품 가격) — '새로고침'으로 재수집.
+  priceTable: PriceProduct[];
+  priceRefreshing: boolean;                 // 수집 진행 중 여부
+  priceProgress: { done: number; total: number } | null; // 수집 진행률(상품 수)
+  priceUpdatedAt: number | null;            // 마지막 수집 시각(ms)
+  refreshPriceTable: () => Promise<{ count: number } | null>;
   // 업무 요청(요청함) — 다른 담당자에게 보낸/받은 요청. realtime 으로 상대 화면에 반영됨.
   requests: WorkRequest[];
   sendRequest: (toId: string, title: string, body?: string) => void;
@@ -123,6 +129,8 @@ const lsImportance = (key: string): number => {
   if (key.includes('request')) return 85; // 다른 담당자와 주고받는 업무 요청 — 핵심에 가깝게 보존
   if (key.includes('internal')) return 75; // 내부 일정 — 업무 데이터급으로 보존
   if (key.includes('vendors')) return 80;
+  if (key.includes('price')) return 65; // 단가표 — 외부에서 다시 받을 수 있으나 자주 안 바뀌어 중간 보존
+
   if (key.includes('accounts')) return 70;
   if (key.includes('site')) return 60;
   if (key.includes('handover')) return 50;
@@ -152,6 +160,7 @@ const SITES_LS_KEY = 'ilsangisang.sites.v1';
 const REPORTS_LS_KEY = 'ilsangisang.reports.v1';
 const AI_PLANS_LS_KEY = 'ilsangisang.aiplans.v1';
 const REQUESTS_LS_KEY = 'ilsangisang.requests.v1';
+const PRICE_TABLE_LS_KEY = 'ilsangisang.priceTable.v1';
 const INTERNAL_EVENTS_LS_KEY = 'ilsangisang.internalEvents.v1';
 const INTERNAL_CATS_LS_KEY = 'ilsangisang.internalCategories.v1';
 const FIRED_REMINDERS_LS_KEY = 'ilsangisang.firedReminders.v1'; // 이미 띄운 내부일정 리마인더(기기별, 중복 방지)
@@ -204,6 +213,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [conversations, activeConversationId],
   );
   const [requests, setRequests] = useState<WorkRequest[]>(() => lsLoad<WorkRequest>(REQUESTS_LS_KEY));
+  // 단가표(외부 수집) — 로컬 캐시 + Supabase 동기화. 수집은 '새로고침' 버튼이 트리거.
+  const [priceTable, setPriceTable] = useState<PriceProduct[]>(() => lsLoad<PriceProduct>(PRICE_TABLE_LS_KEY));
+  const [priceRefreshing, setPriceRefreshing] = useState(false);
+  const [priceProgress, setPriceProgress] = useState<{ done: number; total: number } | null>(null);
   // 내부 일정 + 종류(카테고리). 카테고리는 캐시가 비면 기본값으로 시드.
   const [internalEvents, setInternalEvents] = useState<InternalEvent[]>(() => lsLoad<InternalEvent>(INTERNAL_EVENTS_LS_KEY));
   const [internalCategories, setInternalCategories] = useState<InternalCategory[]>(() => {
@@ -282,6 +295,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const requestsRef = useRef(requests);
   useEffect(() => { requestsRef.current = requests; }, [requests]);
   useEffect(() => { lsSave(REQUESTS_LS_KEY, requests); }, [requests]);
+  // 단가표
+  const priceTableRef = useRef(priceTable);
+  useEffect(() => { priceTableRef.current = priceTable; }, [priceTable]);
+  useEffect(() => { lsSave(PRICE_TABLE_LS_KEY, priceTable); }, [priceTable]);
   // 내부 일정 / 카테고리
   const internalEventsRef = useRef(internalEvents);
   useEffect(() => { internalEventsRef.current = internalEvents; }, [internalEvents]);
@@ -456,6 +473,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setInternalCategories(prev => prev.filter(c => c.id !== id));
     persistDelete('internal_categories', id);
   }, []);
+
+  // ── 단가표 수집 ──
+  // '새로고침' 버튼이 호출한다. 서버(/api/pricing-scrape)로 외부 쇼핑몰을 긁어,
+  // 상품 id 전체를 받은 뒤 작은 청크로 나눠 옵션·가격을 모은다(페이지 1개가 커서 한 번에 못 긁음).
+  // 모은 결과로 화면(state)·localStorage·Supabase 를 한꺼번에 갱신한다.
+  const refreshPriceTable = useCallback(async (): Promise<{ count: number } | null> => {
+    if (priceRefreshing) return null;
+    setPriceRefreshing(true);
+    setPriceProgress({ done: 0, total: 0 });
+    const postScrape = async (payload: unknown) => {
+      const res = await fetch('/api/pricing-scrape', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const ctype = res.headers.get('content-type') ?? '';
+      if (!ctype.includes('application/json')) {
+        throw new Error('수집 서버(/api/pricing-scrape)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
+      }
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error ?? `수집 실패 (${res.status})`);
+      return data;
+    };
+    try {
+      const { ids } = await postScrape({ mode: 'index' }) as { ids: number[] };
+      const total = Array.isArray(ids) ? ids.length : 0;
+      setPriceProgress({ done: 0, total });
+      const CHUNK = 6;
+      const collected: PriceProduct[] = [];
+      for (let i = 0; i < total; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        try {
+          const { products } = await postScrape({ mode: 'detail', ids: chunk }) as { products: PriceProduct[] };
+          if (Array.isArray(products)) collected.push(...products);
+        } catch { /* 일부 청크 실패는 건너뛰고 나머지 계속 */ }
+        setPriceProgress({ done: Math.min(i + CHUNK, total), total });
+      }
+      // 수집 성공분이 있을 때만 교체(전부 실패하면 기존 단가표 유지).
+      if (collected.length) {
+        collected.sort((a, b) => a.category.localeCompare(b.category, 'ko') || a.name.localeCompare(b.name, 'ko'));
+        setPriceTable(collected);
+        persistMany('price_table', collected);
+        // 이번에 사라진 상품(판매중지 등)은 Supabase 에서도 정리해 공유본을 최신과 일치시킨다.
+        const liveIds = new Set(collected.map(p => p.id));
+        priceTableRef.current.filter(p => !liveIds.has(p.id)).forEach(p => persistDelete('price_table', p.id));
+      }
+      return { count: collected.length };
+    } finally {
+      setPriceRefreshing(false);
+      setPriceProgress(null);
+    }
+  }, [priceRefreshing]);
+  const priceUpdatedAt = useMemo(
+    () => priceTable.reduce((mx, p) => Math.max(mx, p.updatedAt || 0), 0) || null,
+    [priceTable],
+  );
 
   // ── 클라이언트 ──
   const saveClient = useCallback((client: Client) => {
@@ -726,6 +798,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const siteContext = siteEntriesRef.current.map(s => ({
       id: s.id, name: s.name, url: s.url, username: s.username, description: s.description,
     }));
+    // 단가표: "○○ 단가 얼마야?", "10만원 이하 패키지 뭐 있어?" 류 질문의 근거.
+    // 옵션이 많아 프롬프트가 비대해지지 않도록 상품·옵션을 평탄화하고 전체 옵션 수를 제한한다.
+    const priceContext = (() => {
+      const out: { name: string; category: string; repPrice: number; options: { n: string; p: number; pkg: boolean }[] }[] = [];
+      let budget = 2500; // 전체 옵션 수 상한(토큰 보호)
+      for (const prod of priceTableRef.current) {
+        const opts: { n: string; p: number; pkg: boolean }[] = [];
+        for (const g of prod.groups) {
+          for (const o of g.options) {
+            if (budget-- <= 0) break;
+            opts.push({ n: o.name, p: o.price, pkg: g.isPackage });
+          }
+        }
+        out.push({ name: prod.name, category: prod.category, repPrice: prod.repPrice, options: opts });
+        if (budget <= 0) break;
+      }
+      return out;
+    })();
     const history = (conversationsRef.current.find(c => c.id === convId)?.messages ?? []).map(m => ({ role: m.role, text: m.text }));
     mutateMessages(convId, prev => [...prev, { role: 'user', text: message }]);
     setAssistantLoading(true);
@@ -759,6 +849,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           vendors: vendorContext,
           accounts: accountContext,
           sites: siteContext,
+          priceTable: priceContext,
           entries: scoped.map(e => ({
             id: e.id, date: e.date, endDate: e.endDate ?? null,
             managerName: e.managerName, clientName: e.clientName,
@@ -1226,6 +1317,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     load<SiteEntry>('site_entries').then(guard(sites => syncLocalFirst('site_entries', sites, siteEntriesRef.current, setSiteEntries)));
     load<Report>('reports').then(guard(rep => syncLocalFirst('reports', rep, reportsRef.current, setReports)));
     load<WorkRequest>('requests').then(guard(reqs => syncLocalFirst('requests', reqs, requestsRef.current, setRequests)));
+    load<PriceProduct>('price_table').then(guard(rows => syncLocalFirst('price_table', rows, priceTableRef.current, setPriceTable)));
     load<InternalEvent>('internal_events').then(guard(evs => syncLocalFirst('internal_events', evs, internalEventsRef.current, setInternalEvents)));
     // 카테고리: 원격에 있으면 사용, 없으면 기본값(로컬 상태) 1회 backfill
     load<InternalCategory>('internal_categories').then(guard(cats => syncLocalFirst('internal_categories', cats, internalCategoriesRef.current, setInternalCategories)));
@@ -1386,6 +1478,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
       internalEvents, internalCategories, saveInternalEvent, removeInternalEvent, saveInternalCategory, removeInternalCategory,
+      priceTable, priceRefreshing, priceProgress, priceUpdatedAt, refreshPriceTable,
       requests, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
       stickyNotices, dismissStickyNotice,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,

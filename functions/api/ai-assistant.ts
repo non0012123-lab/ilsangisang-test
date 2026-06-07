@@ -77,6 +77,15 @@ interface AssistantRequest {
   vendors?: CtxVendor[];
   accounts?: CtxAccount[];
   sites?: CtxSite[];
+  priceTable?: CtxPriceProduct[];
+}
+
+// 단가표(외부 마케팅 쇼핑몰에서 수집한 패키지/단일 상품 가격) — 단가/견적 질문의 근거
+interface CtxPriceProduct {
+  name?: string;
+  category?: string;
+  repPrice?: number;  // 대표가(최저가)
+  options?: { n?: string; p?: number; pkg?: boolean }[]; // n=옵션명, p=가격(원), pkg=패키지 여부
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -211,6 +220,20 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       : '')
     .filter(Boolean).join('\n');
 
+  // 단가표 컨텍스트: "○○ 단가 얼마야?", "10만원 이하 패키지" 류 질문의 근거.
+  const priceProducts = (Array.isArray(req.priceTable) ? req.priceTable : []).slice(0, 200);
+  const won = (n?: number) => typeof n === 'number' ? `${n.toLocaleString('ko-KR')}원` : '-';
+  const priceContext = priceProducts
+    .map(p => {
+      if (!p.name) return '';
+      const opts = (Array.isArray(p.options) ? p.options : [])
+        .map(o => `${o.pkg ? '[패키지] ' : ''}${o.n ?? '-'}: ${won(o.p)}`)
+        .join(' / ');
+      return `■ ${p.name}${p.category ? ` (${p.category})` : ''} — 최저가 ${won(p.repPrice)}${opts ? `\n  ${opts}` : ''}`;
+    })
+    .filter(Boolean)
+    .join('\n');
+
   const developer = [
     '너는 한국 마케팅 대행사의 일정 관리 AI 어시스턴트다. 항상 한국어로, 친절하고 간결하게 답한다.',
     '반드시 아래 JSON 객체로만 응답해(코드펜스·설명문 금지):',
@@ -264,6 +287,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 업체 연락처/예산/계약 질문("○○ 연락처/담당자/이메일/전화 알려줘", "△△ 월 예산/광고비 얼마야?", "□□ 계약 기간/시작일/종료일") : 위 "업체 상세"의 contactPerson·phone·email·monthlyBudget·budgetItems(product/amount, amount는 만원 단위)·startDate·contractEnd 를 근거로 reply 에 정리해 답한다. 인수인계 문서의 "담당자 연락처(keyContacts)"도 보조 근거로 함께 활용한다. 값이 비어 있으면(null/빈 배열) 지어내지 말고 "해당 항목이 등록돼 있지 않다"고 안내한다. 이때 모든 액션 배열은 비운다(조회이므로).',
     '- 외주사 질문("영수증리뷰 어디에 맡겨?", "앱설치 외주 어디 있어?", "○○ 작업 외주사 추천" 등): 아래 "외주사 목록"에서 해당 서비스를 제공하는 외주사를 찾아 업체명·담당자·연락처·단가/메모를 reply 에 정리해 답한다. 여러 곳이면 모두 제시. 이때 모든 액션 배열은 비운다(조회·추천이므로). 맞는 외주사가 없으면 지어내지 말고 "등록된 외주사가 없다"고 안내한다.',
     '- 외주사 등록: 사용자가 새 외주사를 자연어로 등록하려 하면("○○ 외주사 추가해줘. 영수증리뷰·앱설치 가능, 담당 …") vendors 에 담는다. services 는 정해진 코드가 아니라 자유 서술로, 입력에 언급된 서비스를 빠짐없이 담는다. 아는 정보만 채우고 모르면 빈 문자열. reply 에는 무엇을 등록할지 요약하고 "적용"을 안내한다.',
+    '- 단가/가격/견적 질문("○○ 단가 얼마야?", "스토어 상위노출 가격", "10만원 이하 패키지 뭐 있어?", "리뷰 패키지 견적", "△△ 단일 상품 가격대" 등): 아래 "단가표(외부 수집)"를 근거로 답한다. 상품명·옵션명·가격(원)을 그대로 인용해 reply 에 정리하고, 패키지/단일을 구분해 보여준다. 예산 조건이 있으면 그 이하 옵션만 추린다. ★ 표에 없는 가격을 절대 지어내지 말 것 — 맞는 항목이 없으면 "단가표에 해당 항목이 없다(단가표 페이지에서 새로고침 필요할 수 있음)"고 안내한다. 단가표의 "최저가"는 그 상품 옵션 중 가장 싼 값이다. 이때 모든 액션 배열은 비운다(조회이므로).',
     '- 키워드 조회수 질문("○○ 키워드 조회수 알려줘", "△△ 검색량 얼마야?", "□□ 모바일/PC 조회수"): 실제 수치는 네이버 키워드도구로 따로 조회하므로, 너는 절대 숫자를 지어내지 말고 조회할 키워드만 keywords 배열에 담는다(여러 개면 모두). reply 에는 "조회수를 조회해 아래에 표시할게요" 정도로 짧게 답하고 다른 액션 배열은 비운다.',
     '- 아이디 목록 조회("○○ 아이디/비번 뭐야?", "△△ 계정 정보 알려줘"): 비밀번호는 컨텍스트에 없고 화면에서 직접 보여주므로, 매칭되는 항목의 id 를 accountLookups 에 담는다(여러 개면 모두). reply 에는 "아래에서 아이디·비번·아이피를 복사하세요" 정도로 짧게 답하고, 비번 값을 지어내지 말 것. 일치 항목이 없으면 빈 배열 + reply 에서 되묻기.',
     '- 홈페이지 목록 조회("문자발송 사이트 비번?", "○○ 홈페이지 계정"): 매칭 항목 id 를 siteLookups 에 담고 reply 는 짧게. 비번은 화면에서 보여준다.',
@@ -311,6 +335,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '',
     '외주사 목록(서비스별 외주 추천의 근거):',
     vendorContext || '(등록된 외주사 없음)',
+    '',
+    '단가표(외부 수집 — 단가/가격/견적 질문의 근거. 상품마다 최저가 + 옵션별 가격(원), [패키지] 표시):',
+    priceContext || '(수집된 단가표 없음 — 단가표 페이지에서 새로고침 필요)',
     '',
     '아이디 목록(계정 — 조회/수정/삭제 시 위 id 사용):',
     accountContext || '(등록된 아이디 없음)',
