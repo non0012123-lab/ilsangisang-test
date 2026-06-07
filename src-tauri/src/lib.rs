@@ -20,10 +20,10 @@ fn show_main(app: &tauri::AppHandle) {
     }
 }
 
-// 어시스턴트 퀵바 창을 화면 중앙에 보이고 포커스(트레이 메뉴/소환 시)
+// 어시스턴트 퀵바 창을 보이고 포커스(트레이 메뉴/소환 시).
+//  • 위치는 사용자가 드래그해둔 마지막 자리를 그대로 사용(window-state 플러그인이 기억) — 중앙 강제 X.
 fn show_assistant(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("assistant") {
-        let _ = w.center();
         let _ = w.show();
         let _ = w.set_focus();
     }
@@ -53,6 +53,13 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         // 네이티브 알림(웹뷰 웹알림 대신 OS 알림) — 원격 웹 페이지가 IPC 로 호출
         .plugin(tauri_plugin_notification::init())
+        // 창 위치/크기 기억 — 어시스턴트 퀵바를 듀얼모니터 원하는 자리에 두면 다음에도 그 자리.
+        //  VISIBLE 은 저장하지 않음(퀵바는 항상 숨김 상태로 시작 → 단축키로 소환).
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(tauri_plugin_window_state::StateFlags::POSITION | tauri_plugin_window_state::StateFlags::SIZE)
+                .build(),
+        )
         .setup(|app| {
             // 자동 실행 기본값 ON (사용자가 OS 설정에서 끄기 전까지)
             let _ = app.autolaunch().enable();
@@ -108,17 +115,13 @@ pub fn run() {
                 .build(app)?;
             Ok(())
         })
-        .on_window_event(|window, event| match event {
-            // 창 닫기(X/Alt+F4) = 종료가 아니라 트레이로 숨김 → 백그라운드 상주(알림·리마인더 유지)
-            WindowEvent::CloseRequested { api, .. } => {
+        // 창 닫기(X/Alt+F4) = 종료가 아니라 트레이로 숨김 → 백그라운드 상주(알림·리마인더 유지).
+        //  어시스턴트 퀵바는 포커스를 잃어도 안 꺼짐 — 드래그해둔 자리에 계속 떠 있음(Ctrl+Shift+Space/Esc/X 로 닫기).
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
                 let _ = window.hide();
                 api.prevent_close();
             }
-            // 어시스턴트 퀵바는 포커스를 잃으면(다른 창 클릭) 자동으로 숨김 — 작업에 안 거슬리게
-            WindowEvent::Focused(false) if window.label() == "assistant" => {
-                let _ = window.hide();
-            }
-            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
