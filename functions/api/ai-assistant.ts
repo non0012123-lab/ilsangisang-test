@@ -78,6 +78,15 @@ interface AssistantRequest {
   accounts?: CtxAccount[];
   sites?: CtxSite[];
   priceTable?: CtxPriceProduct[];
+  salesEnabled?: boolean;   // 영업관리 권한 여부 — true 일 때만 상담 기록을 다룬다
+  sales?: CtxSales[];       // 기존 상담 목록(조회/수정 대상 식별용)
+}
+
+// 영업관리(상담 로그) 컨텍스트 — 권한자에게만 전달됨
+interface CtxSales {
+  id?: string; consultedAt?: string; handlerName?: string; channel?: string;
+  phone?: string; email?: string; customerName?: string; content?: string;
+  sentiment?: string; status?: string; followUpDate?: string; nasLink?: string;
 }
 
 // 단가표(외부 마케팅 쇼핑몰에서 수집한 패키지/단일 상품 가격) — 단가/견적 질문의 근거
@@ -238,6 +247,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     .filter(Boolean)
     .join('\n');
 
+  // 영업관리(상담 로그) 컨텍스트 — 권한자(salesEnabled)에게만. 조회/수정 대상 식별 근거.
+  const salesEnabled = req.salesEnabled === true;
+  const salesEntries = salesEnabled ? (Array.isArray(req.sales) ? req.sales : []).slice(0, 60) : [];
+  const salesContext = salesEntries
+    .map(s => `■ id=${s.id ?? '?'} | ${s.consultedAt ?? '-'} | 응대:${s.handlerName ?? '-'} | 채널:${s.channel ?? '-'} | 전화:${s.phone ?? '-'} | 이메일:${s.email ?? '-'} | 고객:${s.customerName ?? '-'} | 척도:${s.sentiment ?? '-'} | 상태:${s.status ?? '-'}${s.followUpDate ? ` | 후속:${s.followUpDate}` : ''} | 내용:${(s.content ?? '').slice(0, 80)}`)
+    .join('\n');
+
   const developer = [
     '너는 한국 마케팅 대행사의 일정 관리 AI 어시스턴트다. 항상 한국어로, 친절하고 간결하게 답한다.',
     '반드시 아래 JSON 객체로만 응답해(코드펜스·설명문 금지):',
@@ -253,6 +269,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  "sites": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "url":"", "username":"", "password":"", "description":"" } ],',
     '  "requests": [ { "toName":"요청 받을 담당자 이름", "title":"요청 내용 한 줄(예: 디자인 제작)", "body":"상세 설명(없으면 생략)" } ],',
     '  "internalEvents": [ { "op":"add|update", "id":"수정 시 기존 내부일정 id", "title":"일정 제목", "category":"내부 일정 종류", "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "startTime":"HH:MM(없으면 생략)", "endTime":"HH:MM(없으면 생략)", "participantNames":["참여자 이름"], "location":"장소(없으면 생략)", "notes":"메모(없으면 생략)", "reminder":"off|1h|30m|10m|onTime" } ],',
+    '  "sales": [ { "op":"add|update", "id":"수정 시 기존 상담 id", "consultedAt":"YYYY-MM-DD HH:mm 또는 YYYY-MM-DD", "channel":"phone|inquiry|etc", "phone":"전화번호", "email":"이메일", "customerName":"고객/업체명", "content":"상담 내용", "sentiment":"very_positive|positive|neutral|negative|very_negative", "status":"new|in_progress|done|hold", "followUpDate":"YYYY-MM-DD(있으면)", "nasLink":"첨부/자료 링크(있으면)", "result":"결과/메모(있으면)" } ],',
     '  "accountLookups": [ "조회 질문일 때 답으로 보여줄 아이디 목록 id" ],',
     '  "siteLookups": [ "조회 질문일 때 답으로 보여줄 홈페이지 id" ],',
     '  "keywords": [ "조회수를 조회할 키워드" ]',
@@ -294,6 +311,15 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 단가/가격/견적 질문("○○ 단가 얼마야?", "스토어 상위노출 가격", "10만원 이하 패키지 뭐 있어?", "리뷰 패키지 견적", "△△ 단일 상품 가격대" 등): 아래 "단가표(외부 수집)"를 근거로 답한다. 상품명·옵션명·가격(원)을 그대로 인용해 reply 에 정리하고, 패키지/단일을 구분해 보여준다. 예산 조건이 있으면 그 이하 옵션만 추린다. ★ 표에 없는 가격을 절대 지어내지 말 것 — 맞는 항목이 없으면 "단가표에 해당 항목이 없다(단가표 페이지에서 새로고침 필요할 수 있음)"고 안내한다. 단가표의 "최저가"는 그 상품 옵션 중 가장 싼 값이다. 이때 모든 액션 배열은 비운다(조회이므로).',
     '  · ★ 단가를 답할 때는 각 옵션의 "설명"(단가표의 └ 설명 항목)도 가격과 함께 반드시 같이 보여준다. 특히 "결제 전 (관리자) 문의", "상담 요망", "노출 보장 조건" 같은 주의·조건 문구가 있으면 절대 생략하지 말고 그대로 전달한다(가격만 알려주면 안 됨). 설명이 길면 핵심(구성 항목·보장 조건·문의 안내)을 간추리되 주의 문구는 빠뜨리지 않는다. 설명이 없는 옵션은 가격만 답한다. 패키지는 "패키지명 – 옵션명: 가격" 형태로 그대로 인용한다.',
     '  · 단가표에 옵션 없이 "상품명 (카테고리) — 최저가"만 있는 항목은, 질문이 광범위해 상세를 생략한 것이다. 이 경우 최저가 기준으로 추려 답하고(예: 예산 이하 상품), 정확한 옵션·설명이 필요하면 "어떤 상품인지 콕 집어 다시 물어봐 달라"고 안내한다(억지로 옵션을 지어내지 말 것).',
+    ...(salesEnabled ? [
+      '- ★ 영업관리(상담 기록): 사용자가 "상담/응대/문의/통화" 한 건을 말하면(예: "오늘 010-1234-5678 번호 상담했어 매우긍정이고 내용은 …", "문의폼으로 ○○ 문의 왔어") sales 배열에 담는다. ★★ 이때는 절대 entries(클라이언트 일정)·internalEvents 로 만들지 않는다 — 내용에 "블로그/마케팅/제작" 같은 단어가 있어도 그건 "상담 내용"일 뿐이다. "상담했어/응대했어/문의 왔어" + 척도(매우긍정~매우부정)·전화번호 신호가 있으면 무조건 sales 다.',
+      '  · content: 상담 내용을 그대로(예: "네이버 블로그 관리 문의"). channel: 전화번호/통화면 "phone", 문의폼/이메일이면 "inquiry", 그 외 "etc".',
+      '  · phone: 사용자가 010 을 빼고 숫자만 말해도 그대로 숫자를 넣는다(시스템이 010 을 붙이고 하이픈을 포맷함). 이메일이 있으면 email 에.',
+      '  · sentiment 매핑: "매우긍정"→very_positive, "긍정"→positive, "보통/중립"→neutral, "부정"→negative, "매우부정"→very_negative. 언급 없으면 neutral.',
+      '  · nasLink: "나스 링크/자료 링크/첨부 …" 로 준 URL 은 sales.nasLink 에 넣는다(★ 절대 일정(entries.link)으로 보내지 말 것). consultedAt: "오늘"이면 오늘 날짜, 시간 언급 있으면 함께.',
+      '  · status: 보통 신규 상담이면 "new". "처리완료/해결"이라 하면 "done", "진행중"이면 "in_progress", "보류"면 "hold".',
+      '  · 상담 수정/조회: 기존 상담을 바꾸면 op:"update" + 아래 "상담 목록(영업관리)"에서 맞는 id. "오늘 상담 몇 건?", "부정 상담 보여줘" 같은 조회는 sales 배열을 비우고 reply 로만 그 목록을 근거로 답한다.',
+    ] : []),
     '- 키워드 조회수 질문("○○ 키워드 조회수 알려줘", "△△ 검색량 얼마야?", "□□ 모바일/PC 조회수"): 실제 수치는 네이버 키워드도구로 따로 조회하므로, 너는 절대 숫자를 지어내지 말고 조회할 키워드만 keywords 배열에 담는다(여러 개면 모두). reply 에는 "조회수를 조회해 아래에 표시할게요" 정도로 짧게 답하고 다른 액션 배열은 비운다.',
     '- 아이디 목록 조회("○○ 아이디/비번 뭐야?", "△△ 계정 정보 알려줘"): 비밀번호는 컨텍스트에 없고 화면에서 직접 보여주므로, 매칭되는 항목의 id 를 accountLookups 에 담는다(여러 개면 모두). reply 에는 "아래에서 아이디·비번·아이피를 복사하세요" 정도로 짧게 답하고, 비번 값을 지어내지 말 것. 일치 항목이 없으면 빈 배열 + reply 에서 되묻기.',
     '- 홈페이지 목록 조회("문자발송 사이트 비번?", "○○ 홈페이지 계정"): 매칭 항목 id 를 siteLookups 에 담고 reply 는 짧게. 비번은 화면에서 보여준다.',
@@ -350,6 +376,11 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '',
     '홈페이지 목록(사내 사용 사이트 — 조회/수정/삭제 시 위 id 사용):',
     siteContext || '(등록된 홈페이지 없음)',
+    ...(salesEnabled ? [
+      '',
+      '상담 목록(영업관리 — 상담 수정/조회 시 위 id 사용):',
+      salesContext || '(등록된 상담 없음)',
+    ] : []),
   ].join('\n');
 
   // 대화 맥락을 하나의 사용자 메시지(트랜스크립트)로 합쳐 전달
@@ -398,7 +429,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const data = await aiRes.json();
   const content = extractText(data);
-  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; internalEvents?: unknown; accountLookups?: unknown; siteLookups?: unknown };
+  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; internalEvents?: unknown; sales?: unknown; accountLookups?: unknown; siteLookups?: unknown };
   try {
     parsed = JSON.parse(content);
   } catch {
@@ -416,6 +447,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     sites: Array.isArray(parsed?.sites) ? parsed.sites : [],
     requests: Array.isArray(parsed?.requests) ? parsed.requests : [],
     internalEvents: Array.isArray(parsed?.internalEvents) ? parsed.internalEvents : [],
+    sales: salesEnabled && Array.isArray(parsed?.sales) ? parsed.sales : [],
     accountLookups: Array.isArray(parsed?.accountLookups) ? parsed.accountLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
     siteLookups: Array.isArray(parsed?.siteLookups) ? parsed.siteLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
     keywords: Array.isArray(parsed?.keywords) ? parsed.keywords.filter((k: unknown) => typeof k === 'string' && k.trim()).slice(0, 20) : [],

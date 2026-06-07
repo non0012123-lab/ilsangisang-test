@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock } from 'lucide-react';
+import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { AssistantMessage } from '../types';
@@ -15,6 +15,8 @@ const relTime = (ts: number): string => {
 
 const STATUS_LABEL: Record<string, string> = { pending: '대기중', 'in-progress': '진행중', completed: '완료' };
 const REMINDER_TEXT: Record<string, string> = { '1h': '1시간 전', '30m': '30분 전', '10m': '10분 전', onTime: '정각' };
+const SALES_SENT_LABEL: Record<string, string> = { very_positive: '매우긍정', positive: '긍정', neutral: '보통', negative: '부정', very_negative: '매우부정' };
+const SALES_CH_LABEL: Record<string, string> = { phone: '전화', inquiry: '문의폼', etc: '기타' };
 
 const EXAMPLES = [
   '오늘 스케줄 시간 분배는 어떻게 하는 게 효율적일까?',
@@ -81,7 +83,7 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
   };
 
   const proposalCount = (m: AssistantMessage) =>
-    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0) + (m.internalEvents?.length ?? 0);
+    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0) + (m.internalEvents?.length ?? 0) + (m.sales?.length ?? 0);
 
   const opLabel = (op?: string) => op === 'delete' ? '삭제' : op === 'update' ? '수정' : '추가';
 
@@ -229,6 +231,16 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                         <div key={`iv${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                           {isUpdate ? <Pencil size={13} className="text-cyan-600 shrink-0 mt-0.5" /> : <CalendarClock size={13} className="text-cyan-500 shrink-0 mt-0.5" />}
                           <span><strong>내부 일정 {isUpdate ? '수정' : '추가'}</strong> {iv.date ? `${iv.date}` : ''}{iv.startTime ? ` ${iv.startTime}` : ''}{iv.category ? ` · ${iv.category}` : ''} · {iv.title || '제목?'}{iv.location ? ` @${iv.location}` : ''}{iv.participantNames?.length ? ` · ${isUpdate ? '+' : ''}${iv.participantNames.join(', ')}` : ''}{iv.reminder && iv.reminder !== 'off' ? ` · 🔔${REMINDER_TEXT[iv.reminder] ?? iv.reminder}` : ''}</span>
+                        </div>
+                      );
+                    })}
+                    {(m.sales ?? []).map((s, i) => {
+                      const isUpdate = (s.op ?? (s.id ? 'update' : 'add')) === 'update';
+                      const contact = [s.phone, s.email].filter(Boolean).join(' · ');
+                      return (
+                        <div key={`sl${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                          <PhoneCall size={13} className="text-blue-500 shrink-0 mt-0.5" />
+                          <span><strong>상담 {isUpdate ? '수정' : '기록'}</strong>{s.channel ? ` · ${SALES_CH_LABEL[s.channel] ?? s.channel}` : ''}{contact ? ` · ${contact}` : ''}{s.customerName ? ` · ${s.customerName}` : ''}{s.sentiment ? ` · ${SALES_SENT_LABEL[s.sentiment] ?? s.sentiment}` : ''}{s.content ? ` — ${s.content.slice(0, 30)}` : ''}{s.nasLink ? ' · 🔗NAS' : ''}</span>
                         </div>
                       );
                     })}

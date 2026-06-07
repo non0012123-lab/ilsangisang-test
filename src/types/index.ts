@@ -99,6 +99,8 @@ export interface AssistantUndo {
   requestIds?: string[];           // 어시스턴트로 생성한 업무 요청(되돌릴 때 삭제)
   internalEventIds?: string[];     // 어시스턴트로 생성한 내부 일정(되돌릴 때 삭제)
   updatedInternalPrev?: InternalEvent[]; // 어시스턴트로 수정한 내부 일정의 이전 상태(되돌릴 때 복원)
+  salesIds?: string[];             // 어시스턴트로 생성한 상담 기록(되돌릴 때 삭제)
+  updatedSalesPrev?: SalesEntry[]; // 어시스턴트로 수정한 상담의 이전 상태(되돌릴 때 복원)
   deletedAccounts: AccountEntry[];
   deletedSites: SiteEntry[];
   updatedAccountsPrev: AccountEntry[];
@@ -116,6 +118,7 @@ export interface AssistantMessage {
   sites?: AssistantSiteOp[];        // 홈페이지 목록 추가/수정/삭제
   requests?: AssistantProposalRequest[]; // 다른 담당자에게 보낼 업무 요청
   internalEvents?: AssistantProposalInternal[]; // 사내 내부 일정
+  sales?: AssistantProposalSales[]; // 영업관리 상담 기록 추가/수정
   accountLookups?: string[];        // 조회 답변에 복사 카드로 표시할 아이디 목록 id
   siteLookups?: string[];           // 조회 답변에 복사 카드로 표시할 홈페이지 id
   deletes?: string[];         // 삭제할 기존 일정 id
@@ -382,10 +385,28 @@ export interface SalesEntry {
   sentiment: SalesSentiment;
   status: SalesStatus;
   followUpDate?: string;   // 후속 예정일 YYYY-MM-DD (있으면 대시보드 알림)
+  nasLink?: string;        // 첨부/자료 NAS 링크(녹취·문의폼 캡처 등)
   result?: string;         // 결과/메모
   tags?: string[];         // 관심 제품/태그 (분석용)
   createdAt: number;
   updatedAt: number;
+}
+
+// AI 어시스턴트가 제안하는 상담 기록(추가/수정)
+export interface AssistantProposalSales {
+  op?: 'add' | 'update';
+  id?: string;            // 수정 시 기존 상담 id
+  consultedAt?: string;   // "YYYY-MM-DD HH:mm" 또는 "YYYY-MM-DD"
+  channel?: SalesChannel;
+  phone?: string;
+  email?: string;
+  customerName?: string;
+  content?: string;
+  sentiment?: SalesSentiment;
+  status?: SalesStatus;
+  followUpDate?: string;
+  nasLink?: string;
+  result?: string;
 }
 
 // 클라이언트별 수동 지정 보고 기간 (자동 주기와 별개로 추가 가능)

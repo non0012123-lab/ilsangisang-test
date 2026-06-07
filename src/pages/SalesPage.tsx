@@ -43,7 +43,7 @@ const fmtDateTime = (s: string) => s ? s.replace('T', ' ').slice(0, 16) : '-';
 type Form = Omit<SalesEntry, 'id' | 'handlerId' | 'handlerName' | 'createdAt' | 'updatedAt'>;
 const emptyForm = (): Form => ({
   consultedAt: nowLocal(), channel: 'phone', phone: '', email: '', customerName: '',
-  content: '', sentiment: 'neutral', status: 'new', followUpDate: '', result: '', tags: [],
+  content: '', sentiment: 'neutral', status: 'new', followUpDate: '', nasLink: '', result: '', tags: [],
 });
 
 export default function SalesPage() {
@@ -79,7 +79,7 @@ export default function SalesPage() {
     setForm({
       consultedAt: e.consultedAt, channel: e.channel, phone: e.phone ?? '', email: e.email ?? '',
       customerName: e.customerName ?? '', content: e.content, sentiment: e.sentiment, status: e.status,
-      followUpDate: e.followUpDate ?? '', result: e.result ?? '', tags: e.tags ?? [],
+      followUpDate: e.followUpDate ?? '', nasLink: e.nasLink ?? '', result: e.result ?? '', tags: e.tags ?? [],
     });
     setEditId(e.id); setShowForm(true);
   };
@@ -93,6 +93,7 @@ export default function SalesPage() {
       email: form.email?.trim() || undefined,
       customerName: form.customerName?.trim() || undefined,
       followUpDate: form.followUpDate || undefined,
+      nasLink: form.nasLink?.trim() || undefined,
       result: form.result?.trim() || undefined,
       id: editId ?? `sl-${now}-${Math.random().toString(36).slice(2, 6)}`,
       handlerId: prev?.handlerId ?? user?.id ?? '',
@@ -167,7 +168,10 @@ export default function SalesPage() {
                       {!e.phone && !e.email && '-'}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-gray-700">{e.customerName || '-'}</td>
-                    <td className="px-4 py-3 max-w-xs"><span className="line-clamp-2 text-gray-600">{e.content}</span></td>
+                    <td className="px-4 py-3 max-w-xs">
+                      <span className="line-clamp-2 text-gray-600">{e.content}</span>
+                      {e.nasLink && <a href={e.nasLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">🔗 NAS 링크</a>}
+                    </td>
                     <td className="px-4 py-3"><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${clsOf(SENTIMENTS, e.sentiment)}`}>{labelOf(SENTIMENTS, e.sentiment)}</span></td>
                     <td className="px-4 py-3"><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${clsOf(STATUSES, e.status)}`}>{labelOf(STATUSES, e.status)}</span></td>
                     <td className="px-4 py-3 whitespace-nowrap">
@@ -223,6 +227,7 @@ export default function SalesPage() {
                 </Field>
               </div>
               <Field label="후속 예정일 (선택)"><input type="date" value={form.followUpDate} onChange={e => setForm(f => ({ ...f, followUpDate: e.target.value }))} className={inputCls} /></Field>
+              <Field label="NAS 링크 (선택)"><input value={form.nasLink} onChange={e => setForm(f => ({ ...f, nasLink: e.target.value }))} placeholder="https://… (녹취·문의폼 캡처 등)" className={inputCls} /></Field>
               <Field label="결과/메모 (선택)"><textarea value={form.result} onChange={e => setForm(f => ({ ...f, result: e.target.value }))} rows={2} className={inputCls} /></Field>
             </div>
             <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-100">

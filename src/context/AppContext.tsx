@@ -121,6 +121,18 @@ export interface AiPlanJobInput {
 
 const nowMs = () => Date.now();
 
+// 상담 전화번호 정규화: 사용자가 010 을 빼고 말해도 010 을 붙이고, 휴대폰이면 010-XXXX-XXXX 로 포맷.
+//  • "23398893" → "010-2339-8893"  /  "1023398893" → "010-2339-8893"  /  "0212345678"(0 으로 시작=유선) → 그대로 숫자
+const normSalesPhone = (raw?: string): string | undefined => {
+  if (!raw) return undefined;
+  let d = raw.replace(/\D/g, '');
+  if (!d) return raw.trim() || undefined;
+  if (!d.startsWith('0')) d = `010${d}`;                 // 010 생략분 보정(0 으로 시작하지 않으면 휴대폰으로 간주)
+  if (d.length === 11 && d.startsWith('010')) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
+  if (d.length === 10 && d.startsWith('010')) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
+  return d;
+};
+
 // 로컬 캐시 헬퍼: Supabase 에 해당 테이블이 아직 없거나 일시적으로 닿지 않아도
 // 브라우저에 데이터가 남도록 한다(테이블이 생기면 Supabase 가 우선·공유 소스가 됨).
 const lsLoad = <T,>(key: string): T[] => {
@@ -303,6 +315,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const requestsRef = useRef(requests);
   useEffect(() => { requestsRef.current = requests; }, [requests]);
   useEffect(() => { lsSave(REQUESTS_LS_KEY, requests); }, [requests]);
+  // 영업관리(상담 로그) — 어시스턴트가 조회/수정할 때 최신 목록 참조용
+  const salesEntriesRef = useRef(salesEntries);
+  useEffect(() => { salesEntriesRef.current = salesEntries; }, [salesEntries]);
   // 단가표
   const priceTableRef = useRef(priceTable);
   useEffect(() => { priceTableRef.current = priceTable; }, [priceTable]);
@@ -866,6 +881,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return out;
     })();
+    // 영업관리: 권한자만 어시스턴트로 상담 조회/작성/수정 가능. 민감정보라 권한 없으면 보내지도 받지도 않는다.
+    const salesEnabled = u?.role === 'admin' || !!u?.salesAccess;
+    const salesContext = salesEnabled
+      ? salesEntriesRef.current.slice(0, 60).map(e => ({
+          id: e.id, consultedAt: e.consultedAt, handlerName: e.handlerName, channel: e.channel,
+          phone: e.phone, email: e.email, customerName: e.customerName,
+          content: (e.content ?? '').slice(0, 200), sentiment: e.sentiment, status: e.status,
+          followUpDate: e.followUpDate, nasLink: e.nasLink,
+        }))
+      : [];
     const history = (conversationsRef.current.find(c => c.id === convId)?.messages ?? []).map(m => ({ role: m.role, text: m.text }));
     mutateMessages(convId, prev => [...prev, { role: 'user', text: message }]);
     setAssistantLoading(true);
@@ -900,6 +925,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           accounts: accountContext,
           sites: siteContext,
           priceTable: priceContext,
+          salesEnabled,            // 영업관리 권한 여부 — true 일 때만 어시스턴트가 상담 기록을 다룬다
+          sales: salesContext,     // 권한자에게만 전달되는 기존 상담 목록(조회/수정용)
           entries: scoped.map(e => ({
             id: e.id, date: e.date, endDate: e.endDate ?? null,
             managerName: e.managerName, clientName: e.clientName,
@@ -927,6 +954,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sites: Array.isArray(data.sites) ? data.sites : [],
         requests: Array.isArray(data.requests) ? data.requests : [],
         internalEvents: Array.isArray(data.internalEvents) ? data.internalEvents : [],
+        sales: salesEnabled && Array.isArray(data.sales) ? data.sales : [], // 권한 없으면 무시
         accountLookups: Array.isArray(data.accountLookups) ? data.accountLookups.filter((x: unknown) => typeof x === 'string') : [],
         siteLookups: Array.isArray(data.siteLookups) ? data.siteLookups.filter((x: unknown) => typeof x === 'string') : [],
         deletes: Array.isArray(data.deletes) ? data.deletes.filter((d: unknown) => typeof d === 'string') : [],
@@ -974,6 +1002,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       entryIds: [], clientIds: [], vendorIds: [], handoverIds: [], deletedEntries: [], updatedPrev: [],
       accountIds: [], siteIds: [], requestIds: [], internalEventIds: [], updatedInternalPrev: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
       deletedClients: [], updatedClientsPrev: [], deletedHandovers: [],
+      salesIds: [], updatedSalesPrev: [],
     };
 
     const matchManager = (name?: string) => {
@@ -1258,6 +1287,58 @@ export function AppProvider({ children }: { children: ReactNode }) {
       count += 1;
     });
 
+    // 3) 영업관리(상담 기록) 추가/수정 — 권한자만(RLS 로 서버도 막지만 클라에서도 차단)
+    const salesAllowed = u?.role === 'admin' || !!u?.salesAccess;
+    (salesAllowed ? (msg.sales ?? []) : []).forEach((s, i) => {
+      const op = s.op ?? (s.id ? 'update' : 'add');
+      if (op === 'update') {
+        const cur = s.id ? salesEntriesRef.current.find(e => e.id === s.id) : undefined;
+        if (cur) {
+          const has = (k: keyof typeof s) => Object.prototype.hasOwnProperty.call(s, k);
+          undo.updatedSalesPrev!.push({ ...cur });
+          saveSalesEntry({
+            ...cur,
+            consultedAt: has('consultedAt') && s.consultedAt ? s.consultedAt : cur.consultedAt,
+            channel: has('channel') && s.channel ? s.channel : cur.channel,
+            phone: has('phone') ? (normSalesPhone(s.phone) ?? cur.phone) : cur.phone,
+            email: has('email') ? (s.email?.trim() || undefined) : cur.email,
+            customerName: has('customerName') ? (s.customerName?.trim() || undefined) : cur.customerName,
+            content: has('content') && (s.content ?? '').trim() ? s.content!.trim() : cur.content,
+            sentiment: has('sentiment') && s.sentiment ? s.sentiment : cur.sentiment,
+            status: has('status') && s.status ? s.status : cur.status,
+            followUpDate: has('followUpDate') ? (s.followUpDate || undefined) : cur.followUpDate,
+            nasLink: has('nasLink') ? (s.nasLink?.trim() || undefined) : cur.nasLink,
+            result: has('result') ? (s.result?.trim() || undefined) : cur.result,
+            updatedAt: nowMs(),
+          });
+          count += 1;
+          return;
+        }
+        // 매칭 실패 → 신규로 폴백
+      }
+      if (!(s.content ?? '').trim()) return;
+      const now = nowMs();
+      const ev: SalesEntry = {
+        id: `sl-${now}-${i}-${Math.random().toString(36).slice(2, 5)}`,
+        consultedAt: s.consultedAt || `${todayStr()}`,
+        handlerId: selfId, handlerName: u?.name ?? '',
+        channel: s.channel ?? (s.email ? 'inquiry' : 'phone'),
+        phone: normSalesPhone(s.phone),
+        email: s.email?.trim() || undefined,
+        customerName: s.customerName?.trim() || undefined,
+        content: s.content!.trim(),
+        sentiment: s.sentiment ?? 'neutral',
+        status: s.status ?? 'new',
+        followUpDate: s.followUpDate || undefined,
+        nasLink: s.nasLink?.trim() || undefined,
+        result: s.result?.trim() || undefined,
+        createdAt: now, updatedAt: now,
+      };
+      saveSalesEntry(ev);
+      undo.salesIds!.push(ev.id);
+      count += 1;
+    });
+
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
     // AI 어시스턴트로 반영된 변경도 알림. 무엇을 했는지 핵심을 보여준다(일정 → 요청 → 그 외 순).
     if (count > 0) {
@@ -1280,7 +1361,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       pushNotification({ type: 'assistant', title: 'AI 어시스턴트 적용 완료', body, link });
     }
-  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, saveInternalEvent, saveInternalCategory, pushNotification, pushStickyNotice, mutateMessages]);
+  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, saveInternalEvent, saveInternalCategory, saveSalesEntry, pushNotification, pushStickyNotice, mutateMessages]);
 
   // 직전 적용을 되돌린다(생성한 레코드 제거 + 삭제/수정한 일정 복원)
   const undoAssistantProposal = useCallback((index: number) => {
@@ -1309,8 +1390,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (u.requestIds ?? []).forEach(id => removeRequest(id)); // 보낸 업무 요청 취소
     (u.internalEventIds ?? []).forEach(id => removeInternalEvent(id)); // 생성한 내부 일정 취소
     (u.updatedInternalPrev ?? []).forEach(ev => saveInternalEvent(ev)); // 수정한 내부 일정 복원
+    (u.salesIds ?? []).forEach(id => removeSalesEntry(id)); // 생성한 상담 기록 취소
+    (u.updatedSalesPrev ?? []).forEach(e => saveSalesEntry(e)); // 수정한 상담 복원
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, undone: true } : m));
-  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, removeRequest, removeInternalEvent, saveInternalEvent, mutateMessages]);
+  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, removeRequest, removeInternalEvent, saveInternalEvent, removeSalesEntry, saveSalesEntry, mutateMessages]);
 
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
