@@ -14,7 +14,8 @@
 //    실제 Windows 빌드에서 컴파일/동작 검증이 필요하다(개발 환경에 Rust 가 없어 사전 검증 불가).
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use image::RgbaImage;
+use image::codecs::png::PngEncoder;
+use image::{ColorType, ImageEncoder, RgbaImage};
 use std::time::Duration;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -104,10 +105,12 @@ fn capture_browser_image() -> Result<RgbaImage, String> {
 }
 
 fn png_base64(img: &RgbaImage) -> Result<String, String> {
-    let mut buf = std::io::Cursor::new(Vec::new());
-    img.write_to(&mut buf, image::ImageFormat::Png)
+    // PngEncoder 로 직접 인코딩 — write_to/ImageFormat 은 image 버전마다 시그니처가 달라 회피.
+    let mut bytes: Vec<u8> = Vec::new();
+    PngEncoder::new(&mut bytes)
+        .write_image(img.as_raw(), img.width(), img.height(), ColorType::Rgba8)
         .map_err(|e| e.to_string())?;
-    Ok(STANDARD.encode(buf.into_inner()))
+    Ok(STANDARD.encode(bytes))
 }
 
 // 전체 캡처(현재 보이는 화면) → PNG base64. 영역 캡처는 프런트에서 이 결과를 크롭한다.
@@ -163,15 +166,18 @@ pub async fn capture_browser_scroll(app: tauri::AppHandle) -> Result<String, Str
     .map_err(|e| e.to_string())?
 }
 
-// 프레임들을 세로로 이어붙인다(폭은 첫 프레임 기준).
+// 프레임들을 세로로 이어붙인다(폭은 가장 넓은 프레임 기준).
+//  픽셀을 직접 복사 — imageops::replace 는 image 버전마다 좌표 타입(u32/i64)이 달라 회피.
 fn stitch_vertical(frames: &[RgbaImage]) -> RgbaImage {
     let width = frames.iter().map(|f| f.width()).max().unwrap_or(0);
     let total_h: u32 = frames.iter().map(|f| f.height()).sum();
     let mut canvas = RgbaImage::new(width, total_h);
-    let mut y = 0i64;
+    let mut y_off: u32 = 0;
     for f in frames {
-        image::imageops::replace(&mut canvas, f, 0, y);
-        y += f.height() as i64;
+        for (px, py, pixel) in f.enumerate_pixels() {
+            canvas.put_pixel(px, py + y_off, *pixel);
+        }
+        y_off += f.height();
     }
     canvas
 }
