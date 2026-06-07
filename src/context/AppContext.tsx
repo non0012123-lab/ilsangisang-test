@@ -798,17 +798,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const siteContext = siteEntriesRef.current.map(s => ({
       id: s.id, name: s.name, url: s.url, username: s.username, description: s.description,
     }));
-    // 단가표: "○○ 단가 얼마야?", "10만원 이하 패키지 뭐 있어?" 류 질문의 근거.
-    //  • 모든 상품·옵션의 이름+가격은 항상 보낸다(예산 때문에 옵션이 통째로 누락되면 "항목 없음"이 됨).
-    //  • 패키지 옵션엔 그룹 제목(g)도 실어, 옵션명이 "비기너/스탠다드"처럼 패키지명을 안 담아도 매칭되게 한다.
-    //  • 설명(desc)은 무거우니 단가 관련 질문일 때만 붙이고, 그때도 패키지 설명을 우선 채운다
-    //    ("결제 전 문의" 같은 주의문구가 패키지에 많기 때문). 전체 글자수 예산으로 토큰을 보호한다.
+    // 단가표 컨텍스트는 무거우므로(옵션 ~1,900개) 한 요청이 분당 토큰 한도(429)를 넘지 않게 절제한다.
+    //  • 단가 관련 질문일 때만 보낸다(일정/요청 등 무관한 질문엔 아예 안 보냄).
+    //  • 질문에 등장한 단어로 관련 상품만 추려 그 상품들만 옵션·설명까지 상세히 보낸다.
+    //  • 매칭이 없으면(예: "10만원 이하 패키지") 전체를 이름·카테고리·최저가만 간략히 보낸다(옵션 생략 → 가벼움).
     const isPricingQ = /단가|가격|견적|얼마|얼만|비용|패키지|금액|원짜리|price/i.test(message);
+    // 점수용 토큰: 2글자 이상, 불용어(단가/패키지/알려줘 등 모든 상품에 걸리거나 의미 없는 말) 제외
+    const STOP = new Set(['단가', '가격', '견적', '얼마', '얼만', '비용', '금액', '패키지', '단일', '상품', '알려줘', '알려', '있어', '있나', '있는', '뭐가', '이하', '이상', '정도', '해줘', '확인', '추천', 'price']);
+    const tokens = [...new Set((message.toLowerCase().match(/[가-힣a-z0-9]{2,}/g) ?? []).filter(t => !STOP.has(t)))];
+    const haystack = (p: typeof priceTableRef.current[number]) =>
+      `${p.name} ${p.category} ${p.groups.map(g => `${g.title} ${g.options.map(o => o.name).join(' ')}`).join(' ')}`.toLowerCase();
     const priceContext = (() => {
+      if (!isPricingQ) return [];
       type Opt = { n: string; p: number; pkg: boolean; g?: string; d?: string };
+      // 1) 질문 단어로 관련 상품 추리기
+      const scored = tokens.length
+        ? priceTableRef.current
+            .map(p => ({ p, score: tokens.reduce((s, t) => s + (haystack(p).includes(t) ? 1 : 0), 0) }))
+            .filter(x => x.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 30)
+            .map(x => x.p)
+        : [];
+      // 2) 매칭 없으면 전체를 간략(이름·카테고리·최저가)으로 — 가벼워서 429 위험 없음
+      if (!scored.length) {
+        return priceTableRef.current.map(p => ({ name: p.name, category: p.category, repPrice: p.repPrice, options: [] as Opt[] }));
+      }
+      // 3) 추린 상품은 옵션·설명까지 상세히(상품 수가 적어 안전). 패키지 설명 우선.
       const out: { name: string; category: string; repPrice: number; options: Opt[] }[] = [];
       const descTargets: { opt: Opt; desc: string; pkg: boolean }[] = [];
-      for (const prod of priceTableRef.current) {
+      for (const prod of scored) {
         const options: Opt[] = [];
         for (const grp of prod.groups) {
           for (const o of grp.options) {
@@ -820,15 +839,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         out.push({ name: prod.name, category: prod.category, repPrice: prod.repPrice, options });
       }
-      if (isPricingQ) {
-        let budget = 130000; // 설명 전체 글자수 상한
-        // 패키지 설명 먼저, 그 다음 단일 설명 — 예산이 단일에서 끊겨도 패키지 설명은 보존된다.
-        for (const t of [...descTargets.filter(t => t.pkg), ...descTargets.filter(t => !t.pkg)]) {
-          const d = t.desc.slice(0, 400); // 주의문구가 끝에 있는 경우가 많아 넉넉히 남긴다
-          if (budget - d.length <= 0) continue;
-          t.opt.d = d;
-          budget -= d.length;
-        }
+      let budget = 80000; // 설명 전체 글자수 상한(추린 상품이라 충분)
+      for (const t of [...descTargets.filter(t => t.pkg), ...descTargets.filter(t => !t.pkg)]) {
+        const d = t.desc.slice(0, 400);
+        if (budget - d.length <= 0) continue;
+        t.opt.d = d;
+        budget -= d.length;
       }
       return out;
     })();
