@@ -16,3 +16,17 @@ export async function hideCurrentWindow(): Promise<void> {
     console.warn('[tauri] 창 숨기기 실패:', e);
   }
 }
+
+// 어시스턴트 퀵바 기본 크기(tauri.conf.json 의 assistant 창과 동일하게 유지)
+export const ASSISTANT_DEFAULT_SIZE = { width: 560, height: 540 };
+
+// 현재 창을 기본 크기로 되돌린다(어시스턴트 퀵바 "원래 크기" 버튼용).
+export async function resetCurrentWindowSize(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const { getCurrentWindow, LogicalSize } = await import('@tauri-apps/api/window');
+    await getCurrentWindow().setSize(new LogicalSize(ASSISTANT_DEFAULT_SIZE.width, ASSISTANT_DEFAULT_SIZE.height));
+  } catch (e) {
+    console.warn('[tauri] 창 크기 초기화 실패:', e);
+  }
+}
