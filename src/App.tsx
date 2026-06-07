@@ -20,7 +20,8 @@ import SiteListPage from './pages/SiteListPage';
 import RequestsPage from './pages/RequestsPage';
 import InternalSchedulePage from './pages/InternalSchedulePage';
 import PricingPage from './pages/PricingPage';
-import BrowserCapturePage from './pages/BrowserCapturePage';
+import CapturePage from './pages/CapturePage';
+import CaptureListener from './components/CaptureListener';
 import SalesPage from './pages/SalesPage';
 import AssistantWidgetPage from './pages/AssistantWidgetPage';
 import PendingApprovalPage from './pages/PendingApprovalPage';
@@ -106,7 +107,7 @@ function AppRoutes() {
       <Route path="/requests" element={<ProtectedRoute><RequestsPage /></ProtectedRoute>} />
       <Route path="/internal" element={<ProtectedRoute><InternalSchedulePage /></ProtectedRoute>} />
       <Route path="/pricing" element={<ProtectedRoute><PricingPage /></ProtectedRoute>} />
-      <Route path="/browser" element={<ProtectedRoute><BrowserCapturePage /></ProtectedRoute>} />
+      <Route path="/capture" element={<ProtectedRoute><CapturePage /></ProtectedRoute>} />
       <Route path="/sales" element={<ProtectedRoute requireSales><SalesPage /></ProtectedRoute>} />
       {/* 데스크톱 앱 트레이용 어시스턴트 퀵바(별도 webview 창) — 네비/헤더 없이 어시스턴트만 */}
       <Route path="/widget" element={<ProtectedRoute><AssistantWidgetPage /></ProtectedRoute>} />
@@ -129,6 +130,7 @@ export default function App() {
       <AuthProvider>
         <AppProvider>
           <AppRoutes />
+          <CaptureListener />
         </AppProvider>
       </AuthProvider>
     </BrowserRouter>

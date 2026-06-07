@@ -23,7 +23,7 @@ const mainNav: NavItem[] = [
   { to: '/accounts', icon: <KeyRound size={18} />, label: '아이디 목록' },
   { to: '/sites', icon: <Globe size={18} />, label: '홈페이지 목록' },
   { to: '/pricing', icon: <Tags size={18} />, label: '단가표' },
-  { to: '/browser', icon: <Camera size={18} />, label: '내장 브라우저·캡처' },
+  { to: '/capture', icon: <Camera size={18} />, label: '화면 캡처' },
 ];
 
 const categoryNav: NavItem[] = [
