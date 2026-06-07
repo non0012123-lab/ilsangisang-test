@@ -33,6 +33,7 @@ interface ProfileRow {
   position: string | null;
   client_id: string | null;
   status: string | null;
+  sales_access: boolean | null;
 }
 
 function toAuthUser(row: ProfileRow, fallbackEmail?: string): AuthUser {
@@ -46,6 +47,7 @@ function toAuthUser(row: ProfileRow, fallbackEmail?: string): AuthUser {
     position: row.position ?? undefined,
     clientId: row.client_id ?? undefined,
     status: (row.status as AccountStatus) ?? 'active',
+    salesAccess: row.sales_access ?? false,
   };
 }
 

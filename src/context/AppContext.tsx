@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry } from '../types';
 import { USERS } from '../data/mockData';
 import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
 import type { ReminderOption } from '../types';
@@ -74,6 +74,11 @@ interface AppContextType {
   removeInternalEvent: (id: string) => void;
   saveInternalCategory: (cat: InternalCategory) => void;
   removeInternalCategory: (id: string) => void;
+  // 영업관리(상담 로그) — 권한자만 접근. 민감정보라 localStorage 캐시 없이 Supabase(RLS)만 사용.
+  salesEntries: SalesEntry[];
+  salesAccess: boolean;                         // 현재 사용자의 영업관리 접근 권한(admin 또는 sales_access)
+  saveSalesEntry: (entry: SalesEntry) => void;
+  removeSalesEntry: (id: string) => void;
   // 단가표(외부 마케팅 쇼핑몰에서 수집한 패키지/단일 상품 가격) — '새로고침'으로 재수집.
   priceTable: PriceProduct[];
   priceRefreshing: boolean;                 // 수집 진행 중 여부
@@ -213,6 +218,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [conversations, activeConversationId],
   );
   const [requests, setRequests] = useState<WorkRequest[]>(() => lsLoad<WorkRequest>(REQUESTS_LS_KEY));
+  // 영업관리(상담 로그) — 민감정보라 메모리+Supabase 만(로컬 캐시 없음). RLS 로 권한자만 데이터 수신.
+  const [salesEntries, setSalesEntries] = useState<SalesEntry[]>([]);
+  const salesAccess = user?.role === 'admin' || !!user?.salesAccess;
   // 단가표(외부 수집) — 로컬 캐시 + Supabase 동기화. 수집은 '새로고침' 버튼이 트리거.
   const [priceTable, setPriceTable] = useState<PriceProduct[]>(() => lsLoad<PriceProduct>(PRICE_TABLE_LS_KEY));
   const [priceRefreshing, setPriceRefreshing] = useState(false);
@@ -528,6 +536,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     () => priceTable.reduce((mx, p) => Math.max(mx, p.updatedAt || 0), 0) || null,
     [priceTable],
   );
+
+  // ── 영업관리(상담 로그) ──
+  const saveSalesEntry = useCallback((entry: SalesEntry) => {
+    setSalesEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [entry, ...prev]);
+    persistOne('sales_entries', entry);
+  }, []);
+  const removeSalesEntry = useCallback((id: string) => {
+    setSalesEntries(prev => prev.filter(e => e.id !== id));
+    persistDelete('sales_entries', id);
+  }, []);
 
   // ── 클라이언트 ──
   const saveClient = useCallback((client: Client) => {
@@ -1350,6 +1368,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     load<Report>('reports').then(guard(rep => syncLocalFirst('reports', rep, reportsRef.current, setReports)));
     load<WorkRequest>('requests').then(guard(reqs => syncLocalFirst('requests', reqs, requestsRef.current, setRequests)));
     load<PriceProduct>('price_table').then(guard(rows => syncLocalFirst('price_table', rows, priceTableRef.current, setPriceTable)));
+    // 영업관리: 권한 없으면 RLS 가 빈 결과를 주므로 항상 시도해도 안전(로컬 캐시 없음).
+    load<SalesEntry>('sales_entries').then(guard(rows => { if (rows) setSalesEntries(rows); }));
     load<InternalEvent>('internal_events').then(guard(evs => syncLocalFirst('internal_events', evs, internalEventsRef.current, setInternalEvents)));
     // 카테고리: 원격에 있으면 사용, 없으면 기본값(로컬 상태) 1회 backfill
     load<InternalCategory>('internal_categories').then(guard(cats => syncLocalFirst('internal_categories', cats, internalCategoriesRef.current, setInternalCategories)));
@@ -1510,6 +1530,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
       internalEvents, internalCategories, saveInternalEvent, removeInternalEvent, saveInternalCategory, removeInternalCategory,
+      salesEntries, salesAccess, saveSalesEntry, removeSalesEntry,
       priceTable, priceRefreshing, priceProgress, priceUpdatedAt, refreshPriceTable,
       requests, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
       stickyNotices, dismissStickyNotice,

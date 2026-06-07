@@ -18,6 +18,7 @@ interface Profile {
   position: string | null;
   client_id: string | null;
   status: 'active' | 'suspended';
+  sales_access: boolean | null;
   created_at: string;
 }
 
@@ -80,8 +81,8 @@ export default function ApprovalsPage() {
     setBusyId(null);
   };
 
-  // 부서/직함/직책 지정 (role 이 아니므로 권한변경 트리거 영향 없음)
-  const updateField = async (id: string, patch: Partial<Pick<Profile, 'department' | 'title' | 'position'>>) => {
+  // 부서/직함/직책/영업관리권한 지정 (role 이 아니므로 권한변경 트리거 영향 없음)
+  const updateField = async (id: string, patch: Partial<Pick<Profile, 'department' | 'title' | 'position' | 'sales_access'>>) => {
     if (!supabase) return;
     setBusyId(id); setError('');
     const { error } = await supabase.from('profiles').update(patch).eq('id', id);
@@ -189,7 +190,7 @@ export default function ApprovalsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
-                    {['이름', '이메일', '팀', '직함', '직책', '역할', '연결 클라이언트', '상태', '관리'].map(h => (
+                    {['이름', '이메일', '팀', '직함', '직책', '역할', '영업관리', '연결 클라이언트', '상태', '관리'].map(h => (
                       <th key={h} className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -220,6 +221,18 @@ export default function ApprovalsPage() {
                           <option value="client">클라이언트</option>
                           <option value="admin">관리자</option>
                         </select>
+                      </td>
+                      <td className="px-4 py-3">
+                        {p.role === 'admin' ? (
+                          <span className="text-xs text-emerald-600 font-semibold" title="관리자는 항상 접근 가능">항상</span>
+                        ) : (
+                          <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs text-gray-600">
+                            <input type="checkbox" checked={!!p.sales_access} disabled={busyId === p.id}
+                              onChange={e => updateField(p.id, { sales_access: e.target.checked })}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                            허용
+                          </label>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {p.role === 'client' ? (

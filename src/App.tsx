@@ -21,6 +21,7 @@ import RequestsPage from './pages/RequestsPage';
 import InternalSchedulePage from './pages/InternalSchedulePage';
 import PricingPage from './pages/PricingPage';
 import BrowserCapturePage from './pages/BrowserCapturePage';
+import SalesPage from './pages/SalesPage';
 import AssistantWidgetPage from './pages/AssistantWidgetPage';
 import PendingApprovalPage from './pages/PendingApprovalPage';
 import SuspendedPage from './pages/SuspendedPage';
@@ -46,7 +47,7 @@ function FullScreenLoader() {
   );
 }
 
-function ProtectedRoute({ children, allowClient = false, adminOnly = false }: { children: React.ReactNode; allowClient?: boolean; adminOnly?: boolean }) {
+function ProtectedRoute({ children, allowClient = false, adminOnly = false, requireSales = false }: { children: React.ReactNode; allowClient?: boolean; adminOnly?: boolean; requireSales?: boolean }) {
   const { user, loading } = useAuth();
   if (loading) return <FullScreenLoader />;
   if (!user) return <Navigate to="/login" replace />;
@@ -55,6 +56,8 @@ function ProtectedRoute({ children, allowClient = false, adminOnly = false }: { 
   // 승인 전(pending)에는 어떤 내부 화면에도 접근 불가
   if (user.role === 'pending') return <Navigate to="/pending" replace />;
   if (adminOnly && user.role !== 'admin') return <Navigate to="/dashboard" replace />;
+  // 영업관리: 관리자 또는 sales_access 권한자만
+  if (requireSales && user.role !== 'admin' && !user.salesAccess) return <Navigate to="/dashboard" replace />;
   if (!allowClient && user.role === 'client') return <Navigate to="/client-portal" replace />;
   if (allowClient && user.role !== 'client') return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
@@ -104,6 +107,7 @@ function AppRoutes() {
       <Route path="/internal" element={<ProtectedRoute><InternalSchedulePage /></ProtectedRoute>} />
       <Route path="/pricing" element={<ProtectedRoute><PricingPage /></ProtectedRoute>} />
       <Route path="/browser" element={<ProtectedRoute><BrowserCapturePage /></ProtectedRoute>} />
+      <Route path="/sales" element={<ProtectedRoute requireSales><SalesPage /></ProtectedRoute>} />
       {/* 데스크톱 앱 트레이용 어시스턴트 퀵바(별도 webview 창) — 네비/헤더 없이 어시스턴트만 */}
       <Route path="/widget" element={<ProtectedRoute><AssistantWidgetPage /></ProtectedRoute>} />
       {/* 인수인계는 클라이언트 관리로 통합됨 — 기존 링크/북마크 호환용 리다이렉트 */}

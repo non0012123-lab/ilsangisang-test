@@ -149,6 +149,7 @@ export interface AuthUser {
   position?: string;    // 직책
   clientId?: string;
   status?: AccountStatus;   // 'suspended' 면 내부 접근 차단
+  salesAccess?: boolean;    // 영업관리(상담 로그) 게시판 접근 권한 — 관리자가 사람별로 부여
 }
 
 // 첨부 이미지 종류: 'design'=시안/결과물(그리드로 작게), 'insight'=인사이트 캡처(글씨·숫자·그래프 → 크게·잘림없이)
@@ -359,6 +360,32 @@ export interface PriceProduct {
   repPrice: number;  // 대표가 = 판매중 옵션 중 최저가(메인 화면 "○원~" 와 동일)
   groups: PriceGroup[];
   updatedAt: number; // 수집 시각(ms)
+}
+
+// ── 영업관리 (상담 로그) ───────────────────────────────
+// 회사 공용 전화/문의폼 상담을 누가 응대했고 결과가 어땠는지 기록한다.
+//  • 민감정보(고객 전화/이메일)라 권한(profiles.sales_access)이 있는 사람만 보고, Supabase RLS 로 서버 차단.
+//  • 다른 데이터와 달리 localStorage 캐시는 두지 않는다(공용 PC 에 고객정보가 남지 않도록).
+export type SalesChannel = 'phone' | 'inquiry' | 'etc';        // 전화 / 문의폼(이메일) / 기타
+export type SalesSentiment = 'very_positive' | 'positive' | 'neutral' | 'negative' | 'very_negative';
+export type SalesStatus = 'new' | 'in_progress' | 'done' | 'hold'; // 신규(미처리)/진행중/완료/보류
+export interface SalesEntry {
+  id: string;
+  consultedAt: string;     // 상담 일시 (ISO 또는 YYYY-MM-DD HH:mm)
+  handlerId: string;       // 응대자(전화 받은 사람) profiles.id
+  handlerName: string;
+  channel: SalesChannel;
+  phone?: string;          // 전화번호 (전화 상담)
+  email?: string;          // 이메일 (문의폼/이메일 상담)
+  customerName?: string;   // 고객/업체명
+  content: string;         // 상담 내용
+  sentiment: SalesSentiment;
+  status: SalesStatus;
+  followUpDate?: string;   // 후속 예정일 YYYY-MM-DD (있으면 대시보드 알림)
+  result?: string;         // 결과/메모
+  tags?: string[];         // 관심 제품/태그 (분석용)
+  createdAt: number;
+  updatedAt: number;
 }
 
 // 클라이언트별 수동 지정 보고 기간 (자동 주기와 별개로 추가 가능)
