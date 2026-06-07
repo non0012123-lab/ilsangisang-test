@@ -85,7 +85,7 @@ interface CtxPriceProduct {
   name?: string;
   category?: string;
   repPrice?: number;  // 대표가(최저가)
-  options?: { n?: string; p?: number; pkg?: boolean; d?: string }[]; // n=옵션명, p=가격(원), pkg=패키지 여부, d=설명(주의문구 포함)
+  options?: { n?: string; p?: number; pkg?: boolean; g?: string; d?: string }[]; // n=옵션명, p=가격(원), pkg=패키지 여부, g=패키지(그룹)명, d=설명(주의문구 포함)
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -229,7 +229,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       const opts = (Array.isArray(p.options) ? p.options : [])
         .map(o => {
           const desc = (o.d ?? '').replace(/\s*\n\s*/g, ' / ').trim();
-          return `  · ${o.pkg ? '[패키지] ' : ''}${o.n ?? '-'}: ${won(o.p)}${desc ? `\n    └ 설명: ${desc}` : ''}`;
+          const label = o.g ? `${o.g} – ${o.n ?? '-'}` : (o.n ?? '-'); // 패키지면 "패키지명 – 옵션명"
+          return `  · ${o.pkg ? '[패키지] ' : ''}${label}: ${won(o.p)}${desc ? `\n    └ 설명: ${desc}` : ''}`;
         })
         .join('\n');
       return `■ ${p.name}${p.category ? ` (${p.category})` : ''} — 최저가 ${won(p.repPrice)}${opts ? `\n${opts}` : ''}`;

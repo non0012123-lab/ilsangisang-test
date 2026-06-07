@@ -799,26 +799,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       id: s.id, name: s.name, url: s.url, username: s.username, description: s.description,
     }));
     // 단가표: "○○ 단가 얼마야?", "10만원 이하 패키지 뭐 있어?" 류 질문의 근거.
-    // 옵션 설명(desc)에 "결제 전 문의" 같은 주의 문구가 있어 가격과 함께 보내야 한다.
-    // 설명이 길어 프롬프트가 비대해지지 않도록, 옵션당 설명을 자르고 전체를 글자수 예산으로 제한한다.
+    //  • 모든 상품·옵션의 이름+가격은 항상 보낸다(예산 때문에 옵션이 통째로 누락되면 "항목 없음"이 됨).
+    //  • 패키지 옵션엔 그룹 제목(g)도 실어, 옵션명이 "비기너/스탠다드"처럼 패키지명을 안 담아도 매칭되게 한다.
+    //  • 설명(desc)은 무거우니 단가 관련 질문일 때만 붙이고, 그때도 패키지 설명을 우선 채운다
+    //    ("결제 전 문의" 같은 주의문구가 패키지에 많기 때문). 전체 글자수 예산으로 토큰을 보호한다.
+    const isPricingQ = /단가|가격|견적|얼마|얼만|비용|패키지|금액|원짜리|price/i.test(message);
     const priceContext = (() => {
-      type Opt = { n: string; p: number; pkg: boolean; d?: string };
+      type Opt = { n: string; p: number; pkg: boolean; g?: string; d?: string };
       const out: { name: string; category: string; repPrice: number; options: Opt[] }[] = [];
-      let chars = 70000; // 전체 단가 컨텍스트 글자수 상한(토큰 보호)
+      const descTargets: { opt: Opt; desc: string; pkg: boolean }[] = [];
       for (const prod of priceTableRef.current) {
-        const opts: Opt[] = [];
-        for (const g of prod.groups) {
-          for (const o of g.options) {
-            const d = o.desc ? o.desc.slice(0, 300) : undefined; // 옵션당 설명 길이 제한
-            const cost = o.name.length + (d?.length ?? 0) + 16;
-            if (chars - cost <= 0) break;
-            chars -= cost;
-            opts.push(d ? { n: o.name, p: o.price, pkg: g.isPackage, d } : { n: o.name, p: o.price, pkg: g.isPackage });
+        const options: Opt[] = [];
+        for (const grp of prod.groups) {
+          for (const o of grp.options) {
+            const opt: Opt = { n: o.name, p: o.price, pkg: grp.isPackage };
+            if (grp.isPackage && grp.title && grp.title !== o.name) opt.g = grp.title;
+            options.push(opt);
+            if (o.desc) descTargets.push({ opt, desc: o.desc, pkg: grp.isPackage });
           }
-          if (chars <= 0) break;
         }
-        out.push({ name: prod.name, category: prod.category, repPrice: prod.repPrice, options: opts });
-        if (chars <= 0) break;
+        out.push({ name: prod.name, category: prod.category, repPrice: prod.repPrice, options });
+      }
+      if (isPricingQ) {
+        let budget = 130000; // 설명 전체 글자수 상한
+        // 패키지 설명 먼저, 그 다음 단일 설명 — 예산이 단일에서 끊겨도 패키지 설명은 보존된다.
+        for (const t of [...descTargets.filter(t => t.pkg), ...descTargets.filter(t => !t.pkg)]) {
+          const d = t.desc.slice(0, 400); // 주의문구가 끝에 있는 경우가 많아 넉넉히 남긴다
+          if (budget - d.length <= 0) continue;
+          t.opt.d = d;
+          budget -= d.length;
+        }
       }
       return out;
     })();
