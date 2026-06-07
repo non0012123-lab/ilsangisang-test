@@ -31,7 +31,10 @@ const EXAMPLES = [
   '새 업체 "그린마취통증의학과" 등록하고 인수인계 문서도 만들어줘',
 ];
 
-export default function DashboardAssistant() {
+// variant='widget' : 데스크톱 트레이 퀵바용 미니멀 모드 — 헤더·대화목록·예시·지난 말풍선을 숨기고
+//   입력창 + "방금 입력에 대한 결과 한 칸"만 보여준다(등록=확인문구/적용, 조회=답변).
+export default function DashboardAssistant({ variant = 'full' }: { variant?: 'full' | 'widget' } = {}) {
+  const isWidget = variant === 'widget';
   const {
     entries, accounts, siteEntries, assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
     conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
@@ -86,6 +89,7 @@ export default function DashboardAssistant() {
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col">
+      {!isWidget && (
       <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-50">
         <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center text-white shrink-0">
           <Sparkles size={15} />
@@ -100,9 +104,11 @@ export default function DashboardAssistant() {
           <span className="hidden sm:inline">{convListOpen ? '목록 접기' : '대화목록'}</span>
         </button>
       </div>
+      )}
 
-      <div className="flex">
-        {/* 대화목록 + 새 채팅 */}
+      <div className={isWidget ? 'flex flex-1 min-h-0' : 'flex'}>
+        {/* 대화목록 + 새 채팅 (퀵바에선 숨김) */}
+        {!isWidget && (
         <aside className={`${convListOpen ? 'flex' : 'hidden'} w-40 sm:w-52 shrink-0 border-r border-gray-50 flex-col`} style={{ maxHeight: '30rem' }}>
           <button onClick={handleNew}
             className="m-2 flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl text-xs font-semibold bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors">
@@ -134,12 +140,20 @@ export default function DashboardAssistant() {
             )}
           </div>
         </aside>
+        )}
 
         {/* 채팅 영역 */}
-        <div className="flex-1 min-w-0 flex flex-col">
+        <div className="flex-1 min-w-0 flex flex-col min-h-0">
       {/* 대화 영역 */}
-      <div ref={scrollRef} className="px-4 py-4 space-y-3 overflow-y-auto" style={{ maxHeight: '24rem', minHeight: '8rem' }}>
+      <div ref={scrollRef} className={`px-4 py-4 space-y-3 overflow-y-auto ${isWidget ? 'flex-1 min-h-0' : ''}`} style={isWidget ? undefined : { maxHeight: '24rem', minHeight: '8rem' }}>
         {assistantMessages.length === 0 ? (
+          isWidget ? (
+            <div className="h-full flex flex-col items-center justify-center text-center px-4 gap-1.5">
+              <Sparkles size={22} className="text-purple-300" />
+              <p className="text-sm text-gray-400">요청·일정을 한 줄로 입력하세요</p>
+              <p className="text-[11px] text-gray-300">예: 내일 오후 3시 디자인팀 회의 잡아줘</p>
+            </div>
+          ) : (
           <div className="text-center py-4">
             <p className="text-sm text-gray-500 mb-3">무엇을 도와드릴까요? 예를 들어:</p>
             <div className="flex flex-col gap-2 max-w-xl mx-auto">
@@ -151,8 +165,12 @@ export default function DashboardAssistant() {
               ))}
             </div>
           </div>
+          )
         ) : (
-          assistantMessages.map((m, idx) => (
+          assistantMessages.map((m, idx) => {
+            // 퀵바(미니멀): 가장 최근 어시스턴트 결과 한 개만 표시 — 지난 말풍선·내 입력 에코는 숨김
+            if (isWidget && !(idx === assistantMessages.length - 1 && m.role === 'assistant')) return null;
+            return (
             <div key={idx} className={`group flex items-start gap-1 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] ${m.role === 'user' ? 'order-2' : ''}`}>
                 <div className={`rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${
@@ -351,12 +369,15 @@ export default function DashboardAssistant() {
                   </div>
                 )}
               </div>
+              {!isWidget && (
               <button onClick={() => deleteAssistantMessage(idx)} title="이 메시지 삭제"
                 className="opacity-0 group-hover:opacity-100 mt-1 p-1 rounded text-gray-300 hover:text-red-500 transition-opacity shrink-0">
                 <X size={12} />
               </button>
+              )}
             </div>
-          ))
+            );
+          })
         )}
 
         {assistantLoading && (

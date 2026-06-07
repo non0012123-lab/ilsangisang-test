@@ -38,7 +38,7 @@ export default function AssistantWidgetPage() {
 
       {/* 어시스턴트 본체 — 남은 높이 꽉 채움 */}
       <div className="flex-1 min-h-0 px-2 pb-2 [&>div]:h-full [&>div]:rounded-xl">
-        <DashboardAssistant />
+        <DashboardAssistant variant="widget" />
       </div>
     </div>
   );
