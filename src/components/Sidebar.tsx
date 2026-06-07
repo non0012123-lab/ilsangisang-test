@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, CalendarDays, Users, LogOut,
   Hash, PlayCircle, Globe, Video, Paintbrush, ChevronDown, ChevronRight,
-  BarChart3, MessageSquare, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound, Inbox, CalendarClock, Tags,
+  BarChart3, MessageSquare, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound, Inbox, CalendarClock, Tags, Camera,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -23,6 +23,7 @@ const mainNav: NavItem[] = [
   { to: '/accounts', icon: <KeyRound size={18} />, label: '아이디 목록' },
   { to: '/sites', icon: <Globe size={18} />, label: '홈페이지 목록' },
   { to: '/pricing', icon: <Tags size={18} />, label: '단가표' },
+  { to: '/browser', icon: <Camera size={18} />, label: '내장 브라우저·캡처' },
 ];
 
 const categoryNav: NavItem[] = [

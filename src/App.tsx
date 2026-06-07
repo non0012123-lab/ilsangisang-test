@@ -20,6 +20,7 @@ import SiteListPage from './pages/SiteListPage';
 import RequestsPage from './pages/RequestsPage';
 import InternalSchedulePage from './pages/InternalSchedulePage';
 import PricingPage from './pages/PricingPage';
+import BrowserCapturePage from './pages/BrowserCapturePage';
 import AssistantWidgetPage from './pages/AssistantWidgetPage';
 import PendingApprovalPage from './pages/PendingApprovalPage';
 import SuspendedPage from './pages/SuspendedPage';
@@ -102,6 +103,7 @@ function AppRoutes() {
       <Route path="/requests" element={<ProtectedRoute><RequestsPage /></ProtectedRoute>} />
       <Route path="/internal" element={<ProtectedRoute><InternalSchedulePage /></ProtectedRoute>} />
       <Route path="/pricing" element={<ProtectedRoute><PricingPage /></ProtectedRoute>} />
+      <Route path="/browser" element={<ProtectedRoute><BrowserCapturePage /></ProtectedRoute>} />
       {/* 데스크톱 앱 트레이용 어시스턴트 퀵바(별도 webview 창) — 네비/헤더 없이 어시스턴트만 */}
       <Route path="/widget" element={<ProtectedRoute><AssistantWidgetPage /></ProtectedRoute>} />
       {/* 인수인계는 클라이언트 관리로 통합됨 — 기존 링크/북마크 호환용 리다이렉트 */}
