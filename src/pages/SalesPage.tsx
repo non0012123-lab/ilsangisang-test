@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Plus, Search, X, Pencil, Trash2, Phone, Mail, PhoneCall, AlertCircle, CalendarClock } from 'lucide-react';
+import { Plus, Search, X, Pencil, Trash2, Phone, Mail, PhoneCall, AlertCircle, CalendarClock, Copy, Check } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -55,6 +55,17 @@ export default function SalesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<Form>(emptyForm);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // NAS 링크 복사(바로가기 X — 폴더경로라 탐색기에 붙여넣는 용도)
+  const copyLink = (id: string, link: string) => {
+    navigator.clipboard.writeText(link).catch(() => {});
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(c => (c === id ? null : c)), 1500);
+  };
+  // 표에서 척도·상태를 모달 없이 바로 변경
+  const patchSales = (e: SalesEntry, patch: Partial<SalesEntry>) =>
+    saveSalesEntry({ ...e, ...patch, updatedAt: Date.now() });
 
   // 요약 카드 지표
   const stats = useMemo(() => {
@@ -170,10 +181,27 @@ export default function SalesPage() {
                     <td className="px-4 py-3 whitespace-nowrap text-gray-700">{e.customerName || '-'}</td>
                     <td className="px-4 py-3 max-w-xs">
                       <span className="line-clamp-2 text-gray-600">{e.content}</span>
-                      {e.nasLink && <a href={e.nasLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">🔗 NAS 링크</a>}
+                      {e.nasLink && (
+                        <button onClick={() => copyLink(e.id, e.nasLink!)}
+                          className={`mt-0.5 inline-flex items-center gap-1 text-xs transition-colors ${copiedId === e.id ? 'text-green-600' : 'text-gray-500 hover:text-blue-600'}`}
+                          title={e.nasLink}>
+                          {copiedId === e.id ? <Check size={11} /> : <Copy size={11} />}
+                          {copiedId === e.id ? '복사됨' : 'NAS 링크 복사'}
+                        </button>
+                      )}
                     </td>
-                    <td className="px-4 py-3"><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${clsOf(SENTIMENTS, e.sentiment)}`}>{labelOf(SENTIMENTS, e.sentiment)}</span></td>
-                    <td className="px-4 py-3"><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${clsOf(STATUSES, e.status)}`}>{labelOf(STATUSES, e.status)}</span></td>
+                    <td className="px-4 py-3">
+                      <select value={e.sentiment} onChange={ev => patchSales(e, { sentiment: ev.target.value as SalesSentiment })}
+                        className={`text-xs font-semibold rounded-full pl-2 pr-1 py-0.5 border-0 cursor-pointer focus:ring-2 focus:ring-blue-500 ${clsOf(SENTIMENTS, e.sentiment)}`}>
+                        {SENTIMENTS.map(s => <option key={s.v} value={s.v}>{s.label}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <select value={e.status} onChange={ev => patchSales(e, { status: ev.target.value as SalesStatus })}
+                        className={`text-xs font-semibold rounded-full pl-2 pr-1 py-0.5 border-0 cursor-pointer focus:ring-2 focus:ring-blue-500 ${clsOf(STATUSES, e.status)}`}>
+                        {STATUSES.map(s => <option key={s.v} value={s.v}>{s.label}</option>)}
+                      </select>
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex items-center gap-1">
                         <button onClick={() => openEdit(e)} className="p-1.5 text-gray-400 hover:text-blue-600" title="수정"><Pencil size={15} /></button>
