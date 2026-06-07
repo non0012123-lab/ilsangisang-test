@@ -344,6 +344,7 @@ export interface InternalEvent {
 export interface PriceOption {
   name: string;   // 옵션명(예: "스토어 알림받기 100건")
   price: number;  // 가격(원)
+  desc?: string;  // 옵션 설명(소스에서 클릭 시 펼쳐지는 상세 — summary, 줄바꿈 정리됨)
 }
 export interface PriceGroup {
   title: string;       // 옵션 그룹명(예: "리워드 트래픽", "[Best] 리뷰+순위부스팅 패키지")

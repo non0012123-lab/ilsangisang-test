@@ -10,7 +10,7 @@
 const SOURCE_ORIGIN = 'https://shop.gpakorea.com';
 const UA = 'Mozilla/5.0 (compatible; ilsangisang-pricebot/1.0)';
 
-interface ScrapedOption { name: string; price: number }
+interface ScrapedOption { name: string; price: number; desc?: string }
 interface ScrapedGroup { title: string; isPackage: boolean; options: ScrapedOption[] }
 interface ScrapedProduct {
   id: string; name: string; category: string; url: string;
@@ -54,11 +54,23 @@ function firstMatch(html: string, re: RegExp): string {
   return m ? (m[1] ?? '').trim() : '';
 }
 
+// 옵션 설명(summary)은 <br> 로 줄바꿈된 HTML 조각이다 → 사람이 읽을 줄글로 정리한다.
+function htmlToText(s: string): string {
+  return s
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"')
+    .split('\n').map(l => l.trim()).join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 // 상품 페이지 HTML → 정규화된 상품 1개. 옵션이 하나도 없으면 null(상품 아님/판매중지).
 function parseProduct(id: string, html: string): ScrapedProduct | null {
   const arrText = extractBalancedArray(html, 'var pkgData');
   if (!arrText) return null;
-  let groupsRaw: Array<{ title?: string; pkg?: Record<string, { pkg_name?: string; price?: string; status?: string }> }>;
+  let groupsRaw: Array<{ title?: string; pkg?: Record<string, { pkg_name?: string; price?: string; status?: string; summary?: string }> }>;
   try { groupsRaw = JSON.parse(arrText); } catch { return null; }
 
   const groups: ScrapedGroup[] = [];
@@ -72,7 +84,8 @@ function parseProduct(id: string, html: string): ScrapedProduct | null {
       const price = Number(o?.price);
       // 판매중(status=1) + 가격>0 + 이름 있는 옵션만 단가표에 싣는다.
       if (o?.status === '1' && price > 0 && name) {
-        options.push({ name, price });
+        const desc = htmlToText(o?.summary || '');
+        options.push(desc ? { name, price, desc } : { name, price });
         prices.push(price);
       }
     }
