@@ -4,8 +4,6 @@
 //    · AI 어시스턴트 퀵바(Ctrl+Shift+Space 로 소환하는 별도 창).
 //  • 자동 로그인은 웹뷰가 세션(localStorage)을 보존하므로 추가 코드 없이 유지된다.
 
-mod capture; // 내장 브라우저 + 화면 캡처(전체/영역/스크롤) 명령
-
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -55,15 +53,6 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         // 네이티브 알림(웹뷰 웹알림 대신 OS 알림) — 원격 웹 페이지가 IPC 로 호출
         .plugin(tauri_plugin_notification::init())
-        // 저장 폴더 선택 대화상자(내장 브라우저 캡처 저장 위치 변경용)
-        .plugin(tauri_plugin_dialog::init())
-        // 내장 브라우저 + 캡처(전체/영역/스크롤) + 저장 명령
-        .invoke_handler(tauri::generate_handler![
-            capture::capture_primary_screen,
-            capture::save_capture,
-            capture::get_save_dir,
-            capture::set_save_dir,
-        ])
         // 창 위치/크기 기억 — 어시스턴트 퀵바를 듀얼모니터 원하는 자리에 두면 다음에도 그 자리.
         //  VISIBLE 은 저장하지 않음(퀵바는 항상 숨김 상태로 시작 → 단축키로 소환).
         .plugin(
@@ -82,26 +71,18 @@ pub fn run() {
                     Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
                 };
                 let toggle_sc = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
-                let capture_sc = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS);
-                let toggle_h = toggle_sc.clone();
-                let capture_h = capture_sc.clone();
+                let sc_for_handler = toggle_sc.clone(); // 핸들러로 move, 등록엔 원본 사용
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
                         .with_handler(move |app, sc, event| {
                             // 눌렀을 때(Pressed)만 처리 — 떼는 이벤트(Released)는 무시
-                            if event.state() != ShortcutState::Pressed {
-                                return;
-                            }
-                            if sc == &toggle_h {
+                            if sc == &sc_for_handler && event.state() == ShortcutState::Pressed {
                                 toggle_assistant(app);
-                            } else if sc == &capture_h {
-                                capture::capture_and_emit(app);
                             }
                         })
                         .build(),
                 )?;
                 app.global_shortcut().register(toggle_sc)?;
-                app.global_shortcut().register(capture_sc)?;
             }
 
             // 트레이 아이콘 + 우클릭 메뉴
