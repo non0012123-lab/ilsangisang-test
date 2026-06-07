@@ -799,20 +799,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       id: s.id, name: s.name, url: s.url, username: s.username, description: s.description,
     }));
     // 단가표: "○○ 단가 얼마야?", "10만원 이하 패키지 뭐 있어?" 류 질문의 근거.
-    // 옵션이 많아 프롬프트가 비대해지지 않도록 상품·옵션을 평탄화하고 전체 옵션 수를 제한한다.
+    // 옵션 설명(desc)에 "결제 전 문의" 같은 주의 문구가 있어 가격과 함께 보내야 한다.
+    // 설명이 길어 프롬프트가 비대해지지 않도록, 옵션당 설명을 자르고 전체를 글자수 예산으로 제한한다.
     const priceContext = (() => {
-      const out: { name: string; category: string; repPrice: number; options: { n: string; p: number; pkg: boolean }[] }[] = [];
-      let budget = 2500; // 전체 옵션 수 상한(토큰 보호)
+      type Opt = { n: string; p: number; pkg: boolean; d?: string };
+      const out: { name: string; category: string; repPrice: number; options: Opt[] }[] = [];
+      let chars = 70000; // 전체 단가 컨텍스트 글자수 상한(토큰 보호)
       for (const prod of priceTableRef.current) {
-        const opts: { n: string; p: number; pkg: boolean }[] = [];
+        const opts: Opt[] = [];
         for (const g of prod.groups) {
           for (const o of g.options) {
-            if (budget-- <= 0) break;
-            opts.push({ n: o.name, p: o.price, pkg: g.isPackage });
+            const d = o.desc ? o.desc.slice(0, 300) : undefined; // 옵션당 설명 길이 제한
+            const cost = o.name.length + (d?.length ?? 0) + 16;
+            if (chars - cost <= 0) break;
+            chars -= cost;
+            opts.push(d ? { n: o.name, p: o.price, pkg: g.isPackage, d } : { n: o.name, p: o.price, pkg: g.isPackage });
           }
+          if (chars <= 0) break;
         }
         out.push({ name: prod.name, category: prod.category, repPrice: prod.repPrice, options: opts });
-        if (budget <= 0) break;
+        if (chars <= 0) break;
       }
       return out;
     })();
