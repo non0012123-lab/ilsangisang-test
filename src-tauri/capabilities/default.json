@@ -1,13 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "기본 권한 — 원격 웹(배포 사이트)이 네이티브 알림만 호출하도록 허용.",
-  "windows": ["main"],
+  "description": "기본 권한 — 원격 웹(배포 사이트)이 네이티브 알림 호출 + 어시스턴트 퀵바 창 제어(숨김·드래그)를 허용.",
+  "windows": ["main", "assistant"],
   "remote": {
-    "urls": ["https://ilsangisang-test.pages.dev"]
+    "urls": [
+      "https://ilsangisang-test.pages.dev",
+      "https://ilsangisang-test.pages.dev/*"
+    ]
   },
   "permissions": [
     "core:default",
+    "core:window:allow-hide",
+    "core:window:allow-start-dragging",
     "notification:default"
   ]
 }

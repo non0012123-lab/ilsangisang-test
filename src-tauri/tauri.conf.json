@@ -20,6 +20,19 @@
         "minHeight": 480,
         "resizable": true,
         "center": true
+      },
+      {
+        "label": "assistant",
+        "title": "AI 어시스턴트",
+        "url": "https://ilsangisang-test.pages.dev/widget",
+        "width": 560,
+        "height": 540,
+        "resizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {
