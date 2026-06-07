@@ -19,6 +19,7 @@ import AccountListPage from './pages/AccountListPage';
 import SiteListPage from './pages/SiteListPage';
 import RequestsPage from './pages/RequestsPage';
 import InternalSchedulePage from './pages/InternalSchedulePage';
+import AssistantWidgetPage from './pages/AssistantWidgetPage';
 import PendingApprovalPage from './pages/PendingApprovalPage';
 import SuspendedPage from './pages/SuspendedPage';
 import ApprovalsPage from './pages/ApprovalsPage';
@@ -99,6 +100,8 @@ function AppRoutes() {
       <Route path="/sites" element={<ProtectedRoute><SiteListPage /></ProtectedRoute>} />
       <Route path="/requests" element={<ProtectedRoute><RequestsPage /></ProtectedRoute>} />
       <Route path="/internal" element={<ProtectedRoute><InternalSchedulePage /></ProtectedRoute>} />
+      {/* 데스크톱 앱 트레이용 어시스턴트 퀵바(별도 webview 창) — 네비/헤더 없이 어시스턴트만 */}
+      <Route path="/widget" element={<ProtectedRoute><AssistantWidgetPage /></ProtectedRoute>} />
       {/* 인수인계는 클라이언트 관리로 통합됨 — 기존 링크/북마크 호환용 리다이렉트 */}
       <Route path="/handover" element={<Navigate to="/clients" replace />} />
 
