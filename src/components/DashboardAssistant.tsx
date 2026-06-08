@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -17,6 +18,11 @@ const STATUS_LABEL: Record<string, string> = { pending: '대기중', 'in-progres
 const REMINDER_TEXT: Record<string, string> = { '1h': '1시간 전', '30m': '30분 전', '10m': '10분 전', onTime: '정각' };
 const SALES_SENT_LABEL: Record<string, string> = { very_positive: '매우긍정', positive: '긍정', neutral: '보통', negative: '부정', very_negative: '매우부정' };
 const SALES_CH_LABEL: Record<string, string> = { phone: '전화', inquiry: '문의폼', etc: '기타' };
+
+// 답변 본문 속 링크 감지: http(s) URL · www. 시작 · NAS UNC 경로(\\서버\...)
+const LINK_RE = /(https?:\/\/[^\s]+|www\.[^\s]+|\\\\[^\s]+)/g;
+// URL 끝에 붙은 문장부호(마침표·괄호 등)는 링크에서 떼어 본문으로 되돌린다.
+const TRAIL_RE = /[.,;:!?)\]}'"」』）]+$/;
 
 const EXAMPLES = [
   '오늘 스케줄 시간 분배는 어떻게 하는 게 효율적일까?',
@@ -70,6 +76,44 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
       </button>
     </div>
   ) : null;
+
+  // 답변 본문을 렌더링하되, 포함된 링크는 클릭 가능 + 복사 버튼을 붙인다.
+  const renderText = (text: string, msgKey: string): ReactNode => {
+    const nodes: ReactNode[] = [];
+    let last = 0;
+    let i = 0;
+    let m: RegExpExecArray | null;
+    LINK_RE.lastIndex = 0;
+    while ((m = LINK_RE.exec(text)) !== null) {
+      let url = m[0];
+      let trail = '';
+      const tm = url.match(TRAIL_RE);
+      if (tm) { trail = tm[0]; url = url.slice(0, -trail.length); }
+      if (m.index > last) nodes.push(text.slice(last, m.index));
+      const isWeb = /^(https?:\/\/|www\.)/i.test(url);
+      const href = url.startsWith('www.') ? `https://${url}` : url;
+      const k = `${msgKey}:lnk${i}`;
+      nodes.push(
+        <span key={`l${i}`} className="inline-flex items-baseline gap-0.5 max-w-full">
+          {isWeb ? (
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{url}</a>
+          ) : (
+            <span className="break-all underline decoration-dotted decoration-gray-400">{url}</span>
+          )}
+          <button onClick={() => copy(url, k)} title="링크 복사"
+            className={`shrink-0 self-center p-0.5 rounded transition-colors ${copiedKey === k ? 'text-green-600' : 'text-gray-400 hover:text-blue-600'}`}>
+            {copiedKey === k ? <Check size={11} /> : <Copy size={11} />}
+          </button>
+        </span>
+      );
+      if (trail) nodes.push(trail);
+      last = m.index + m[0].length;
+      i++;
+    }
+    if (i === 0) return text;
+    if (last < text.length) nodes.push(text.slice(last));
+    return nodes;
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -178,7 +222,7 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                 <div className={`rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${
                   m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'
                 }`}>
-                  {m.text}
+                  {m.role === 'assistant' ? renderText(m.text, `m${idx}`) : m.text}
                 </div>
 
                 {/* 제안된 액션 */}
