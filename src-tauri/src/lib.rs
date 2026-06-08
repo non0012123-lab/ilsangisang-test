@@ -29,10 +29,15 @@ fn show_assistant(app: &tauri::AppHandle) {
     }
 }
 
-// 어시스턴트 퀵바 토글: 보이는 중이면 숨기고, 아니면 띄운다(전역 단축키용)
+// 어시스턴트 퀵바 토글(전역 단축키용).
+//  • 퀵바는 alwaysOnTop 이라 대시보드를 클릭하면 "보이지만 포커스 없음" 상태가 흔하다.
+//    이때 단축키를 누르면 사용자는 "퀵바로 가기"를 원하므로, 보이기만 해선 숨기면 안 된다.
+//  • 그래서 "보이고 + 포커스까지 있을 때"만 숨기고, 그 외(숨김/보이지만 비포커스)는 띄우고 포커스.
 fn toggle_assistant(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("assistant") {
-        if w.is_visible().unwrap_or(false) {
+        let visible = w.is_visible().unwrap_or(false);
+        let focused = w.is_focused().unwrap_or(false);
+        if visible && focused {
             let _ = w.hide();
         } else {
             show_assistant(app);
