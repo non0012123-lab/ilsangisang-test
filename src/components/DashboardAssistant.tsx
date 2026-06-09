@@ -17,7 +17,7 @@ const relTime = (ts: number): string => {
 const STATUS_LABEL: Record<string, string> = { pending: '대기중', 'in-progress': '진행중', completed: '완료' };
 const REMINDER_TEXT: Record<string, string> = { '1h': '1시간 전', '30m': '30분 전', '10m': '10분 전', onTime: '정각' };
 const SALES_SENT_LABEL: Record<string, string> = { very_positive: '매우긍정', positive: '긍정', neutral: '보통', negative: '부정', very_negative: '매우부정' };
-const SALES_CH_LABEL: Record<string, string> = { phone: '전화', inquiry: '문의폼', etc: '기타' };
+const SALES_CH_LABEL: Record<string, string> = { phone: '전화', inquiry: '이메일', referral: '소개', etc: '기타' };
 
 // 답변 본문 속 링크 감지: http(s) URL · www. 시작 · NAS UNC 경로(\\서버\...)
 const LINK_RE = /(https?:\/\/[^\s]+|www\.[^\s]+|\\\\[^\s]+)/g;

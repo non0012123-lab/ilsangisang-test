@@ -9,7 +9,8 @@ import type { SalesEntry, SalesChannel, SalesSentiment, SalesStatus } from '../t
 // 라벨·색상 정의 ─────────────────────────────────────────
 const CHANNELS: { v: SalesChannel; label: string }[] = [
   { v: 'phone', label: '전화' },
-  { v: 'inquiry', label: '문의폼(이메일)' },
+  { v: 'inquiry', label: '이메일' },
+  { v: 'referral', label: '소개' },
   { v: 'etc', label: '기타' },
 ];
 const SENTIMENTS: { v: SalesSentiment; label: string; cls: string }[] = [
@@ -176,7 +177,7 @@ export default function SalesPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-left text-xs font-semibold text-gray-500 uppercase">
-                  {['날짜', '고객사', '연락처', '내용', '담당자', '척도', '상태', ''].map((h, i) => (
+                  {['날짜', '고객사', '연락처', '채널', '내용', '담당자', '척도', '상태', ''].map((h, i) => (
                     <th key={i} className="px-4 py-3 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -190,6 +191,12 @@ export default function SalesPage() {
                       {e.phone && <div className="flex items-center gap-1"><Phone size={11} className="text-gray-400" />{e.phone}</div>}
                       {e.email && <div className="flex items-center gap-1"><Mail size={11} className="text-gray-400" />{e.email}</div>}
                       {!e.phone && !e.email && '-'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <select value={e.channel} onChange={ev => patchSales(e, { channel: ev.target.value as SalesChannel })}
+                        className="text-xs font-medium rounded-lg px-1.5 py-1 border border-gray-200 text-gray-600 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        {CHANNELS.map(c => <option key={c.v} value={c.v}>{c.label}</option>)}
+                      </select>
                     </td>
                     <td className="px-4 py-3 max-w-md">
                       <span className="whitespace-pre-wrap text-gray-700">{e.content}</span>

@@ -922,6 +922,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           message, history, today: todayStr(),
           currentUser: u?.name ?? '', // 로그인한 본인 — 담당자 미지정 시 기본 담당자, "나/내가" 표현 매핑용
+          currentUserId: u?.id ?? '', // "내게 온 요청" 식별용(요청함 toUid 와 매칭)
           // 이름 + 팀·직함·직책 — 어시스턴트가 "디자인팀장", "영상팀 PD" 등을 사람으로 해석하는 근거
           managers: membersRef.current.map(m => ({ name: m.name, department: m.department, title: m.title, position: m.position })),
           clients: activeClients.map(c => ({
@@ -948,6 +949,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           priceTable: priceContext,
           salesEnabled,            // 영업관리 권한 여부 — true 일 때만 어시스턴트가 상담 기록을 다룬다
           sales: salesContext,     // 권한자에게만 전달되는 기존 상담 목록(조회/수정용)
+          // 요청함(업무 요청) — "오늘 들어온 요청", "내가 보낸 요청", "○○가 요청한 거" 조회용.
+          //  본인 기준 방향(받은/보낸)·날짜·상태를 줘서 어시스턴트가 필터해 답할 수 있게 한다.
+          existingRequests: requestsRef.current.slice(0, 80).map(r => {
+            const d = new Date(r.createdAt); const p = (n: number) => String(n).padStart(2, '0');
+            return {
+              id: r.id, fromName: r.fromName, toName: r.toName, fromMe: r.fromUid === (u?.id ?? ''), toMe: r.toUid === (u?.id ?? ''),
+              title: r.title, body: (r.body ?? '').slice(0, 120), status: r.status,
+              date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+              doneNote: r.doneNote ? r.doneNote.slice(0, 120) : undefined,
+            };
+          }),
           entries: scoped.map(e => ({
             id: e.id, date: e.date, endDate: e.endDate ?? null,
             managerName: e.managerName, clientName: e.clientName,
@@ -1625,6 +1637,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .subscribe();
     return () => { sb.removeChannel(channel); };
   }, [uid, pushNotification, pushStickyNotice]);
+
+  // 영업관리(상담) 실시간 구독: 다른 권한자가 등록/수정/삭제하면 새로고침 없이 목록 반영(조회용, 알림 없음).
+  //  • 0016_sales.sql 로 sales_entries 가 realtime publication + REPLICA IDENTITY FULL 로 설정돼 있어야 한다.
+  //  • 이게 없으면 다른 세션/기기에서 지운 상담이 이 세션엔 남아 어시스턴트가 "삭제했는데 아직 있다"고 답하게 된다.
+  useEffect(() => {
+    if (!supabase || !uid) return;
+    const sb = supabase;
+    const channel = sb
+      .channel(`rt-sales-${uid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_entries' }, payload => {
+        if (payload.eventType === 'DELETE') {
+          const oldId = (payload.old as { id?: string })?.id;
+          if (oldId) setSalesEntries(prev => prev.filter(e => e.id !== oldId));
+          return;
+        }
+        const s = (payload.new as { data?: SalesEntry })?.data;
+        if (!s || !s.id) return;
+        setSalesEntries(prev => prev.some(e => e.id === s.id) ? prev.map(e => e.id === s.id ? s : e) : [s, ...prev]);
+      })
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [uid]);
 
   // 내부 일정 사전 알림(리마인더): 시작 N분 전에 참여자에게 PC + 스티커. 30초마다 점검.
   //  • 내가 참여자인 일정만. eventId:reminder 단위로 1회만(기기별 firedReminders).

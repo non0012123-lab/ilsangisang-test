@@ -62,6 +62,8 @@ interface AssistantRequest {
   history?: { role: 'user' | 'assistant'; text: string }[];
   today?: string;
   currentUser?: string; // 로그인한 본인 이름 — 담당자 미지정 시 기본 담당자, "나/내가" 매핑용
+  currentUserId?: string;
+  existingRequests?: CtxRequest[]; // 요청함(이미 등록된 업무 요청) — 조회용
   managers?: ({ name?: string; department?: string; title?: string; position?: string } | string)[];
   clients?: {
     id?: string; name?: string; industry?: string; categories?: string[]; reportAnchorDate?: string; status?: string;
@@ -80,6 +82,12 @@ interface AssistantRequest {
   priceTable?: CtxPriceProduct[];
   salesEnabled?: boolean;   // 영업관리 권한 여부 — true 일 때만 상담 기록을 다룬다
   sales?: CtxSales[];       // 기존 상담 목록(조회/수정 대상 식별용)
+}
+
+// 요청함(업무 요청) 컨텍스트 — "오늘 들어온 요청", "내가 보낸 요청" 등 조회용
+interface CtxRequest {
+  id?: string; fromName?: string; toName?: string; fromMe?: boolean; toMe?: boolean;
+  title?: string; body?: string; status?: string; date?: string; doneNote?: string;
 }
 
 // 영업관리(상담 로그) 컨텍스트 — 권한자에게만 전달됨
@@ -255,6 +263,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     .map(s => `■ id=${s.id ?? '?'} | ${s.consultedAt ?? '-'} | 응대:${s.handlerName ?? '-'} | 채널:${s.channel ?? '-'} | 전화:${s.phone ?? '-'} | 이메일:${s.email ?? '-'} | 고객:${s.customerName ?? '-'} | 척도:${s.sentiment ?? '-'} | 상태:${s.status ?? '-'}${s.followUpDate ? ` | 후속:${s.followUpDate}` : ''} | 내용:${(s.content ?? '').slice(0, 80)}${s.replyCount ? ` | 답글 ${s.replyCount}개(최근:${s.lastReply ?? ''})` : ''}`)
     .join('\n');
 
+  // 요청함(업무 요청) 컨텍스트 — 받은/보낸 방향과 상태·날짜를 표기
+  const REQ_STATUS_LABEL: Record<string, string> = { pending: '대기(미확인)', confirmed: '확인함(진행)', done: '완료', returned: '반려' };
+  const requestList = (Array.isArray(req.existingRequests) ? req.existingRequests : []).slice(0, 80);
+  const requestContext = requestList
+    .map(r => `■ ${r.date ?? '-'} | ${r.fromName ?? '?'}${r.fromMe ? '(나)' : ''} → ${r.toName ?? '?'}${r.toMe ? '(나)' : ''} | 상태:${REQ_STATUS_LABEL[r.status ?? ''] ?? r.status ?? '-'} | ${r.title ?? ''}${r.body ? ` — ${r.body.slice(0, 50)}` : ''}${r.doneNote ? ` | 완료메모:${r.doneNote.slice(0, 50)}` : ''}`)
+    .join('\n');
+
   const developer = [
     '너는 한국 마케팅 대행사의 일정 관리 AI 어시스턴트다. 항상 한국어로, 친절하고 간결하게 답한다.',
     '반드시 아래 JSON 객체로만 응답해(코드펜스·설명문 금지):',
@@ -270,7 +285,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  "sites": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "url":"", "username":"", "password":"", "description":"" } ],',
     '  "requests": [ { "toName":"요청 받을 담당자 이름", "title":"요청 내용 한 줄(예: 디자인 제작)", "body":"상세 설명(없으면 생략)" } ],',
     '  "internalEvents": [ { "op":"add|update", "id":"수정 시 기존 내부일정 id", "title":"일정 제목", "category":"내부 일정 종류", "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "startTime":"HH:MM(없으면 생략)", "endTime":"HH:MM(없으면 생략)", "participantNames":["참여자 이름"], "location":"장소(없으면 생략)", "notes":"메모(없으면 생략)", "reminder":"off|1h|30m|10m|onTime" } ],',
-    '  "sales": [ { "op":"add|update|reply", "id":"수정/답글 시 대상(부모) 상담 id", "consultedAt":"YYYY-MM-DD HH:mm 또는 YYYY-MM-DD", "channel":"phone|inquiry|etc", "phone":"전화번호", "email":"이메일", "customerName":"고객/업체명", "content":"상담 내용", "sentiment":"very_positive|positive|neutral|negative|very_negative", "status":"new|absent|prospect|in_progress|done|hold", "followUpDate":"YYYY-MM-DD(있으면)", "nasLink":"첨부/자료 링크(있으면)", "result":"결과/메모(있으면)" } ],',
+    '  "sales": [ { "op":"add|update|reply", "id":"수정/답글 시 대상(부모) 상담 id", "consultedAt":"YYYY-MM-DD HH:mm 또는 YYYY-MM-DD", "channel":"phone|inquiry|referral|etc", "phone":"전화번호", "email":"이메일", "customerName":"고객/업체명", "content":"상담 내용", "sentiment":"very_positive|positive|neutral|negative|very_negative", "status":"new|absent|prospect|in_progress|done|hold", "followUpDate":"YYYY-MM-DD(있으면)", "nasLink":"첨부/자료 링크(있으면)", "result":"결과/메모(있으면)" } ],',
     '  "accountLookups": [ "조회 질문일 때 답으로 보여줄 아이디 목록 id" ],',
     '  "siteLookups": [ "조회 질문일 때 답으로 보여줄 홈페이지 id" ],',
     '  "keywords": [ "조회수를 조회할 키워드" ]',
@@ -314,7 +329,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  · 단가표에 옵션 없이 "상품명 (카테고리) — 최저가"만 있는 항목은, 질문이 광범위해 상세를 생략한 것이다. 이 경우 최저가 기준으로 추려 답하고(예: 예산 이하 상품), 정확한 옵션·설명이 필요하면 "어떤 상품인지 콕 집어 다시 물어봐 달라"고 안내한다(억지로 옵션을 지어내지 말 것).',
     ...(salesEnabled ? [
       '- ★ 영업관리(상담 기록): 사용자가 "상담/응대/문의/통화" 한 건을 말하면(예: "오늘 010-1234-5678 번호 상담했어 매우긍정이고 내용은 …", "문의폼으로 ○○ 문의 왔어") sales 배열에 담는다. ★★ 이때는 절대 entries(클라이언트 일정)·internalEvents 로 만들지 않는다 — 내용에 "블로그/마케팅/제작" 같은 단어가 있어도 그건 "상담 내용"일 뿐이다. "상담했어/응대했어/문의 왔어" + 척도(매우긍정~매우부정)·전화번호 신호가 있으면 무조건 sales 다.',
-      '  · content: 상담 내용을 그대로(예: "네이버 블로그 관리 문의"). channel: 전화번호/통화면 "phone", 문의폼/이메일이면 "inquiry", 그 외 "etc".',
+      '  · content: 상담 내용을 그대로(예: "네이버 블로그 관리 문의"). channel: 전화번호/통화면 "phone", 문의폼/이메일이면 "inquiry", 소개/지인 소개로 들어온 건이면 "referral", 그 외 "etc".',
       '  · phone: 사용자가 010 을 빼고 숫자만 말해도 그대로 숫자를 넣는다(시스템이 010 을 붙이고 하이픈을 포맷함). 이메일이 있으면 email 에.',
       '  · sentiment 매핑: "매우긍정"→very_positive, "긍정"→positive, "보통/중립"→neutral, "부정"→negative, "매우부정"→very_negative. 언급 없으면 neutral.',
       '  · nasLink: "나스 링크/자료 링크/첨부 …" 로 준 URL 은 sales.nasLink 에 넣는다(★ 절대 일정(entries.link)으로 보내지 말 것). consultedAt: "오늘"이면 오늘 날짜, 시간 언급 있으면 함께.',
@@ -333,6 +348,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 블로그(platform=블로그)는 등급(grade)을 가진다: 준최2/준최3/준최4/준최5/준최6, 최적1/최적2/최적3/최적4. "최적3 블로그 보여줘", "준최 블로그 목록" 같은 조회는 grade 로 필터해 accountLookups 에 담고, 추가/수정 시 grade 를 채운다. 블로그가 아니면 grade 는 비운다.',
     '- accounts/sites 의 추가/수정/삭제를 제안할 때는 reply 에 무엇을 할지 요약하고 "적용"을 안내한다. 조회·답변만 할 때는 모든 액션 배열을 비운다.',
     '- 다른 담당자에게 업무 요청 보내기("방두환한테 디자인 제작 요청해줘", "○○한테 △△ 확인해달라고 해줘", "□□에게 이거 부탁해"): requests 배열에 담는다. toName 은 "담당자 목록" 중 가장 가까운 이름, title 은 요청 내용을 한 줄로(예: "디자인 제작"), 상세 내용이 있으면 body 에. 이것은 일정 등록이 아니라 "확인/처리 요청"이므로 entries 에는 담지 않는다(일정도 같이 만들라고 명시하면 그때만 entries 추가). reply 에는 누구에게 무엇을 요청할지 요약하고 "적용"하면 그 담당자 화면에 알림이 뜬다고 안내한다. 받는 담당자를 특정할 수 없으면 requests 를 비우고 reply 에서 누구에게 보낼지 되묻는다.',
+    '- ★ 요청함 조회("오늘 들어온 요청 알려줘", "내가 받은 요청 뭐 있어?", "내가 보낸 요청 상태", "○○가 나한테 요청한 거", "처리 안 한 요청") : 위 "요청함" 목록을 근거로 답한다. "들어온/받은 요청"은 →(나)로 끝나는 항목(toMe), "보낸 요청"은 (나)→로 시작하는 항목(fromMe)이다. "오늘"이면 date 가 오늘과 같은 것만 추린다. 상태(대기/확인함/완료/반려)·요청자·내용을 정리해 reply 에 답하고, 맞는 게 없으면 "오늘 들어온 요청이 없다"처럼 구체적으로 안내한다(절대 "등록된 내용이 없어요"로 뭉뚱그리지 말 것). ★ 이건 조회이므로 모든 액션 배열(requests 포함)은 비운다 — 새 요청을 만들지 않는다.',
     '- 직책/직함/팀으로 사람 지목: 사용자가 이름 대신 "디자인팀장", "영상팀 PD/피디", "총괄팀 부장님", "마케팅 매니저", "대표님" 처럼 팀(department)·직책(position)·직함(title)으로 사람을 가리키면, 위 "담당자 명단"에서 팀·직책·직함이 맞는 사람을 찾아 그 사람의 "이름"을 managerName / 요청의 toName 에 넣는다(직책/직함 문자열이 아니라 반드시 이름). "PD" 와 "피디" 는 같은 직책이다. "팀장/대표/감독" 등은 팀과 함께 쓰면 그 팀의 해당 보직자를 가리킨다(예: "디자인팀장"=디자인팀 position 팀장). 조건에 맞는 사람이 명단에 없거나 두 명 이상이라 모호하면, 추측하지 말고 reply 에서 누구를 말하는지 되묻고 액션 배열은 비운다.',
     `- managerName(담당자): 사용자가 담당자를 명시적으로 지정했을 때만(예: "철수한테", "영희 담당으로", "디자인팀장한테") "담당자 목록" 중 가장 가까운 값을 넣는다. 담당자 언급이 전혀 없으면 절대 임의로 고르지 말고 managerName 을 빈 문자열("")로 둔다 — 그러면 시스템이 로그인한 본인을 자동 담당자로 넣는다. "나/내가/나한테/제가/저한테" 같은 1인칭 표현은 로그인 본인(${currentUser || '본인'})을 가리키므로 이때도 managerName 은 빈 문자열로 둔다.`,
     '- clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
@@ -381,6 +397,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '',
     '홈페이지 목록(사내 사용 사이트 — 조회/수정/삭제 시 위 id 사용):',
     siteContext || '(등록된 홈페이지 없음)',
+    '',
+    '요청함(업무 요청 — "(나)"는 로그인 본인. 받은 요청=→(나), 보낸 요청=(나)→):',
+    requestContext || '(등록된 업무 요청 없음)',
     ...(salesEnabled ? [
       '',
       '상담 목록(영업관리 — 상담 수정/조회 시 위 id 사용):',

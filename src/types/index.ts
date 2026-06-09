@@ -369,7 +369,7 @@ export interface PriceProduct {
 // 회사 공용 전화/문의폼 상담을 누가 응대했고 결과가 어땠는지 기록한다.
 //  • 민감정보(고객 전화/이메일)라 권한(profiles.sales_access)이 있는 사람만 보고, Supabase RLS 로 서버 차단.
 //  • 다른 데이터와 달리 localStorage 캐시는 두지 않는다(공용 PC 에 고객정보가 남지 않도록).
-export type SalesChannel = 'phone' | 'inquiry' | 'etc';        // 전화 / 문의폼(이메일) / 기타
+export type SalesChannel = 'phone' | 'inquiry' | 'referral' | 'etc';  // 전화 / 이메일 / 소개 / 기타
 export type SalesSentiment = 'very_positive' | 'positive' | 'neutral' | 'negative' | 'very_negative';
 export type SalesStatus = 'new' | 'absent' | 'prospect' | 'in_progress' | 'done' | 'hold'; // 신규(미처리)/부재/가망/진행중/완료/보류
 // 상담 답글(후속 통화·메모) — 같은 고객사 상담을 수정에 들어가지 않고 그 밑에 이어서 기록
