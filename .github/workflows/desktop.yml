@@ -9,6 +9,10 @@ on:
     branches: [desktop]
     tags: ['app-v*']
 
+# 태그 빌드에서 GitHub Release 를 생성하려면 contents: write 가 필요(기본 토큰은 읽기 전용).
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
