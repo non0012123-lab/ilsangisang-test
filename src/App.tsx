@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
+import { runSilentUpdate } from './utils/tauriUpdate';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import DashboardPage from './pages/DashboardPage';
@@ -122,6 +124,8 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // 데스크톱 셸이면 시작 시 자동 업데이트 확인(웹에서는 no-op).
+  useEffect(() => { void runSilentUpdate(); }, []);
   return (
     <BrowserRouter>
       <AuthProvider>
