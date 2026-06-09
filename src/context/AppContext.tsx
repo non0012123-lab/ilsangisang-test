@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply } from '../types';
 import { USERS } from '../data/mockData';
 import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
 import type { ReminderOption } from '../types';
@@ -79,6 +79,8 @@ interface AppContextType {
   salesAccess: boolean;                         // 현재 사용자의 영업관리 접근 권한(admin 또는 sales_access)
   saveSalesEntry: (entry: SalesEntry) => void;
   removeSalesEntry: (id: string) => void;
+  addSalesReply: (entryId: string, reply: SalesReply) => void;        // 상담 스레드에 답글 추가
+  removeSalesReply: (entryId: string, replyId: string) => void;       // 답글 삭제
   // 단가표(외부 마케팅 쇼핑몰에서 수집한 패키지/단일 상품 가격) — '새로고침'으로 재수집.
   priceTable: PriceProduct[];
   priceRefreshing: boolean;                 // 수집 진행 중 여부
@@ -561,6 +563,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSalesEntries(prev => prev.filter(e => e.id !== id));
     persistDelete('sales_entries', id);
   }, []);
+  // 답글: 부모 상담의 replies 배열에 이어 붙이고 부모 엔트리를 통째로 저장(jsonb 라 별도 테이블 불필요)
+  const addSalesReply = useCallback((entryId: string, reply: SalesReply) => {
+    setSalesEntries(prev => prev.map(e => {
+      if (e.id !== entryId) return e;
+      const updated = { ...e, replies: [...(e.replies ?? []), reply], updatedAt: nowMs() };
+      persistOne('sales_entries', updated);
+      return updated;
+    }));
+  }, []);
+  const removeSalesReply = useCallback((entryId: string, replyId: string) => {
+    setSalesEntries(prev => prev.map(e => {
+      if (e.id !== entryId) return e;
+      const updated = { ...e, replies: (e.replies ?? []).filter(r => r.id !== replyId), updatedAt: nowMs() };
+      persistOne('sales_entries', updated);
+      return updated;
+    }));
+  }, []);
 
   // ── 클라이언트 ──
   const saveClient = useCallback((client: Client) => {
@@ -889,6 +908,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           phone: e.phone, email: e.email, customerName: e.customerName,
           content: (e.content ?? '').slice(0, 200), sentiment: e.sentiment, status: e.status,
           followUpDate: e.followUpDate, nasLink: e.nasLink,
+          replyCount: e.replies?.length ?? 0,                                  // 답글 스레드 길이(답글 추가 대상 식별)
+          lastReply: e.replies?.length ? (e.replies[e.replies.length - 1].content ?? '').slice(0, 60) : undefined,
         }))
       : [];
     const history = (conversationsRef.current.find(c => c.id === convId)?.messages ?? []).map(m => ({ role: m.role, text: m.text }));
@@ -1289,8 +1310,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // 3) 영업관리(상담 기록) 추가/수정 — 권한자만(RLS 로 서버도 막지만 클라에서도 차단)
     const salesAllowed = u?.role === 'admin' || !!u?.salesAccess;
+    // 부모(스레드) 상담 찾기: id 우선 → 고객사명 → 전화 뒷자리. 답글/자동 스레딩에 사용.
+    const findSalesParent = (s: { id?: string; customerName?: string; phone?: string }): SalesEntry | undefined => {
+      if (s.id) { const byId = salesEntriesRef.current.find(e => e.id === s.id); if (byId) return byId; }
+      const name = s.customerName?.trim();
+      const digits = (s.phone ?? '').replace(/\D/g, '');
+      const tail = digits.slice(-4);
+      // 최신 상담부터(목록은 최신이 앞) 매칭 — 같은 고객사/전화의 가장 최근 스레드에 답글
+      return salesEntriesRef.current.find(e => {
+        if (name && (e.customerName ?? '').trim() === name) return true;
+        if (tail.length >= 4 && (e.phone ?? '').replace(/\D/g, '').endsWith(tail)) return true;
+        return false;
+      });
+    };
     (salesAllowed ? (msg.sales ?? []) : []).forEach((s, i) => {
       const op = s.op ?? (s.id ? 'update' : 'add');
+      if (op === 'reply') {
+        const parent = findSalesParent(s);
+        if (parent && (s.content ?? '').trim()) {
+          undo.updatedSalesPrev!.push({ ...parent }); // 부모 통째 스냅샷 → 되돌리면 답글 제거됨
+          const now = nowMs();
+          saveSalesEntry({
+            ...parent,
+            replies: [...(parent.replies ?? []), {
+              id: `slr-${now}-${i}-${Math.random().toString(36).slice(2, 5)}`,
+              content: s.content!.trim(),
+              handlerId: selfId, handlerName: u?.name ?? '',
+              consultedAt: s.consultedAt || undefined,
+              createdAt: now,
+            }],
+            updatedAt: now,
+          });
+          count += 1;
+          return;
+        }
+        // 부모를 못 찾으면 신규 상담으로 폴백
+      }
       if (op === 'update') {
         const cur = s.id ? salesEntriesRef.current.find(e => e.id === s.id) : undefined;
         if (cur) {
@@ -1613,7 +1668,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
       internalEvents, internalCategories, saveInternalEvent, removeInternalEvent, saveInternalCategory, removeInternalCategory,
-      salesEntries, salesAccess, saveSalesEntry, removeSalesEntry,
+      salesEntries, salesAccess, saveSalesEntry, removeSalesEntry, addSalesReply, removeSalesReply,
       priceTable, priceRefreshing, priceProgress, priceUpdatedAt, refreshPriceTable,
       requests, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
       stickyNotices, dismissStickyNotice,

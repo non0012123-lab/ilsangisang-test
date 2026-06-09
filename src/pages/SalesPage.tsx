@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Plus, Search, X, Pencil, Trash2, Phone, Mail, PhoneCall, AlertCircle, CalendarClock, Copy, Check } from 'lucide-react';
+import { Plus, Search, X, Pencil, Trash2, Phone, Mail, PhoneCall, AlertCircle, CalendarClock, Copy, Check, CornerDownRight, MessageSquarePlus } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -21,12 +21,13 @@ const SENTIMENTS: { v: SalesSentiment; label: string; cls: string }[] = [
 ];
 const STATUSES: { v: SalesStatus; label: string; cls: string }[] = [
   { v: 'new', label: '신규(미처리)', cls: 'bg-blue-100 text-blue-700' },
+  { v: 'absent', label: '부재', cls: 'bg-slate-100 text-slate-500' },
+  { v: 'prospect', label: '가망', cls: 'bg-teal-100 text-teal-700' },
   { v: 'in_progress', label: '진행중', cls: 'bg-amber-100 text-amber-700' },
   { v: 'done', label: '완료', cls: 'bg-green-100 text-green-700' },
   { v: 'hold', label: '보류', cls: 'bg-gray-100 text-gray-600' },
 ];
-const labelOf = <T extends string>(arr: { v: T; label: string }[], v: T) => arr.find(x => x.v === v)?.label ?? v;
-const clsOf = (arr: { v: string; label: string; cls: string }[], v: string) => arr.find(x => x.v === v)?.cls ?? 'bg-gray-100 text-gray-600';
+const clsOf =(arr: { v: string; label: string; cls: string }[], v: string) => arr.find(x => x.v === v)?.cls ?? 'bg-gray-100 text-gray-600';
 
 const todayStr = () => {
   const d = new Date();
@@ -47,7 +48,7 @@ const emptyForm = (): Form => ({
 });
 
 export default function SalesPage() {
-  const { salesEntries, saveSalesEntry, removeSalesEntry } = useApp();
+  const { salesEntries, saveSalesEntry, removeSalesEntry, addSalesReply, removeSalesReply } = useApp();
   const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [fStatus, setFStatus] = useState<SalesStatus | '전체'>('전체');
@@ -56,6 +57,19 @@ export default function SalesPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<Form>(emptyForm);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [replyOpen, setReplyOpen] = useState<string | null>(null); // 답글 입력창이 열린 상담 id
+  const [replyText, setReplyText] = useState('');
+
+  const submitReply = (entryId: string) => {
+    const text = replyText.trim();
+    if (!text) return;
+    addSalesReply(entryId, {
+      id: `slr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      content: text, handlerId: user?.id ?? '', handlerName: user?.name ?? '',
+      consultedAt: nowLocal(), createdAt: Date.now(),
+    });
+    setReplyText(''); setReplyOpen(null);
+  };
 
   // NAS 링크 복사(바로가기 X — 폴더경로라 탐색기에 붙여넣는 용도)
   const copyLink = (id: string, link: string) => {
@@ -82,7 +96,7 @@ export default function SalesPage() {
   const filtered = useMemo(() => salesEntries
     .filter(e => fStatus === '전체' || e.status === fStatus)
     .filter(e => fSent === '전체' || e.sentiment === fSent)
-    .filter(e => !q || [e.content, e.customerName, e.phone, e.email, e.handlerName].some(v => (v ?? '').toLowerCase().includes(q)))
+    .filter(e => !q || [e.content, e.customerName, e.phone, e.email, e.handlerName, ...(e.replies ?? []).map(r => r.content)].some(v => (v ?? '').toLowerCase().includes(q)))
     .sort((a, b) => (b.consultedAt ?? '').localeCompare(a.consultedAt ?? '')), [salesEntries, fStatus, fSent, q]);
 
   const openAdd = () => { setForm(emptyForm()); setEditId(null); setShowForm(true); };
@@ -162,34 +176,67 @@ export default function SalesPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-left text-xs font-semibold text-gray-500 uppercase">
-                  {['일시', '응대자', '채널', '연락처/이메일', '고객', '내용', '척도', '상태', ''].map(h => (
-                    <th key={h} className="px-4 py-3 whitespace-nowrap">{h}</th>
+                  {['날짜', '고객사', '연락처', '내용', '담당자', '척도', '상태', ''].map((h, i) => (
+                    <th key={i} className="px-4 py-3 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.map(e => (
-                  <tr key={e.id} className="hover:bg-gray-50/50">
+                  <tr key={e.id} className="hover:bg-gray-50/50 align-top">
                     <td className="px-4 py-3 whitespace-nowrap text-gray-600">{fmtDateTime(e.consultedAt)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-gray-700">{e.handlerName || '-'}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-gray-500">{labelOf(CHANNELS, e.channel)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap text-gray-700">{e.customerName || '-'}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-gray-600">
                       {e.phone && <div className="flex items-center gap-1"><Phone size={11} className="text-gray-400" />{e.phone}</div>}
                       {e.email && <div className="flex items-center gap-1"><Mail size={11} className="text-gray-400" />{e.email}</div>}
                       {!e.phone && !e.email && '-'}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-gray-700">{e.customerName || '-'}</td>
-                    <td className="px-4 py-3 max-w-xs">
-                      <span className="line-clamp-2 text-gray-600">{e.content}</span>
+                    <td className="px-4 py-3 max-w-md">
+                      <span className="whitespace-pre-wrap text-gray-700">{e.content}</span>
                       {e.nasLink && (
                         <button onClick={() => copyLink(e.id, e.nasLink!)}
-                          className={`mt-0.5 inline-flex items-center gap-1 text-xs transition-colors ${copiedId === e.id ? 'text-green-600' : 'text-gray-500 hover:text-blue-600'}`}
+                          className={`mt-0.5 ml-2 inline-flex items-center gap-1 text-xs transition-colors ${copiedId === e.id ? 'text-green-600' : 'text-gray-500 hover:text-blue-600'}`}
                           title={e.nasLink}>
                           {copiedId === e.id ? <Check size={11} /> : <Copy size={11} />}
                           {copiedId === e.id ? '복사됨' : 'NAS 링크 복사'}
                         </button>
                       )}
+                      {/* 답글 스레드(후속 상담) — 수정에 들어가지 않고 그 밑에 이어 기록 */}
+                      {(e.replies ?? []).map(r => (
+                        <div key={r.id} className="mt-1.5 flex items-start gap-1.5 border-l-2 border-gray-200 pl-2 group/reply">
+                          <CornerDownRight size={12} className="text-gray-300 shrink-0 mt-0.5" />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs text-gray-400">
+                              {r.handlerName || '담당자'} · {fmtDateTime(r.consultedAt || '')}
+                            </div>
+                            <div className="whitespace-pre-wrap text-gray-600 text-[13px]">{r.content}</div>
+                          </div>
+                          <button onClick={() => { if (window.confirm('이 답글을 삭제할까요?')) removeSalesReply(e.id, r.id); }}
+                            className="p-0.5 text-gray-300 hover:text-red-500 opacity-0 group-hover/reply:opacity-100 transition-opacity" title="답글 삭제">
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+                      {/* 답글 입력창 / 답글 달기 버튼 */}
+                      {replyOpen === e.id ? (
+                        <div className="mt-2 flex items-start gap-1.5">
+                          <textarea value={replyText} onChange={ev => setReplyText(ev.target.value)} rows={2} autoFocus
+                            onKeyDown={ev => { if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') submitReply(e.id); }}
+                            placeholder="후속 상담 내용 (Ctrl/⌘+Enter 등록)"
+                            className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          <div className="flex flex-col gap-1">
+                            <button onClick={() => submitReply(e.id)} className="px-2 py-1 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white">등록</button>
+                            <button onClick={() => { setReplyOpen(null); setReplyText(''); }} className="px-2 py-1 text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">취소</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button onClick={() => { setReplyOpen(e.id); setReplyText(''); }}
+                          className="mt-1.5 inline-flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600">
+                          <MessageSquarePlus size={12} /> 답글
+                        </button>
+                      )}
                     </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-gray-700">{e.handlerName || '-'}</td>
                     <td className="px-4 py-3">
                       <select value={e.sentiment} onChange={ev => patchSales(e, { sentiment: ev.target.value as SalesSentiment })}
                         className={`text-xs font-semibold rounded-full pl-2 pr-1 py-0.5 border-0 cursor-pointer focus:ring-2 focus:ring-blue-500 ${clsOf(SENTIMENTS, e.sentiment)}`}>

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall } from 'lucide-react';
+import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall, CornerDownRight } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { AssistantMessage } from '../types';
@@ -279,12 +279,13 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                       );
                     })}
                     {(m.sales ?? []).map((s, i) => {
-                      const isUpdate = (s.op ?? (s.id ? 'update' : 'add')) === 'update';
+                      const op = s.op ?? (s.id ? 'update' : 'add');
+                      const opLabel = op === 'reply' ? '답글' : op === 'update' ? '수정' : '기록';
                       const contact = [s.phone, s.email].filter(Boolean).join(' · ');
                       return (
                         <div key={`sl${i}`} className="flex items-start gap-2 text-xs text-gray-700">
-                          <PhoneCall size={13} className="text-blue-500 shrink-0 mt-0.5" />
-                          <span><strong>상담 {isUpdate ? '수정' : '기록'}</strong>{s.channel ? ` · ${SALES_CH_LABEL[s.channel] ?? s.channel}` : ''}{contact ? ` · ${contact}` : ''}{s.customerName ? ` · ${s.customerName}` : ''}{s.sentiment ? ` · ${SALES_SENT_LABEL[s.sentiment] ?? s.sentiment}` : ''}{s.content ? ` — ${s.content.slice(0, 30)}` : ''}{s.nasLink ? ' · 🔗NAS' : ''}</span>
+                          {op === 'reply' ? <CornerDownRight size={13} className="text-blue-500 shrink-0 mt-0.5" /> : <PhoneCall size={13} className="text-blue-500 shrink-0 mt-0.5" />}
+                          <span><strong>상담 {opLabel}</strong>{op !== 'reply' && s.channel ? ` · ${SALES_CH_LABEL[s.channel] ?? s.channel}` : ''}{contact ? ` · ${contact}` : ''}{s.customerName ? ` · ${s.customerName}` : ''}{op !== 'reply' && s.sentiment ? ` · ${SALES_SENT_LABEL[s.sentiment] ?? s.sentiment}` : ''}{s.content ? ` — ${s.content.slice(0, 30)}` : ''}{s.nasLink ? ' · 🔗NAS' : ''}</span>
                         </div>
                       );
                     })}

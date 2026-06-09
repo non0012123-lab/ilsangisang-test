@@ -371,7 +371,16 @@ export interface PriceProduct {
 //  • 다른 데이터와 달리 localStorage 캐시는 두지 않는다(공용 PC 에 고객정보가 남지 않도록).
 export type SalesChannel = 'phone' | 'inquiry' | 'etc';        // 전화 / 문의폼(이메일) / 기타
 export type SalesSentiment = 'very_positive' | 'positive' | 'neutral' | 'negative' | 'very_negative';
-export type SalesStatus = 'new' | 'in_progress' | 'done' | 'hold'; // 신규(미처리)/진행중/완료/보류
+export type SalesStatus = 'new' | 'absent' | 'prospect' | 'in_progress' | 'done' | 'hold'; // 신규(미처리)/부재/가망/진행중/완료/보류
+// 상담 답글(후속 통화·메모) — 같은 고객사 상담을 수정에 들어가지 않고 그 밑에 이어서 기록
+export interface SalesReply {
+  id: string;
+  content: string;          // 후속 상담 내용
+  handlerId: string;        // 답글 작성자(응대자) profiles.id
+  handlerName: string;
+  consultedAt?: string;     // 후속 상담 일시 (없으면 createdAt 사용)
+  createdAt: number;
+}
 export interface SalesEntry {
   id: string;
   consultedAt: string;     // 상담 일시 (ISO 또는 YYYY-MM-DD HH:mm)
@@ -388,14 +397,15 @@ export interface SalesEntry {
   nasLink?: string;        // 첨부/자료 NAS 링크(녹취·문의폼 캡처 등)
   result?: string;         // 결과/메모
   tags?: string[];         // 관심 제품/태그 (분석용)
+  replies?: SalesReply[];  // 후속 상담 답글 스레드(오래된 순)
   createdAt: number;
   updatedAt: number;
 }
 
-// AI 어시스턴트가 제안하는 상담 기록(추가/수정)
+// AI 어시스턴트가 제안하는 상담 기록(추가/수정/답글)
 export interface AssistantProposalSales {
-  op?: 'add' | 'update';
-  id?: string;            // 수정 시 기존 상담 id
+  op?: 'add' | 'update' | 'reply'; // reply = 기존 상담 스레드에 답글로 이어 달기
+  id?: string;            // 수정/답글 시 대상(부모) 상담 id
   consultedAt?: string;   // "YYYY-MM-DD HH:mm" 또는 "YYYY-MM-DD"
   channel?: SalesChannel;
   phone?: string;
