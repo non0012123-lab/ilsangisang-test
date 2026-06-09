@@ -41,7 +41,8 @@ jobs:
           # 태그일 때만 릴리스 생성, 브랜치 push 면 빌드만
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: '일상이상 데스크톱 ${{ github.ref_name }}'
-          releaseDraft: true
+          # 자동 업데이트가 releases/latest 의 latest.json 을 읽으므로 초안(draft)이 아닌 "발행" 상태여야 한다.
+          releaseDraft: false
           prerelease: false
 
       - name: Upload installer (빌드 검증용 아티팩트)

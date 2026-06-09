@@ -60,6 +60,8 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         // 셸 자동 업데이트
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // 업데이트 설치 후 재실행(relaunch) — 원격 웹의 자동 업데이트 코드가 IPC 로 호출
+        .plugin(tauri_plugin_process::init())
         // 네이티브 알림(웹뷰 웹알림 대신 OS 알림) — 원격 웹 페이지가 IPC 로 호출
         .plugin(tauri_plugin_notification::init())
         // 창 위치/크기 기억 — 어시스턴트 퀵바를 듀얼모니터 원하는 자리에 두면 다음에도 그 자리.
