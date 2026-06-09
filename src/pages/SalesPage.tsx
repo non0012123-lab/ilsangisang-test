@@ -121,6 +121,7 @@ export default function SalesPage() {
       followUpDate: form.followUpDate || undefined,
       nasLink: form.nasLink?.trim() || undefined,
       result: form.result?.trim() || undefined,
+      replies: prev?.replies, // ★ 수정 시 기존 답글 스레드 보존(form 에는 replies 가 없어 덮어쓰면 소실됨)
       id: editId ?? `sl-${now}-${Math.random().toString(36).slice(2, 6)}`,
       handlerId: prev?.handlerId ?? user?.id ?? '',
       handlerName: prev?.handlerName ?? user?.name ?? '',
@@ -198,8 +199,8 @@ export default function SalesPage() {
                         {CHANNELS.map(c => <option key={c.v} value={c.v}>{c.label}</option>)}
                       </select>
                     </td>
-                    <td className="px-4 py-3 max-w-md">
-                      <span className="whitespace-pre-wrap text-gray-700">{e.content}</span>
+                    <td className="px-4 py-3 max-w-md min-w-[160px]">
+                      <span className="block whitespace-pre-line break-words text-gray-700">{e.content}</span>
                       {e.nasLink && (
                         <button onClick={() => copyLink(e.id, e.nasLink!)}
                           className={`mt-0.5 ml-2 inline-flex items-center gap-1 text-xs transition-colors ${copiedId === e.id ? 'text-green-600' : 'text-gray-500 hover:text-blue-600'}`}
@@ -216,7 +217,7 @@ export default function SalesPage() {
                             <div className="text-xs text-gray-400">
                               {r.handlerName || '담당자'} · {fmtDateTime(r.consultedAt || '')}
                             </div>
-                            <div className="whitespace-pre-wrap text-gray-600 text-[13px]">{r.content}</div>
+                            <div className="whitespace-pre-line break-words text-gray-600 text-[13px]">{r.content}</div>
                           </div>
                           <button onClick={() => { if (window.confirm('이 답글을 삭제할까요?')) removeSalesReply(e.id, r.id); }}
                             className="p-0.5 text-gray-300 hover:text-red-500 opacity-0 group-hover/reply:opacity-100 transition-opacity" title="답글 삭제">

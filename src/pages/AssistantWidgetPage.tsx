@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
-import { Sparkles, X, Minimize2 } from 'lucide-react';
+import { Sparkles, X, Minimize2, Minus } from 'lucide-react';
 import DashboardAssistant from '../components/DashboardAssistant';
-import { hideCurrentWindow, resetCurrentWindowSize } from '../utils/tauriWindow';
+import { hideCurrentWindow, resetCurrentWindowSize, minimizeCurrentWindow } from '../utils/tauriWindow';
 
 // 데스크톱 앱 트레이용 어시스턴트 퀵바(별도 webview 창, ?widget=assistant 로 진입).
 //  • 네비/헤더/사이드바 없이 어시스턴트만 풀스크린.
@@ -33,6 +33,10 @@ export default function AssistantWidgetPage() {
         <button onClick={() => void resetCurrentWindowSize()} title="원래 크기로"
           className="shrink-0 p-1 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors">
           <Minimize2 size={14} />
+        </button>
+        <button onClick={() => void minimizeCurrentWindow()} title="최소화 (작업표시줄)"
+          className="shrink-0 p-1 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors">
+          <Minus size={14} />
         </button>
         <button onClick={() => void hideCurrentWindow()} title="닫기 (Esc)"
           className="shrink-0 p-1 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors">

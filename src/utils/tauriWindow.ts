@@ -17,6 +17,21 @@ export async function hideCurrentWindow(): Promise<void> {
   }
 }
 
+// 현재 창을 최소화한다(데스크톱 앱에서만) — 작업표시줄에 남도록.
+//  • 퀵바는 평소 skipTaskbar=true(오버레이)라, 최소화 전에 false 로 바꿔야 작업표시줄에 아이콘이 남는다.
+//  • 작업표시줄 아이콘을 클릭하면 복원된다. 단축키로 다시 띄우면 셸이 skipTaskbar 를 true 로 되돌린다.
+export async function minimizeCurrentWindow(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const w = getCurrentWindow();
+    await w.setSkipTaskbar(false);
+    await w.minimize();
+  } catch (e) {
+    console.warn('[tauri] 창 최소화 실패:', e);
+  }
+}
+
 // 어시스턴트 퀵바 기본 크기(tauri.conf.json 의 assistant 창과 동일하게 유지)
 export const ASSISTANT_DEFAULT_SIZE = { width: 560, height: 540 };
 
