@@ -44,6 +44,8 @@ const STATUS_LABEL: Record<string, string> = { completed: '완료', 'in-progress
 export default function TimetablePage() {
   const { entries, saveEntry, saveEntries, removeEntry, clients } = useApp();
   const [clientId, setClientId] = useState('all');
+  const [catFilter, setCatFilter] = useState<string[]>([]); // 선택 카테고리(여러 개). 비어 있으면 전체
+  const toggleCat = (cat: string) => setCatFilter(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
   const [curDate, setCurDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<number | null>(new Date().getDate());
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null; date?: string }>({ open: false });
@@ -56,11 +58,15 @@ export default function TimetablePage() {
   const monthStart = padDate(year, month, 1);
   const monthEnd = padDate(year, month, new Date(year, month + 1, 0).getDate());
 
-  // 이번 달과 겹치는(기간 작업 포함) 모든 작업
-  const visible = entries.filter(e =>
+  // 이번 달과 겹치는(기간 작업 포함) 작업 — 업체 필터까지만 적용(카테고리 칩 목록·개수 산정용)
+  const monthEntries = entries.filter(e =>
     overlapsRange(e, monthStart, monthEnd) &&
     (clientId === 'all' || e.clientId === clientId)
   );
+  // 카테고리 칩 목록: 기본 색상표 + 이번 달 실제 일정에 등장한 커스텀 카테고리
+  const catList = Array.from(new Set([...Object.keys(CAT_COLOR), ...monthEntries.map(e => e.category)])).filter(Boolean);
+  // 캘린더·패널·통계의 실제 소스 — 카테고리 필터(여러 개 중 하나라도 일치)까지 적용
+  const visible = monthEntries.filter(e => catFilter.length === 0 || catFilter.includes(e.category));
 
   // 기간 작업은 걸쳐 있는 모든 날짜 칸에 표시 (우측 패널/통계용)
   const byDay: Record<number, ScheduleEntry[]> = {};
@@ -166,6 +172,31 @@ export default function TimetablePage() {
                 <Plus size={16} /> 일정 추가
               </button>
             </div>
+          </div>
+
+          {/* 카테고리 필터 칩 — 클릭으로 해당 종류만 보기(여러 개 동시 선택 가능) */}
+          <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+            <button onClick={() => setCatFilter([])}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                catFilter.length === 0 ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+              }`}>
+              전체 {monthEntries.length}
+            </button>
+            {catList.map(cat => {
+              const cnt = monthEntries.filter(e => e.category === cat).length;
+              const active = catFilter.includes(cat);
+              const color = CAT_COLOR[cat] ?? '#6b7280';
+              return (
+                <button key={cat} onClick={() => toggleCat(cat)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                    active ? 'text-white border-transparent' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  } ${catFilter.length > 0 && !active ? 'opacity-50' : ''}`}
+                  style={active ? { backgroundColor: color } : undefined}>
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                  {cat} {cnt}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -363,17 +394,20 @@ export default function TimetablePage() {
                 </div>
               </div>
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">카테고리별</p>
-                <div className="space-y-1.5">
-                  {Object.entries(CAT_COLOR).map(([cat, color]) => {
-                    const cnt = visible.filter(e => e.category === cat).length;
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">카테고리별 (클릭해 필터)</p>
+                <div className="space-y-1">
+                  {catList.map(cat => {
+                    const cnt = monthEntries.filter(e => e.category === cat).length;
                     if (!cnt) return null;
+                    const color = CAT_COLOR[cat] ?? '#6b7280';
+                    const active = catFilter.includes(cat);
                     return (
-                      <div key={cat} className="flex items-center gap-2">
+                      <button key={cat} onClick={() => toggleCat(cat)}
+                        className={`w-full flex items-center gap-2 px-1.5 py-1 rounded-lg transition-colors ${active ? 'bg-gray-100' : 'hover:bg-gray-50'}`}>
                         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                        <span className="text-xs text-gray-600 flex-1 truncate">{cat}</span>
+                        <span className={`text-xs flex-1 truncate text-left ${active ? 'font-bold text-gray-900' : 'text-gray-600'}`}>{cat}</span>
                         <span className="text-xs font-semibold text-gray-700">{cnt}</span>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
@@ -431,16 +465,23 @@ export default function TimetablePage() {
           })()}
         </div>
 
-        {/* Legend */}
+        {/* Legend — 클릭하면 해당 카테고리 필터(상단 칩과 동기화) */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-5 py-3">
-          <div className="flex items-center gap-5 flex-wrap">
-            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">범례</span>
-            {Object.entries(CAT_COLOR).map(([cat, color]) => (
-              <span key={cat} className="flex items-center gap-1.5 text-xs text-gray-600">
-                <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
-                {cat}
-              </span>
-            ))}
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">범례 (클릭해 필터)</span>
+            {catList.map(cat => {
+              const color = CAT_COLOR[cat] ?? '#6b7280';
+              const active = catFilter.includes(cat);
+              return (
+                <button key={cat} onClick={() => toggleCat(cat)}
+                  className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg transition-colors ${
+                    active ? 'bg-gray-100 font-bold text-gray-900' : 'text-gray-600 hover:bg-gray-50'
+                  } ${catFilter.length > 0 && !active ? 'opacity-50' : ''}`}>
+                  <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
+                  {cat}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
