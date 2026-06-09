@@ -18,6 +18,15 @@ const STATUS_LABEL: Record<string, string> = { pending: '대기중', 'in-progres
 const REMINDER_TEXT: Record<string, string> = { '1h': '1시간 전', '30m': '30분 전', '10m': '10분 전', onTime: '정각' };
 const SALES_SENT_LABEL: Record<string, string> = { very_positive: '매우긍정', positive: '긍정', neutral: '보통', negative: '부정', very_negative: '매우부정' };
 const SALES_CH_LABEL: Record<string, string> = { phone: '전화', inquiry: '이메일', referral: '소개', etc: '기타' };
+const WD_LABEL = ['일', '월', '화', '수', '목', '금', '토'];
+// 반복 규칙 → 짧은 한국어 라벨(어시스턴트 미리보기용)
+const recurLabel = (r: { freq?: string; interval?: number; weekday?: number; day?: number; count?: number; until?: string }): string => {
+  const n = r.count ? `${r.count}회` : r.until ? `~${r.until}` : '12회';
+  if (r.freq === 'daily') return `매일 · ${n}`;
+  if (r.freq === 'weekly') return `${(r.interval ?? 1) >= 2 ? '격주' : '매주'}${r.weekday != null ? ` ${WD_LABEL[r.weekday]}요일` : ''} · ${n}`;
+  if (r.freq === 'monthly') return `${(r.interval ?? 1) >= 2 ? '격월' : '매월'}${r.day ? ` ${r.day}일` : ''} · ${n}`;
+  return n;
+};
 
 // 답변 본문 속 링크 감지: http(s) URL · www. 시작 · NAS UNC 경로(\\서버\...)
 const LINK_RE = /(https?:\/\/[^\s]+|www\.[^\s]+|\\\\[^\s]+)/g;
@@ -293,8 +302,9 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                       <div key={`e${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                         <CalendarPlus size={13} className="text-purple-500 shrink-0 mt-0.5" />
                         <span>
-                          <strong>신규 일정</strong> {e.date}{e.endDate && e.endDate !== 'null' ? `~${e.endDate}` : ''} · {e.managerName || selfName} · {e.clientName || '업체?'} · {e.category || '기타'}
+                          <strong>{e.recurrence ? '반복 일정' : '신규 일정'}</strong> {e.date}{e.endDate && e.endDate !== 'null' ? `~${e.endDate}` : ''} · {e.managerName || selfName} · {e.clientName || '업체?'} · {e.category || '기타'}
                           {e.keyword ? ` · ${e.keyword}` : ''}{e.status && e.status !== 'pending' ? ` (${STATUS_LABEL[e.status] ?? e.status})` : ''}{e.link ? ' · 🔗 링크' : ''}
+                          {e.recurrence && <span className="ml-1 inline-flex items-center gap-0.5 text-blue-600 font-medium">🔁 {recurLabel(e.recurrence)}</span>}
                         </span>
                       </div>
                     ))}

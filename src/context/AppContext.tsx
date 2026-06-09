@@ -6,6 +6,7 @@ import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMI
 import type { ReminderOption } from '../types';
 import { supabase } from '../lib/supabase';
 import { todayStr } from '../utils/today';
+import { recurrenceOccurrences } from '../utils/recurrence';
 import { fireDesktop, requestNotifyPermission, isNotifySupported } from '../utils/notifications';
 import { useAuth } from './AuthContext';
 
@@ -55,6 +56,7 @@ interface AppContextType {
   saveEntries: (entries: ScheduleEntry[]) => void;
   patchEntry: (id: string, patch: Partial<ScheduleEntry>) => void;
   removeEntry: (id: string) => void;
+  removeSeries: (seriesId: string, fromDate?: string) => void;  // 반복 일정 일괄 삭제(이후 전체)
   saveClient: (client: Client) => void;
   removeClient: (id: string) => void;
   saveHandover: (doc: HandoverDoc) => void;
@@ -417,6 +419,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeEntry = useCallback((id: string) => {
     setEntries(prev => prev.filter(e => e.id !== id));
     persistDelete('schedule_entries', id);
+  }, []);
+  // 반복(시리즈) 일괄 삭제: 같은 seriesId 의 일정 제거. fromDate 가 있으면 그 날짜 이후 회차만(=이후 전체).
+  const removeSeries = useCallback((seriesId: string, fromDate?: string) => {
+    const targets = entriesRef.current.filter(e => e.seriesId === seriesId && (!fromDate || e.date >= fromDate));
+    if (targets.length === 0) return;
+    const ids = new Set(targets.map(e => e.id));
+    setEntries(prev => prev.filter(e => !ids.has(e.id)));
+    targets.forEach(e => persistDelete('schedule_entries', e.id));
   }, []);
 
   // ── 업무 요청(요청함) ──
@@ -1133,13 +1143,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!e.date || !managerId || !clientId) return;
       const category = ((ASSISTANT_CATEGORIES as string[]).includes(e.category ?? '') ? e.category : (ASSISTANT_CATEGORIES.find(c => e.category?.includes(c)) ?? '기타')) as Category;
       const endDate = e.endDate && e.endDate !== 'null' && e.endDate > e.date ? e.endDate : undefined;
-      newEntries.push({
-        id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
-        date: e.date, endDate, managerId, managerName: mem.find(m => m.id === managerId)?.name ?? '',
+      const base = {
+        managerId, managerName: mem.find(m => m.id === managerId)?.name ?? '',
         category, keyword: e.keyword || undefined, clientId, clientName: clientNameOf(clientId),
         link: e.link || undefined,
         rank: Number(e.rank) > 0 ? Number(e.rank) : undefined, // "키워드 N위로 등록" → 순위 N
         status: (['pending', 'in-progress', 'completed'].includes(e.status ?? '') ? e.status : 'pending') as ScheduleStatus,
+      };
+      // 반복("매월 7일", "매주 화요일" 등) → 해당 날짜마다 실제 일정 N개 생성 + seriesId 로 묶음(수동 등록과 동일 로직).
+      if (e.recurrence && e.recurrence.freq) {
+        const rec = { ...e.recurrence, interval: e.recurrence.interval || 1, count: e.recurrence.count && e.recurrence.count > 0 ? e.recurrence.count : 12 };
+        const occ = recurrenceOccurrences(e.date, endDate, rec);
+        const seriesId = `srs-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`;
+        occ.forEach((o, j) => newEntries.push({
+          id: `${Date.now()}-${i}-${j}-${Math.random().toString(36).slice(2, 5)}`,
+          date: o.date, endDate: o.endDate, seriesId, recurrence: j === 0 ? rec : undefined, ...base,
+        }));
+        return;
+      }
+      newEntries.push({
+        id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+        date: e.date, endDate, ...base,
       });
     });
     if (newEntries.length) {
@@ -1699,7 +1723,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       aiImageRunning, aiImageError, startAiImageJob,
       assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
       conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
-      saveEntry, saveEntries, patchEntry, removeEntry, saveClient, removeClient, saveHandover, removeHandover,
+      saveEntry, saveEntries, patchEntry, removeEntry, removeSeries, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
       internalEvents, internalCategories, saveInternalEvent, removeInternalEvent, saveInternalCategory, removeInternalCategory,
       salesEntries, salesAccess, saveSalesEntry, removeSalesEntry, addSalesReply, removeSalesReply,

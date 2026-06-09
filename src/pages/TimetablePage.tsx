@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Sparkles, Calendar, X, CalendarRange, ExternalLink, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Sparkles, Calendar, X, CalendarRange, ExternalLink, Trash2, Repeat } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -42,7 +42,17 @@ const STATUS_STYLE: Record<string, string> = {
 const STATUS_LABEL: Record<string, string> = { completed: '완료', 'in-progress': '진행중', pending: '대기' };
 
 export default function TimetablePage() {
-  const { entries, saveEntry, saveEntries, removeEntry, clients } = useApp();
+  const { entries, saveEntry, saveEntries, removeEntry, removeSeries, clients } = useApp();
+  // 반복 일정 삭제: 시리즈면 "이 일정만 / 이후 전체" 선택(2단계 확인)
+  const deleteEntry = (e: ScheduleEntry) => {
+    if (!e.seriesId) {
+      if (window.confirm('이 일정을 삭제할까요? (되돌릴 수 없음)')) removeEntry(e.id);
+      return;
+    }
+    if (!window.confirm('반복 일정입니다. 삭제할까요?')) return;
+    const all = window.confirm('이후 회차도 모두 삭제할까요?\n\n확인 = 이 날짜 이후 전체 삭제\n취소 = 이 일정 하나만 삭제');
+    if (all) removeSeries(e.seriesId, e.date); else removeEntry(e.id);
+  };
   const [clientId, setClientId] = useState('all');
   const [catFilter, setCatFilter] = useState<string[]>([]); // 선택 카테고리(여러 개). 비어 있으면 전체
   const toggleCat = (cat: string) => setCatFilter(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
@@ -342,11 +352,12 @@ export default function TimetablePage() {
                           <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${STATUS_STYLE[entry.status]}`}>
                             {STATUS_LABEL[entry.status]}
                           </span>
-                          <button onClick={ev => { ev.stopPropagation(); if (window.confirm('이 일정을 삭제할까요? (되돌릴 수 없음)')) removeEntry(entry.id); }}
+                          <button onClick={ev => { ev.stopPropagation(); deleteEntry(entry); }}
                             className="p-1 -mr-1 text-gray-300 hover:text-red-500 transition-colors" title="삭제"><Trash2 size={13} /></button>
                         </div>
                       </div>
-                      <p className="text-sm font-semibold text-gray-900 mb-0.5 truncate">
+                      <p className="text-sm font-semibold text-gray-900 mb-0.5 truncate flex items-center gap-1">
+                        {entry.seriesId && <Repeat size={11} className="text-blue-500 shrink-0" />}
                         {entry.opinionTitle ?? entry.keyword ?? entry.category}
                       </p>
                       <p className="text-xs text-gray-400 truncate">{entry.managerName} · {entry.clientName}</p>

@@ -1,10 +1,35 @@
-import { useState } from 'react';
-import { X, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
-import type { ScheduleEntry, Category, ScheduleStatus, AIMetrics } from '../types';
+import { useMemo, useState } from 'react';
+import { X, Sparkles, ChevronDown, ChevronUp, Repeat } from 'lucide-react';
+import type { ScheduleEntry, Category, ScheduleStatus, AIMetrics, Recurrence } from '../types';
 import { useApp } from '../context/AppContext';
 import ImageDropzone from './ImageDropzone';
 import ImageThumb from './ImageThumb';
 import { MAX_IMAGES, entryImages } from '../utils/entryImages';
+import { recurrenceOccurrences } from '../utils/recurrence';
+
+// 반복 옵션(UI) → Recurrence 규칙 매핑. 'none' 이면 반복 없음(단건).
+type RecurOpt = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
+const RECUR_OPTS: { v: RecurOpt; label: string }[] = [
+  { v: 'none', label: '반복 없음' },
+  { v: 'daily', label: '매일' },
+  { v: 'weekly', label: '매주(같은 요일)' },
+  { v: 'biweekly', label: '격주' },
+  { v: 'monthly', label: '매월(같은 일자)' },
+];
+const WD = ['일', '월', '화', '수', '목', '금', '토'];
+// 'YYYY-MM-DD' → 요일(0~6), 로컬 기준(UTC 파싱 오차 방지)
+const wdOf = (s?: string): number => { if (!s) return 0; const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d).getDay(); };
+// UI 옵션 + 시작일 → Recurrence 규칙
+const buildRecurrence = (opt: RecurOpt, startStr: string, count: number, until?: string): Recurrence | null => {
+  if (opt === 'none') return null;
+  const [y, m, d] = startStr.split('-').map(Number);
+  const wd = new Date(y, m - 1, d).getDay();
+  const base = { count: Math.max(1, count), until: until || undefined };
+  if (opt === 'daily') return { freq: 'daily', interval: 1, ...base };
+  if (opt === 'weekly') return { freq: 'weekly', interval: 1, weekday: wd, ...base };
+  if (opt === 'biweekly') return { freq: 'weekly', interval: 2, weekday: wd, ...base };
+  return { freq: 'monthly', interval: 1, day: d, ...base }; // monthly
+};
 
 const CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 const STATUSES: { value: ScheduleStatus; label: string }[] = [
@@ -35,9 +60,10 @@ interface Props {
 }
 
 export default function ScheduleModal({ entry, defaultDate, defaultClientId, onSave, onClose }: Props) {
-  const { clients, members } = useApp();
+  const { clients, members, saveEntries } = useApp();
   const activeClients = clients.filter(c => c.status !== 'inactive');
   const defaultClient = activeClients.find(c => c.id === defaultClientId) ?? activeClients[0];
+  const isEdit = !!entry; // 반복은 신규 등록에서만 (수정은 단건)
 
   const [form, setForm] = useState<Partial<ScheduleEntry>>(
     entry ?? {
@@ -53,6 +79,19 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
   const [metrics, setMetrics] = useState<AIMetrics>(entry?.metrics ?? {});
   const [showMetrics, setShowMetrics] = useState(!!entry?.metrics);
   const [aiLoading, setAiLoading] = useState(false);
+  // 반복 설정(신규 등록 전용)
+  const [recurOpt, setRecurOpt] = useState<RecurOpt>('none');
+  const [recurCount, setRecurCount] = useState(12);
+  const [recurUntil, setRecurUntil] = useState('');
+
+  // 반복 미리보기 — 생성될 발생일 목록(최대 몇 개만 보여주고 총 개수 표기)
+  const recurPreview = useMemo(() => {
+    if (isEdit || recurOpt === 'none' || !form.date) return null;
+    const rec = buildRecurrence(recurOpt, form.date, recurCount, recurUntil || undefined);
+    if (!rec) return null;
+    const endDate = form.endDate && form.endDate > form.date ? form.endDate : undefined;
+    return recurrenceOccurrences(form.date, endDate, rec).map(o => o.date);
+  }, [isEdit, recurOpt, recurCount, recurUntil, form.date, form.endDate]);
 
   const set = (key: keyof ScheduleEntry, value: unknown) =>
     setForm(prev => ({ ...prev, [key]: value }));
@@ -97,9 +136,8 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
     const endDate = form.endDate && form.endDate > form.date! ? form.endDate : undefined;
 
     const hasMetrics = Object.values(metrics).some(v => v !== undefined && v !== '');
-    onSave({
-      id: entry?.id ?? Date.now().toString(),
-      date: form.date!, endDate, managerId: form.managerId!, managerName: form.managerName!,
+    const common = {
+      managerId: form.managerId!, managerName: form.managerName!,
       category: form.category!, clientId: form.clientId!, clientName: form.clientName!,
       status: form.status!,
       keyword: form.keyword, link: form.link, rank: form.rank,
@@ -107,7 +145,26 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
       images: images.length ? images : undefined, screenshot: undefined,
       metrics: hasMetrics ? { ...metrics, aiAnalyzed: false } : undefined,
       notes: form.notes,
-    });
+    };
+
+    // 반복 설정이 있으면(신규 등록) 해당 날짜마다 실제 일정 N개를 한 번에 생성하고 seriesId 로 묶는다.
+    const rec = isEdit ? null : buildRecurrence(recurOpt, form.date!, recurCount, recurUntil || undefined);
+    if (rec) {
+      const occ = recurrenceOccurrences(form.date!, endDate, rec);
+      if (occ.length === 0) { alert('생성할 반복 일정이 없습니다. 횟수/종료일을 확인해주세요.'); return; }
+      const seriesId = `srs-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const series: ScheduleEntry[] = occ.map((o, i) => ({
+        id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+        date: o.date, endDate: o.endDate, seriesId,
+        recurrence: i === 0 ? rec : undefined, // 시리즈 대표 정보는 첫 회차에만
+        ...common,
+      }));
+      saveEntries(series);
+      onClose();
+      return;
+    }
+
+    onSave({ id: entry?.id ?? Date.now().toString(), date: form.date!, endDate, ...common });
   };
 
   const managers = members;
@@ -144,6 +201,47 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
             <p className="-mt-2 text-xs text-blue-600">
               📅 {form.date} ~ {form.endDate} 기간 작업으로 타임테이블에 자동 표시됩니다.
             </p>
+          )}
+
+          {/* 반복 설정 — 신규 등록에서만. 선택 시 해당 날짜마다 실제 일정이 생성됨 */}
+          {!isEdit && (
+            <div className="rounded-xl border border-gray-200 p-3 space-y-3 bg-gray-50/60">
+              <div className="flex items-center gap-2">
+                <Repeat size={14} className="text-blue-600" />
+                <label className="text-xs font-semibold text-gray-700">반복</label>
+                <select value={recurOpt} onChange={e => setRecurOpt(e.target.value as RecurOpt)}
+                  className="ml-auto border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  {RECUR_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+                </select>
+              </div>
+              {recurOpt !== 'none' && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-500 mb-1">횟수</label>
+                      <input type="number" min={1} max={366} value={recurCount} disabled={!!recurUntil}
+                        onChange={e => setRecurCount(Math.max(1, Number(e.target.value) || 1))}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white disabled:bg-gray-100 disabled:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-500 mb-1">또는 종료일(선택)</label>
+                      <input type="date" value={recurUntil} min={form.date}
+                        onChange={e => setRecurUntil(e.target.value)}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                  </div>
+                  {recurUntil && <button type="button" onClick={() => setRecurUntil('')} className="text-[11px] text-gray-400 hover:text-gray-600">종료일 지우고 횟수로</button>}
+                  {recurPreview && (
+                    <p className="text-xs text-blue-700 bg-blue-50 rounded-lg px-2.5 py-2 leading-relaxed">
+                      🔁 {recurOpt === 'monthly' ? `매월 ${Number(form.date?.split('-')[2])}일` : recurOpt === 'weekly' ? `매주 ${WD[wdOf(form.date)]}요일` : recurOpt === 'biweekly' ? `격주 ${WD[wdOf(form.date)]}요일` : '매일'}
+                      {' · '}총 <strong>{recurPreview.length}</strong>개 생성
+                      <br />
+                      <span className="text-blue-600/80">{recurPreview.slice(0, 5).join(', ')}{recurPreview.length > 5 ? ` … ${recurPreview[recurPreview.length - 1]}` : ''}</span>
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
           )}
 
           {/* Row 2 */}

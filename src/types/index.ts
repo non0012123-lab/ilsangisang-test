@@ -65,7 +65,7 @@ export interface AiPlanResult {
 
 // ── 대시보드 AI 어시스턴트 ──
 // 어시스턴트가 제안하는 액션들 (사용자가 "적용" 해야 반영됨)
-export interface AssistantProposalEntry { date?: string; endDate?: string | null; managerName?: string; clientName?: string; category?: string; keyword?: string; status?: string; link?: string; rank?: number }
+export interface AssistantProposalEntry { date?: string; endDate?: string | null; managerName?: string; clientName?: string; category?: string; keyword?: string; status?: string; link?: string; rank?: number; recurrence?: Recurrence }
 export interface AssistantProposalUpdate { id?: string; date?: string | null; endDate?: string | null; managerName?: string | null; status?: string | null; link?: string | null; rank?: number | null }
 // 클라이언트는 추가/수정/삭제를 op 로 구분 (수정·삭제는 id 사용). reportAnchorDate = 월간 보고 기준 시작일.
 export interface AssistantProposalClient { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; industry?: string; categories?: string[]; contactPerson?: string; phone?: string; email?: string; status?: 'active' | 'inactive' | 'pending'; reportAnchorDate?: string }
@@ -162,10 +162,23 @@ export interface EntryImage {
   kind: ImageKind;
 }
 
+// 반복 일정 규칙 — 등록 시 해당 날짜마다 실제 일정(ScheduleEntry)들을 생성하고 seriesId 로 묶는다.
+//  • 규칙형(가상)이 아니라 실체화 방식: 각 회차가 독립 레코드라 상태·링크·순위·지표를 따로 가진다.
+export interface Recurrence {
+  freq: 'daily' | 'weekly' | 'monthly';
+  interval: number;   // 1=매주/매월, 2=격주/격월
+  weekday?: number;   // weekly: 0(일)~6(토)
+  day?: number;       // monthly: 1~31 (그 달에 그 날이 없으면 말일로 당김)
+  count?: number;     // 생성 횟수(종료일 미지정 시)
+  until?: string;     // 종료일 YYYY-MM-DD (있으면 이 날까지 생성)
+}
+
 export interface ScheduleEntry {
   id: string;
   date: string;        // 시작일 (하루 작업이면 종료일과 동일)
   endDate?: string;    // 마감일 (기간 작업일 때만; 없으면 date 하루)
+  seriesId?: string;       // 같은 반복에서 생성된 일정 묶음 id (시리즈 일괄 삭제용)
+  recurrence?: Recurrence; // 생성 근거(시리즈 대표 정보, 첫 회차에 보관)
   managerId: string;
   managerName: string;
   category: Category;
