@@ -24,6 +24,10 @@ fn show_main(app: &tauri::AppHandle) {
 //  • 위치는 사용자가 드래그해둔 마지막 자리를 그대로 사용(window-state 플러그인이 기억) — 중앙 강제 X.
 fn show_assistant(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("assistant") {
+        // 최소화 버튼으로 작업표시줄에 내려갔던 경우(skipTaskbar=false) → 단축키로 다시 부르면
+        // 깔끔한 오버레이로 복귀하도록 작업표시줄에서 다시 숨긴다.
+        let _ = w.unminimize();
+        let _ = w.set_skip_taskbar(true);
         let _ = w.show();
         let _ = w.set_focus();
     }
