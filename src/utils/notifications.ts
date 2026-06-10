@@ -45,7 +45,7 @@ export async function requestNotifyPermission(): Promise<NotificationPermission>
 // 실제로 알림을 생성했으면 true, (권한 없음/미지원/생성 실패) 면 false 를 반환한다.
 // requireInteraction: 자동으로 사라지지 않고 사용자가 클릭/닫을 때까지 화면에 유지 — 담당자가
 //   자리를 비웠다 돌아와도 놓치지 않도록(데스크톱 Chrome/Edge에서 동작, macOS/모바일은 OS 정책상 제한).
-export function fireDesktop(title: string, body?: string, tag?: string): boolean {
+export function fireDesktop(title: string, body?: string, tag?: string, link?: string): boolean {
   // Tauri 데스크톱: 네이티브 알림(권한 프롬프트 없이 OS 가 표시). 비동기지만 fire-and-forget.
   if (isTauri()) {
     (async () => {
@@ -57,15 +57,32 @@ export function fireDesktop(title: string, body?: string, tag?: string): boolean
     })();
     return true;
   }
-  // 브라우저: 웹 Notification
+  // 브라우저
   if (!('Notification' in window) || Notification.permission !== 'granted') return false;
+  // ★ 모바일(Android Chrome·설치형 PWA·iOS 16.4+)은 new Notification() 이 막혀 있어
+  //    반드시 서비스워커의 showNotification 을 써야 한다. SW 가 있으면 그쪽으로 띄운다.
+  if ('serviceWorker' in navigator) {
+    try {
+      navigator.serviceWorker.ready.then(reg => {
+        reg.showNotification(title, {
+          body, tag, icon: '/icon.svg', badge: '/icon.svg',
+          data: { link: link || '/' }, requireInteraction: true,
+        }).catch(() => fallbackNotification(title, body, tag));
+      }).catch(() => fallbackNotification(title, body, tag));
+      return true;
+    } catch { /* 아래 생성자 폴백 */ }
+  }
+  return fallbackNotification(title, body, tag);
+}
+
+// 서비스워커가 없는 데스크톱 브라우저용 폴백(구형/SW 미등록).
+function fallbackNotification(title: string, body?: string, tag?: string): boolean {
   try {
-    const n = new Notification(title, { body, tag, icon: '/favicon.ico', requireInteraction: true });
+    const n = new Notification(title, { body, tag, icon: '/icon.svg', requireInteraction: true });
     n.onclick = () => { try { window.focus(); } catch { /* noop */ } n.close(); };
     return true;
   } catch (e) {
-    // 일부 브라우저(예: Android Chrome)는 ServiceWorker 없이는 생성자 호출이 막힘
-    console.warn('[notify] 데스크톱 알림 생성 실패:', e);
+    console.warn('[notify] 알림 생성 실패:', e);
     return false;
   }
 }

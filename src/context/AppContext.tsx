@@ -353,7 +353,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setNotifications(prev => [notif, ...prev].slice(0, NOTIFS_MAX));
     // tag 는 알림별 고유 id — 같은 타입이라도 매번 새 OS 알림으로 떠야 함(타입을 tag 로 쓰면
     // requireInteraction 으로 남은 이전 알림을 조용히 교체해 새 알림이 안 뜨는 문제가 있었음).
-    return fireDesktop(notif.title, notif.body, notif.id); // 데스크톱 알림이 실제로 떴는지
+    return fireDesktop(notif.title, notif.body, notif.id, notif.link); // 데스크톱/모바일 알림이 실제로 떴는지(클릭 시 link 로 이동)
   }, []);
   const markAllNotificationsRead = useCallback(() => setNotifications(prev => prev.map(n => n.read ? n : { ...n, read: true })), []);
   const markNotificationRead = useCallback((id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n)), []);

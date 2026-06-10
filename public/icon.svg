@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- maskable 안전영역(중앙 80%)을 고려해 글리프를 가운데로 모았다 -->
+  <rect width="512" height="512" fill="#2563eb"/>
+  <g fill="#ffffff">
+    <rect x="170" y="280" width="44" height="92" rx="8"/>
+    <rect x="234" y="232" width="44" height="140" rx="8"/>
+    <rect x="298" y="184" width="44" height="188" rx="8"/>
+  </g>
+</svg>

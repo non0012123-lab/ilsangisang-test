@@ -1,0 +1,16 @@
+{
+  "name": "일상이상 커뮤니케이션",
+  "short_name": "일상이상",
+  "description": "일상이상 마케팅 대행 — 스케줄·보고·클라이언트 포털",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb",
+  "lang": "ko",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
