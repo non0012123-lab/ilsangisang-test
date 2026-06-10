@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { ExternalLink, Copy, Plus, Check, X } from 'lucide-react';
+import { toNasForOS } from '../utils/nasPath';
 
 interface Props {
   link?: string;
@@ -68,16 +69,18 @@ export default function InlineLink({ link, onChange, onCopied, className = '' }:
     );
   }
 
+  // NAS 경로는 보는 사람 OS 방언(\\… ↔ smb://…)으로 표시·복사. 웹 링크는 원문 그대로.
+  const shown = toNasForOS(link);
   return (
     <div className={`flex items-center gap-1 ${className}`}>
-      <a href={link} target="_blank" rel="noopener noreferrer"
-        className="table-link link-cell" title={link}>{link}</a>
+      <a href={shown} target="_blank" rel="noopener noreferrer"
+        className="table-link link-cell" title={shown}>{shown}</a>
       <div className="flex gap-0.5 shrink-0">
-        <a href={link} target="_blank" rel="noopener noreferrer"
+        <a href={shown} target="_blank" rel="noopener noreferrer"
           className="p-1 text-gray-300 hover:text-blue-500 transition-colors" title="새 탭으로 열기">
           <ExternalLink size={12} />
         </a>
-        <button onClick={() => copy(link)} className="p-1 text-gray-300 hover:text-gray-700 transition-colors" title="링크 복사">
+        <button onClick={() => copy(shown)} className="p-1 text-gray-300 hover:text-gray-700 transition-colors" title="링크 복사">
           <Copy size={12} />
         </button>
         <button onClick={() => { setValue(link); setEditing(true); }} className="p-1 text-gray-300 hover:text-gray-700 transition-colors" title="링크 수정">

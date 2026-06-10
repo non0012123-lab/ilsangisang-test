@@ -5,6 +5,7 @@ import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { SalesEntry, SalesChannel, SalesSentiment, SalesStatus } from '../types';
+import { toNasForOS } from '../utils/nasPath';
 
 // 라벨·색상 정의 ─────────────────────────────────────────
 const CHANNELS: { v: SalesChannel; label: string }[] = [
@@ -74,7 +75,7 @@ export default function SalesPage() {
 
   // NAS 링크 복사(바로가기 X — 폴더경로라 탐색기에 붙여넣는 용도)
   const copyLink = (id: string, link: string) => {
-    navigator.clipboard.writeText(link).catch(() => {});
+    navigator.clipboard.writeText(toNasForOS(link)).catch(() => {}); // NAS 면 보는 OS 방언으로 복사
     setCopiedId(id);
     setTimeout(() => setCopiedId(c => (c === id ? null : c)), 1500);
   };
@@ -204,7 +205,7 @@ export default function SalesPage() {
                       {e.nasLink && (
                         <button onClick={() => copyLink(e.id, e.nasLink!)}
                           className={`mt-0.5 ml-2 inline-flex items-center gap-1 text-xs transition-colors ${copiedId === e.id ? 'text-green-600' : 'text-gray-500 hover:text-blue-600'}`}
-                          title={e.nasLink}>
+                          title={toNasForOS(e.nasLink)}>
                           {copiedId === e.id ? <Check size={11} /> : <Copy size={11} />}
                           {copiedId === e.id ? '복사됨' : 'NAS 링크 복사'}
                         </button>

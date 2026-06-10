@@ -5,6 +5,8 @@ import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { WorkRequest, RequestStatus } from '../types';
+import LinkifiedText from '../components/LinkifiedText';
+import { convertNasInText } from '../utils/nasPath';
 
 const relTime = (ts: number): string => {
   const min = Math.floor((Date.now() - ts) / 60000);
@@ -124,12 +126,12 @@ export default function RequestsPage() {
                       <span className="text-xs text-gray-400">{relTime(r.createdAt)}</span>
                     </div>
                     <h3 className="font-bold text-gray-900 break-words">{r.title}</h3>
-                    {r.body && <p className="text-sm text-gray-500 mt-0.5 whitespace-pre-wrap break-words">{r.body}</p>}
+                    {r.body && <p className="text-sm text-gray-500 mt-0.5 whitespace-pre-wrap break-words"><LinkifiedText text={r.body} /></p>}
                     {r.doneNote && (
                       <div className="mt-1.5 flex items-start gap-1.5 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1.5">
                         <span className="text-xs text-emerald-700 font-semibold shrink-0 mt-0.5">📎 완료</span>
-                        <span className="text-xs text-gray-700 break-all flex-1 whitespace-pre-wrap">{r.doneNote}</span>
-                        <button onClick={() => copyNote(r.id, r.doneNote!)} className={`shrink-0 p-0.5 rounded transition-colors ${copiedId === r.id ? 'text-green-600' : 'text-gray-400 hover:text-blue-600'}`} title="복사">
+                        <span className="text-xs text-gray-700 break-all flex-1 whitespace-pre-wrap"><LinkifiedText text={r.doneNote} /></span>
+                        <button onClick={() => copyNote(r.id, convertNasInText(r.doneNote!))} className={`shrink-0 p-0.5 rounded transition-colors ${copiedId === r.id ? 'text-green-600' : 'text-gray-400 hover:text-blue-600'}`} title="복사">
                           {copiedId === r.id ? <Check size={13} /> : <Copy size={13} />}
                         </button>
                       </div>

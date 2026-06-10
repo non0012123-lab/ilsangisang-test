@@ -4,6 +4,7 @@ import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, 
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { AssistantMessage } from '../types';
+import { toNasForOS } from '../utils/nasPath';
 
 const relTime = (ts: number): string => {
   const min = Math.floor((Date.now() - ts) / 60000);
@@ -28,8 +29,8 @@ const recurLabel = (r: { freq?: string; interval?: number; weekday?: number; day
   return n;
 };
 
-// 답변 본문 속 링크 감지: http(s) URL · www. 시작 · NAS UNC 경로(\\서버\...)
-const LINK_RE = /(https?:\/\/[^\s]+|www\.[^\s]+|\\\\[^\s]+)/g;
+// 답변 본문 속 링크 감지: http(s) URL · www. 시작 · NAS 경로(\\서버\… · smb://서버/…)
+const LINK_RE = /(https?:\/\/[^\s]+|www\.[^\s]+|smb:\/\/[^\s]+|\\\\[^\s]+)/gi;
 // URL 끝에 붙은 문장부호(마침표·괄호 등)는 링크에서 떼어 본문으로 되돌린다.
 const TRAIL_RE = /[.,;:!?)\]}'"」』）]+$/;
 
@@ -101,15 +102,16 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
       if (m.index > last) nodes.push(text.slice(last, m.index));
       const isWeb = /^(https?:\/\/|www\.)/i.test(url);
       const href = url.startsWith('www.') ? `https://${url}` : url;
+      const shown = toNasForOS(url); // NAS 면 보는 OS 방언으로, 웹이면 원문 그대로
       const k = `${msgKey}:lnk${i}`;
       nodes.push(
         <span key={`l${i}`} className="inline-flex items-baseline gap-0.5 max-w-full">
           {isWeb ? (
-            <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{url}</a>
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{shown}</a>
           ) : (
-            <span className="break-all underline decoration-dotted decoration-gray-400">{url}</span>
+            <span className="break-all underline decoration-dotted decoration-gray-400" title={shown}>{shown}</span>
           )}
-          <button onClick={() => copy(url, k)} title="링크 복사"
+          <button onClick={() => copy(shown, k)} title="링크 복사"
             className={`shrink-0 self-center p-0.5 rounded transition-colors ${copiedKey === k ? 'text-green-600' : 'text-gray-400 hover:text-blue-600'}`}>
             {copiedKey === k ? <Check size={11} /> : <Copy size={11} />}
           </button>
