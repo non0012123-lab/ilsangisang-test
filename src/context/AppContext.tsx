@@ -1047,6 +1047,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       deletedClients: [], updatedClientsPrev: [], deletedHandovers: [],
       salesIds: [], updatedSalesPrev: [],
     };
+    const appliedUpdates: string[] = []; // 알림용: 실제 적용된 "일정 변경"의 핵심 내용(순위·링크·날짜 등)
+    const deletedDescs: string[] = [];   // 알림용: 삭제된 일정 핵심 내용
 
     const matchManager = (name?: string) => {
       if (!name) return '';
@@ -1225,6 +1227,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (Object.keys(patch).length) {
         if (!patchedIds.has(cur.id)) { undo.updatedPrev.push({ ...cur }); patchedIds.add(cur.id); count += 1; }
         patchEntry(cur.id, patch);
+        // 알림용: 무엇이 어떻게 바뀌었는지 핵심을 사람이 읽을 형태로 기록
+        const who = `${cur.clientName}${cur.keyword ? `(${cur.keyword})` : cur.category ? `(${cur.category})` : ''}`;
+        const ch: string[] = [];
+        if (patch.rank !== undefined) ch.push(`순위 ${patch.rank}위`);
+        if ('link' in patch) ch.push(patch.link ? (cur.link ? '링크 변경' : '링크 추가') : '링크 삭제');
+        if (patch.date) ch.push(`날짜 ${patch.date}`);
+        if (patch.managerName) ch.push(`담당 ${patch.managerName}`);
+        if (patch.status) ch.push(patch.status === 'completed' ? '완료' : patch.status === 'in-progress' ? '진행중' : '대기');
+        if (ch.length) appliedUpdates.push(`${who} ${ch.join('·')}`);
       }
     });
 
@@ -1233,6 +1244,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const cur = entriesRef.current.find(en => en.id === id);
       if (!cur) return;
       undo.deletedEntries.push({ ...cur });
+      deletedDescs.push(`${cur.clientName}${cur.keyword ? `(${cur.keyword})` : cur.category ? `(${cur.category})` : ''} ${cur.date}`);
       removeEntry(id);
       count += 1;
     });
@@ -1464,26 +1476,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
-    // AI 어시스턴트로 반영된 변경도 알림. 무엇을 했는지 핵심을 보여준다(일정 → 요청 → 그 외 순).
+    // 알림은 "적용했다"가 아니라 "무엇이 바뀌었는지" 핵심 내용을 제목·본문에 담는다.
+    // 우선순위: 일정 변경(순위·링크 등) → 새 일정 → 삭제 → 내부 일정 → 업무 요청 → 그 외.
     if (count > 0) {
-      const rest = count - 1;
       const head = newEntries[0];
       const reqHead = newRequests[0];
       const intHead = newInternal[0];
-      let body: string, link = '/schedule/daily';
-      if (head) {
+      const more = (n: number) => n > 1 ? ` 외 ${n - 1}건` : '';
+      let title: string, body: string, link = '/schedule/daily';
+      if (appliedUpdates.length) {                       // 순위/링크/날짜/담당 변경 — 가장 흔한 케이스
+        title = '일정 변경';
+        body = `${appliedUpdates[0]}${more(appliedUpdates.length)}`;
+      } else if (head) {
+        title = '새 일정 등록';
         const label = `${head.clientName} ${head.keyword || head.category}`.trim();
-        body = `${label} 일정${rest > 0 ? ` 외 ${rest}건` : ''}이 반영됐어요`;
+        body = `${label}${head.date ? ` · ${head.date}` : ''}${newEntries.length > 1 ? ` 외 ${newEntries.length - 1}건` : ''}`;
+      } else if (deletedDescs.length) {
+        title = '일정 삭제';
+        body = `${deletedDescs[0]}${more(deletedDescs.length)}`;
       } else if (intHead) {
-        body = `내부 일정 ‘${intHead.title}’(${intHead.category})${rest > 0 ? ` 외 ${rest}건` : ''}이 등록됐어요`;
+        title = '내부 일정 등록';
+        body = `${intHead.title}(${intHead.category})${newInternal.length > 1 ? ` 외 ${newInternal.length - 1}건` : ''}`;
         link = '/internal';
       } else if (reqHead) {
-        body = `${reqHead.toName || '담당자'}에게 ‘${reqHead.title}’ 요청${rest > 0 ? ` 외 ${rest}건` : ''}을 보냈어요`;
+        title = '업무 요청 전송';
+        body = `${reqHead.toName || '담당자'} · ${reqHead.title}${newRequests.length > 1 ? ` 외 ${newRequests.length - 1}건` : ''}`;
         link = '/requests';
       } else {
+        title = '변경 반영됨';
         body = `${count}건이 반영됐어요`;
       }
-      pushNotification({ type: 'assistant', title: 'AI 어시스턴트 적용 완료', body, link });
+      pushNotification({ type: 'assistant', title, body, link });
     }
   }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, saveInternalEvent, saveInternalCategory, saveSalesEntry, pushNotification, pushStickyNotice, mutateMessages]);
 
