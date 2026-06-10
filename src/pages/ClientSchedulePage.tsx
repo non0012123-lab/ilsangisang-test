@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, NavLink, Navigate } from 'react-router-dom';
-import { Plus, Pencil, Trash2, CalendarRange, Building2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, CalendarRange, Building2, Search } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
@@ -21,10 +21,22 @@ export default function ClientSchedulePage() {
   const { notify, show: showToast } = useCopyToast();
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
+  const [clientSearch, setClientSearch] = useState('');
 
   const client = clients.find(c => c.id === clientId);
-  // 활성 클라이언트 탭 (상단 빠른 이동)
+  // 활성 클라이언트 (사이드바 목록 소스)
   const tabClients = clients.filter(c => c.status !== 'inactive');
+  // 업체별 작업 수 — 사이드바에 표시
+  const countByClient = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of entries) m.set(e.clientId, (m.get(e.clientId) ?? 0) + 1);
+    return m;
+  }, [entries]);
+  // 검색어로 사이드바 목록 추리기(업체명·업종)
+  const q = clientSearch.trim().toLowerCase();
+  const sidebarClients = q
+    ? tabClients.filter(c => c.name.toLowerCase().includes(q) || (c.industry ?? '').toLowerCase().includes(q))
+    : tabClients;
 
   // 등록되지 않은 클라이언트면 첫 활성 클라이언트로 이동
   if (!client) {
@@ -58,19 +70,42 @@ export default function ClientSchedulePage() {
   return (
     <Layout>
       <Header title="클라이언트별 스케줄" subtitle="업체별 작업 현황을 확인합니다" />
-      <div className="flex-1 p-6 space-y-4">
-        {/* Client Tabs */}
-        <div className="flex gap-2 flex-wrap">
-          {tabClients.map(c => (
-            <NavLink key={c.id} to={`/client/${c.id}`}
-              className={({ isActive }) =>
-                `flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${isActive ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-600 border border-gray-200 hover:border-blue-300 hover:text-blue-600'}`
-              }>
-              <Building2 size={14} />{c.name}
-            </NavLink>
-          ))}
-        </div>
+      <div className="flex-1 p-6">
+       <div className="flex flex-col lg:flex-row gap-4">
+        {/* 업체 검색 사이드바 */}
+        <aside className="lg:w-72 lg:shrink-0">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-3 lg:sticky lg:top-6">
+            <div className="relative mb-2">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input type="text" value={clientSearch} onChange={e => setClientSearch(e.target.value)}
+                placeholder="업체 검색…"
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="space-y-1 max-h-[40vh] lg:max-h-[calc(100vh-180px)] overflow-y-auto pr-0.5">
+              {sidebarClients.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-6">검색 결과가 없습니다</p>
+              ) : sidebarClients.map(c => (
+                <NavLink key={c.id} to={`/client/${c.id}`}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-colors ${isActive ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-700 hover:bg-gray-50'}`
+                  }>
+                  {({ isActive }) => (
+                    <>
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${isActive ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>{c.name[0]}</div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold truncate leading-tight">{c.name}</p>
+                        <p className={`text-[11px] truncate leading-tight ${isActive ? 'text-white/70' : 'text-gray-400'}`}>{c.industry || '업종 미지정'} · {countByClient.get(c.id) ?? 0}건</p>
+                      </div>
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          </div>
+        </aside>
 
+        {/* 선택 업체 상세 */}
+        <div className="flex-1 min-w-0 space-y-4">
         {/* Client Header */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-6 text-white">
           <div className="flex items-center justify-between">
@@ -170,6 +205,8 @@ export default function ClientSchedulePage() {
         <ScheduleCardList entries={filtered} onPatch={updateEntry} onPreview={setPreviewImg}
           onEdit={e => setModal({ open: true, entry: e })} onDelete={handleDelete} onCopied={notify}
           emptyText={`${client.name}에 등록된 스케줄이 없습니다`} />
+        </div>{/* 상세 끝 */}
+       </div>{/* flex 행 끝 */}
       </div>
 
       {modal.open && (

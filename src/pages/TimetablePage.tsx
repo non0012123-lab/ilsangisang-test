@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Sparkles, Calendar, X, CalendarRange, ExternalLink, Trash2, Repeat } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
+import TeamFilter from '../components/TeamFilter';
+import { orderedTeams } from '../data/org';
 import { useApp } from '../context/AppContext';
 import ScheduleModal from '../components/ScheduleModal';
 import AIScheduleModal from '../components/AIScheduleModal';
@@ -42,7 +44,7 @@ const STATUS_STYLE: Record<string, string> = {
 const STATUS_LABEL: Record<string, string> = { completed: '완료', 'in-progress': '진행중', pending: '대기' };
 
 export default function TimetablePage() {
-  const { entries, saveEntry, saveEntries, removeEntry, removeSeries, clients } = useApp();
+  const { entries, saveEntry, saveEntries, removeEntry, removeSeries, clients, members } = useApp();
   // 반복 일정 삭제: 시리즈면 "이 일정만 / 이후 전체" 선택(2단계 확인)
   const deleteEntry = (e: ScheduleEntry) => {
     if (!e.seriesId) {
@@ -54,6 +56,9 @@ export default function TimetablePage() {
     if (all) removeSeries(e.seriesId, e.date); else removeEntry(e.id);
   };
   const [clientId, setClientId] = useState('all');
+  const [filterTeam, setFilterTeam] = useState('all');
+  const teamById = useMemo(() => new Map(members.map(m => [m.id, m.department])), [members]);
+  const teams = useMemo(() => orderedTeams(members.map(m => m.department)), [members]);
   const [catFilter, setCatFilter] = useState<string[]>([]); // 선택 카테고리(여러 개). 비어 있으면 전체
   const toggleCat = (cat: string) => setCatFilter(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
   const [curDate, setCurDate] = useState(new Date());
@@ -71,7 +76,8 @@ export default function TimetablePage() {
   // 이번 달과 겹치는(기간 작업 포함) 작업 — 업체 필터까지만 적용(카테고리 칩 목록·개수 산정용)
   const monthEntries = entries.filter(e =>
     overlapsRange(e, monthStart, monthEnd) &&
-    (clientId === 'all' || e.clientId === clientId)
+    (clientId === 'all' || e.clientId === clientId) &&
+    (filterTeam === 'all' || teamById.get(e.managerId) === filterTeam)
   );
   // 카테고리 칩 목록: 기본 색상표 + 이번 달 실제 일정에 등장한 커스텀 카테고리
   const catList = Array.from(new Set([...Object.keys(CAT_COLOR), ...monthEntries.map(e => e.category)])).filter(Boolean);
@@ -183,6 +189,12 @@ export default function TimetablePage() {
               </button>
             </div>
           </div>
+
+          {teams.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <TeamFilter teams={teams} value={filterTeam} onChange={setFilterTeam} />
+            </div>
+          )}
 
           {/* 카테고리 필터 칩 — 클릭으로 해당 종류만 보기(여러 개 동시 선택 가능) */}
           <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">

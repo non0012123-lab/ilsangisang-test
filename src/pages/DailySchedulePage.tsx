@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, Search, Filter, CalendarRange } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
+import TeamFilter from '../components/TeamFilter';
+import { orderedTeams } from '../data/org';
 import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
@@ -31,9 +33,13 @@ export default function DailySchedulePage() {
   const [filterCategory, setFilterCategory] = useState<Category | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<ScheduleStatus | 'all'>('all');
   const [filterManager, setFilterManager] = useState('all');
+  const [filterTeam, setFilterTeam] = useState('all');
 
   // 담당자 필터는 실제 가입·승인된 담당자(Supabase profiles)를 사용 (스케줄 등록 모달과 동일 소스)
   const managers = members;
+  // 팀(department)별 보기 — 담당자 id → 팀 매핑. 칩 목록은 실제 존재하는 팀만 표준 순서로.
+  const teamById = useMemo(() => new Map(members.map(m => [m.id, m.department])), [members]);
+  const teams = useMemo(() => orderedTeams(members.map(m => m.department)), [members]);
 
   const prevDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() - 1); setDate(toDateStr(d)); };
   const nextDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() + 1); setDate(toDateStr(d)); };
@@ -57,6 +63,7 @@ export default function DailySchedulePage() {
     .filter(e => filterCategory === 'all' || e.category === filterCategory)
     .filter(e => filterStatus === 'all' || e.status === filterStatus)
     .filter(e => filterManager === 'all' || e.managerId === filterManager)
+    .filter(e => filterTeam === 'all' || teamById.get(e.managerId) === filterTeam)
     .filter(e => !search ||
       (e.keyword ?? '').includes(search) || (e.opinionTitle ?? '').includes(search) ||
       e.managerName.includes(search) || e.clientName.includes(search) || (e.link ?? '').includes(search));
@@ -104,6 +111,8 @@ export default function DailySchedulePage() {
               placeholder="키워드, 제목, 담당자, 클라이언트, 링크 검색..."
               className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
+
+          <TeamFilter teams={teams} value={filterTeam} onChange={setFilterTeam} />
 
           {showFilters && (
             <div className="pt-3 border-t border-gray-100 grid grid-cols-2 md:grid-cols-4 gap-3">

@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, X, Calendar, CalendarRange, MapPin, Clock, Users, Tag, Trash2, Settings2 } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
+import TeamFilter from '../components/TeamFilter';
+import { orderedTeams } from '../data/org';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { CATEGORY_COLORS, REMINDER_OPTIONS } from '../data/internalCategories';
@@ -33,8 +35,12 @@ export default function InternalSchedulePage() {
   const [curDate, setCurDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<number | null>(new Date().getDate());
   const [catFilter, setCatFilter] = useState('all');
+  const [filterTeam, setFilterTeam] = useState('all');
   const [form, setForm] = useState<typeof EMPTY_FORM & { id?: string } | null>(null);
   const [catMgrOpen, setCatMgrOpen] = useState(false);
+  // 팀(department)별 보기 — 내부 일정은 "참여자 중 그 팀이 있으면" 해당 팀으로 본다.
+  const teamById = useMemo(() => new Map(members.map(m => [m.id, m.department])), [members]);
+  const teams = useMemo(() => orderedTeams(members.map(m => m.department)), [members]);
 
   const year = curDate.getFullYear();
   const month = curDate.getMonth();
@@ -45,8 +51,10 @@ export default function InternalSchedulePage() {
 
   const colorOf = (cat: string) => internalCategories.find(c => c.name === cat)?.color ?? FALLBACK_COLOR;
 
-  const visible = internalEvents.filter(e =>
-    overlapsRange(e, monthStart, monthEnd) && (catFilter === 'all' || e.category === catFilter));
+  // 팀 필터: 참여자 중 해당 팀이 한 명이라도 있으면 노출. 종류 칩 개수는 팀 필터까지만 반영.
+  const teamMatch = (e: InternalEvent) => filterTeam === 'all' || e.participantIds.some(id => teamById.get(id) === filterTeam);
+  const monthInternal = internalEvents.filter(e => overlapsRange(e, monthStart, monthEnd) && teamMatch(e));
+  const visible = monthInternal.filter(e => catFilter === 'all' || e.category === catFilter);
 
   const byDay: Record<number, InternalEvent[]> = {};
   visible.forEach(e => enumerateDays(e, monthPrefix).forEach(ds => {
@@ -116,11 +124,6 @@ export default function InternalSchedulePage() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3 flex-wrap">
-              <select value={catFilter} onChange={e => setCatFilter(e.target.value)}
-                className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                <option value="all">전체 종류</option>
-                {internalCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-              </select>
               <div className="flex items-center gap-1">
                 <button onClick={() => setCurDate(new Date(year, month - 1, 1))} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronLeft size={18} /></button>
                 <span className="text-base font-bold text-gray-900 min-w-[110px] text-center">{year}년 {month + 1}월</span>
@@ -136,6 +139,37 @@ export default function InternalSchedulePage() {
                 <Plus size={16} /> 일정 추가
               </button>
             </div>
+          </div>
+
+          {teams.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <TeamFilter teams={teams} value={filterTeam} onChange={setFilterTeam} />
+            </div>
+          )}
+
+          {/* 종류(카테고리) 필터 칩 — 클릭으로 해당 종류만 보기 */}
+          <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+            <button onClick={() => setCatFilter('all')}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                catFilter === 'all' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+              }`}>
+              전체 {monthInternal.length}
+            </button>
+            {internalCategories.map(c => {
+              const cnt = monthInternal.filter(e => e.category === c.name).length;
+              const active = catFilter === c.name;
+              const color = c.color ?? FALLBACK_COLOR;
+              return (
+                <button key={c.id} onClick={() => setCatFilter(active ? 'all' : c.name)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                    active ? 'text-white border-transparent' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  }`}
+                  style={active ? { backgroundColor: color } : undefined}>
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                  {c.name} {cnt}
+                </button>
+              );
+            })}
           </div>
         </div>
 

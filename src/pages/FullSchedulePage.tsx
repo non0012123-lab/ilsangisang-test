@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Plus, Pencil, Trash2, Search, Filter, CalendarRange } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
+import TeamFilter from '../components/TeamFilter';
+import { orderedTeams } from '../data/org';
 import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
@@ -26,17 +28,21 @@ export default function FullSchedulePage() {
   const [filterCategory, setFilterCategory] = useState<Category | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<ScheduleStatus | 'all'>('all');
   const [filterManager, setFilterManager] = useState('all');
+  const [filterTeam, setFilterTeam] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
   // 담당자 필터는 실제 가입·승인된 담당자(Supabase profiles)를 사용 (스케줄 등록 모달과 동일 소스)
   const managers = members;
+  const teamById = useMemo(() => new Map(members.map(m => [m.id, m.department])), [members]);
+  const teams = useMemo(() => orderedTeams(members.map(m => m.department)), [members]);
 
   const filtered = entries
     .filter(e => filterClient === 'all' || e.clientId === filterClient)
     .filter(e => filterCategory === 'all' || e.category === filterCategory)
     .filter(e => filterStatus === 'all' || e.status === filterStatus)
     .filter(e => filterManager === 'all' || e.managerId === filterManager)
+    .filter(e => filterTeam === 'all' || teamById.get(e.managerId) === filterTeam)
     .filter(e => overlapsRange(e, dateFrom || undefined, dateTo || undefined))
     .filter(e => !search || (e.keyword ?? '').includes(search) || (e.opinionTitle ?? '').includes(search) || e.managerName.includes(search) || e.clientName.includes(search) || (e.link ?? '').includes(search))
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -70,6 +76,8 @@ export default function FullSchedulePage() {
               <Plus size={16} /> 추가
             </button>
           </div>
+
+          <TeamFilter teams={teams} value={filterTeam} onChange={setFilterTeam} />
 
           {showFilters && (
             <div className="pt-3 border-t border-gray-100 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
