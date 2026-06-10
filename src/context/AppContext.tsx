@@ -1618,17 +1618,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, [uid]);
 
-  // 스케줄 실시간 구독: 내 담당 스케줄이 등록되면 새로고침 없이 알림 + 목록 반영.
-  //  • 0010_realtime_schedule.sql 로 schedule_entries 가 realtime publication 에 추가돼 있어야 한다.
-  //  • 본인이 등록한 것도 본인 담당이면 알림한다(요청사항). 목록 중복만 dedup.
+  // 스케줄 실시간 구독: 다른 화면/기기/창에서 등록·변경·삭제하면 새로고침 없이 목록 반영.
+  //  • 0010_realtime_schedule.sql(publication) + 0017_realtime_schedule_full.sql(REPLICA IDENTITY FULL) 필요.
+  //    → FULL 이 없으면 UPDATE/DELETE 이벤트가 누락돼, 데스크톱 메인창 ↔ 트레이 AI 위젯처럼
+  //      별도 컨텍스트 간 변경/삭제가 전파되지 않는다(어시스턴트가 "삭제했는데 아직 있다"고 답하는 원인).
+  //  • INSERT(새 일정, 내 담당): 종/PC/스티커 알림. UPDATE·DELETE: 조용히 목록만 동기화(알림은 변경 주체 쪽에서 이미 띄움).
   useEffect(() => {
     if (!supabase || !uid) return;
     const sb = supabase;
     const channel = sb
       .channel(`rt-schedule-${uid}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'schedule_entries' }, payload => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule_entries' }, payload => {
+        // 삭제: id 로 로컬 목록에서 제거(다른 창/기기에서 지운 것도 즉시 사라지게).
+        if (payload.eventType === 'DELETE') {
+          const oldId = (payload.old as { id?: string })?.id;
+          if (oldId) setEntries(prev => prev.filter(e => e.id !== oldId));
+          return;
+        }
         const e = (payload.new as { data?: ScheduleEntry })?.data;
-        if (!e || e.managerId !== uid) return;            // 내 담당 스케줄만(본인 등록분 포함)
+        if (!e || !e.id) return;
+        // 변경(순위·링크·상태·날짜·담당 등): 가지고 있던 건 교체, 없던 내 담당분은 추가. 알림 없음(조용히 반영).
+        if (payload.eventType === 'UPDATE') {
+          setEntries(prev => prev.some(x => x.id === e.id) ? prev.map(x => x.id === e.id ? e : x) : (e.managerId === uid ? [e, ...prev] : prev));
+          return;
+        }
+        // INSERT — 내 담당 스케줄만(본인 등록분 포함) 목록 반영 + 알림.
+        if (e.managerId !== uid) return;
         setEntries(prev => prev.some(x => x.id === e.id) ? prev : [e, ...prev]); // 목록 중복만 방지
         // 어시스턴트로 막 만든 일정은 이미 "적용 완료" 요약 알림이 떴으므로 여기선 건너뜀
         if (assistantEntryIdsRef.current.has(e.id)) { assistantEntryIdsRef.current.delete(e.id); return; }
