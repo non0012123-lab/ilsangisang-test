@@ -13,9 +13,9 @@ export function isMacOS(): boolean {
   return /Mac/i.test(s) && !/iPhone|iPad|iPod/i.test(s);
 }
 
-const UNC_RE = /^\\\\[^\\]+\\.+/;                  // \\host\share\...
-const SMB_RE = /^smb:\/\/[^/]+\/.+/i;              // smb://host/share/...
-const BARE_IP_RE = /^\d{1,3}(?:\.\d{1,3}){3}\\.+/; // 192.168.0.1\share\...  (앞 \\ 누락 입력 보정)
+const UNC_RE = /^\\\\[^\\/]+/;                      // \\host  (공유 경로는 선택: \\host\share\...)
+const SMB_RE = /^smb:\/\/[^/]+/i;                   // smb://host (경로 선택)
+const BARE_IP_RE = /^\d{1,3}(?:\.\d{1,3}){3}\\.+/;  // 192.168.0.1\share\...  (앞 \\ 누락 입력 보정)
 
 // NAS 공유 경로처럼 보이는가? (일반 웹 링크는 false)
 export function isNasPath(raw?: string): boolean {
