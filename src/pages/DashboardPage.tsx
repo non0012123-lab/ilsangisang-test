@@ -301,16 +301,18 @@ export default function DashboardPage() {
               ) : (
                 <div className="divide-y divide-gray-50">
                   {weekEntries.map(entry => (
-                    <div key={entry.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 transition-colors">
-                      <span className="text-xs text-gray-400 w-16 shrink-0 font-medium">
-                        {new Date(entry.date + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' })}
-                      </span>
+                    <div key={entry.id} className="flex items-center gap-2.5 px-4 py-3 hover:bg-gray-50/50 transition-colors">
                       <CategoryBadge category={entry.category} />
-                      <span className="text-sm text-gray-700 flex-1 min-w-0 truncate flex items-center gap-1.5">
-                        <span className="truncate">{entry.opinionTitle ?? entry.keyword ?? entry.category}</span>
-                        {isMultiDay(entry) && <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full shrink-0">기간</span>}
-                      </span>
-                      <span className="text-xs text-gray-400 shrink-0 truncate max-w-[84px] hidden sm:block">{entry.clientName}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-gray-800 truncate flex items-center gap-1.5">
+                          <span className="truncate">{entry.opinionTitle ?? entry.keyword ?? entry.category}</span>
+                          {isMultiDay(entry) && <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full shrink-0">기간</span>}
+                        </p>
+                        <p className="text-xs text-gray-400 truncate">
+                          {new Date(entry.date + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' })}
+                          {entry.clientName ? ` · ${entry.clientName}` : ''}
+                        </p>
+                      </div>
                       <InlineStatus status={entry.status} onChange={s => updateEntry(entry.id, { status: s })} />
                       {rowActions(entry)}
                     </div>
