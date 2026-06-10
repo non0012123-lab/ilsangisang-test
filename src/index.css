@@ -14,6 +14,9 @@ body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* 한글(CJK)은 띄어쓰기(단어) 경계에서만 줄바꿈 — "초이스피부과 신사점"이 글자 중간에서 잘리지 않게.
+     URL 등 공백 없는 긴 문자열은 .table-link 등에서 break-all 로 따로 처리한다. */
+  word-break: keep-all;
 }
 
 #root {

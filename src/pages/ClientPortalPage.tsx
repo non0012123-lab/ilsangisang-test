@@ -97,7 +97,8 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
         <span className="text-sm text-gray-400">총 {monthEntries.length}건</span>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-4">
+      {/* 달력 그리드 — 데스크톱(md+) 전용. 모바일은 아래 어젠다 리스트로 대체(가로 스크롤 제거). */}
+      <div className="hidden md:flex flex-col lg:flex-row gap-4">
         {/* Calendar grid */}
         <div className="flex-1 min-w-0 bg-gray-50 rounded-2xl overflow-x-auto">
           <div className="grid grid-cols-7 border-b border-gray-200 min-w-[640px]">
@@ -189,6 +190,43 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
               ))
             )}
           </div>
+        )}
+      </div>
+
+      {/* 모바일 어젠다 — 날짜별 일정 목록(달력 가로 스크롤 대체). 일정 있는 날만 표시. */}
+      <div className="md:hidden space-y-3">
+        {Object.keys(byDay).length === 0 ? (
+          <p className="text-center text-gray-400 text-sm py-8 bg-gray-50 rounded-2xl">이번 달 일정이 없습니다.</p>
+        ) : (
+          Object.keys(byDay).map(Number).sort((a, b) => a - b).map(d => {
+            const wd = WEEKDAYS[new Date(year, month, d).getDay()];
+            const isToday = d === todayDay;
+            return (
+              <div key={d} className="bg-white border border-gray-100 rounded-2xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`w-7 h-7 flex items-center justify-center rounded-full text-sm font-bold shrink-0 ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>{d}</span>
+                  <span className="text-sm font-semibold text-gray-700">{month + 1}월 {d}일 ({wd})</span>
+                  <span className="ml-auto text-xs text-gray-400">{byDay[d].length}건</span>
+                </div>
+                <div className="space-y-2">
+                  {byDay[d].map(e => (
+                    <div key={e.id} className="p-2.5 bg-gray-50 rounded-xl">
+                      <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full text-white" style={{ backgroundColor: CAT_COLOR[e.category] ?? '#6b7280' }}>{e.category}</span>
+                      <p className="text-sm font-semibold text-gray-900 mt-1.5 break-keep">{e.opinionTitle ?? e.keyword ?? '-'}</p>
+                      <p className="text-xs text-gray-400">{e.managerName}</p>
+                      {isMultiDay(e) && <p className="text-xs text-blue-600 flex items-center gap-1 mt-0.5"><CalendarRange size={10} />{e.date}~{e.endDate}</p>}
+                      {e.link && (
+                        <a href={e.link} target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-blue-500 hover:underline mt-1 flex items-center gap-1">
+                          <ExternalLink size={10} className="shrink-0" /><span className="truncate">바로가기</span>
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
 
@@ -351,10 +389,10 @@ export default function ClientPortalPage() {
             { key: 'keywords', icon: <Search size={15} />, label: '키워드 조회' },
           ] as { key: Tab; icon: React.ReactNode; label: string }[]).map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+              className={`flex-1 flex items-center justify-center gap-1 sm:gap-2 py-2.5 px-1 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
                 tab === t.key ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
               }`}>
-              {t.icon} {t.label}
+              <span className="shrink-0">{t.icon}</span> {t.label}
             </button>
           ))}
         </div>
@@ -402,7 +440,8 @@ export default function ClientPortalPage() {
                 <h3 className="font-bold text-gray-900">{rangeLabel} 마케팅 현황</h3>
                 <TrendingUp size={16} className="text-gray-400" />
               </div>
-              <div className="overflow-x-auto">
+              {/* 데스크톱: 표 */}
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
@@ -448,6 +487,38 @@ export default function ClientPortalPage() {
                     )}
                   </tbody>
                 </table>
+              </div>
+
+              {/* 모바일: 카드(가로 스크롤 없이 한 눈에) */}
+              <div className="md:hidden divide-y divide-gray-50">
+                {recentEntries.length === 0 ? (
+                  <p className="text-center py-8 text-gray-400 text-sm">작업 내역이 없습니다.</p>
+                ) : recentEntries.map(entry => (
+                  <div key={entry.id} className="px-4 py-3">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <CategoryBadge category={entry.category} />
+                        <span className="text-xs text-gray-400 whitespace-nowrap">{entry.date}</span>
+                      </div>
+                      <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${
+                        entry.status === 'completed' ? 'bg-green-50 text-green-700' :
+                        entry.status === 'in-progress' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
+                      }`}>
+                        {entry.status === 'completed' ? '완료' : entry.status === 'in-progress' ? '진행중' : '대기중'}
+                      </span>
+                    </div>
+                    <p className="text-sm font-semibold text-gray-900 break-keep">
+                      {entry.keyword || '-'}
+                      {entry.rank ? <span className="ml-1.5 text-blue-700 font-bold text-xs">{entry.rank}위</span> : null}
+                    </p>
+                    {entry.link && (
+                      <a href={entry.link} target="_blank" rel="noopener noreferrer"
+                        className="mt-1 inline-flex items-center gap-1 text-xs text-blue-500 hover:underline max-w-full">
+                        <ExternalLink size={11} className="shrink-0" /><span className="truncate">{entry.link}</span>
+                      </a>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
 
