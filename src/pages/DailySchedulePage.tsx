@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, Search, Filter, CalendarRange } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, Search, Filter, CalendarRange, User } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import TeamFilter from '../components/TeamFilter';
 import { orderedTeams } from '../data/org';
+import { useAuth } from '../context/AuthContext';
 import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
@@ -40,6 +41,11 @@ export default function DailySchedulePage() {
   // 팀(department)별 보기 — 담당자 id → 팀 매핑. 칩 목록은 실제 존재하는 팀만 표준 순서로.
   const teamById = useMemo(() => new Map(members.map(m => [m.id, m.department])), [members]);
   const teams = useMemo(() => orderedTeams(members.map(m => m.department)), [members]);
+  // "내 일정" 빠른 버튼 — 로그인 본인을 담당자 필터로 토글(기존 filterManager 재사용)
+  const { user } = useAuth();
+  const selfId = user?.id && members.some(m => m.id === user.id) ? user.id : '';
+  const myView = !!selfId && filterManager === selfId;
+  const toggleMine = () => setFilterManager(myView ? 'all' : selfId);
 
   const prevDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() - 1); setDate(toDateStr(d)); };
   const nextDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() + 1); setDate(toDateStr(d)); };
@@ -94,6 +100,12 @@ export default function DailySchedulePage() {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-500">{dayEntries.length}/{allDayEntries.length}건</span>
+              {selfId && (
+                <button onClick={toggleMine} title="내 담당 일정만 보기"
+                  className={`flex items-center gap-1.5 px-3 py-2 border rounded-xl text-sm font-semibold transition-colors ${myView ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600'}`}>
+                  <User size={14} /> 내 일정
+                </button>
+              )}
               <button onClick={() => setShowFilters(v => !v)}
                 className={`flex items-center gap-1.5 px-3 py-2 border rounded-xl text-sm transition-colors ${showFilters ? 'border-blue-500 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                 <Filter size={14} /> 필터

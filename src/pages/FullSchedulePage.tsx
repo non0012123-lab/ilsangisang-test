@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Plus, Pencil, Trash2, Search, Filter, CalendarRange } from 'lucide-react';
+import { Plus, Pencil, Trash2, Search, Filter, CalendarRange, User } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import TeamFilter from '../components/TeamFilter';
 import { orderedTeams } from '../data/org';
+import { useAuth } from '../context/AuthContext';
 import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
@@ -36,6 +37,11 @@ export default function FullSchedulePage() {
   const managers = members;
   const teamById = useMemo(() => new Map(members.map(m => [m.id, m.department])), [members]);
   const teams = useMemo(() => orderedTeams(members.map(m => m.department)), [members]);
+  // "내 일정" 빠른 버튼 — 로그인 본인을 담당자 필터로 토글(기존 filterManager 재사용)
+  const { user } = useAuth();
+  const selfId = user?.id && members.some(m => m.id === user.id) ? user.id : '';
+  const myView = !!selfId && filterManager === selfId;
+  const toggleMine = () => setFilterManager(myView ? 'all' : selfId);
 
   const filtered = entries
     .filter(e => filterClient === 'all' || e.clientId === filterClient)
@@ -67,6 +73,12 @@ export default function FullSchedulePage() {
                 placeholder="키워드, 제목, 담당자, 클라이언트, 링크 검색..."
                 className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
+            {selfId && (
+              <button onClick={toggleMine} title="내 담당 일정만 보기"
+                className={`flex items-center gap-2 px-4 py-2 border rounded-xl text-sm font-semibold transition-colors ${myView ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600'}`}>
+                <User size={14} /> 내 일정
+              </button>
+            )}
             <button onClick={() => setShowFilters(v => !v)}
               className={`flex items-center gap-2 px-4 py-2 border rounded-xl text-sm transition-colors ${showFilters ? 'border-blue-500 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               <Filter size={14} /> 필터
