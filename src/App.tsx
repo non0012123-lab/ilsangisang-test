@@ -1,34 +1,36 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import { runSilentUpdate } from './utils/tauriUpdate';
 import { getWindowLabel } from './utils/tauriWindow';
-import LoginPage from './pages/LoginPage';
-import SignupPage from './pages/SignupPage';
-import DashboardPage from './pages/DashboardPage';
-import DailySchedulePage from './pages/DailySchedulePage';
-import FullSchedulePage from './pages/FullSchedulePage';
-import CategoryPage from './pages/CategoryPage';
-import ClientSchedulePage from './pages/ClientSchedulePage';
-import ClientManagementPage from './pages/ClientManagementPage';
-import VendorManagementPage from './pages/VendorManagementPage';
-import ClientPortalPage from './pages/ClientPortalPage';
-import TimetablePage from './pages/TimetablePage';
-import AIPlanningPage from './pages/AIPlanningPage';
-import AIResultsPage from './pages/AIResultsPage';
-import KeywordToolPage from './pages/KeywordToolPage';
-import AccountListPage from './pages/AccountListPage';
-import SiteListPage from './pages/SiteListPage';
-import RequestsPage from './pages/RequestsPage';
-import InternalSchedulePage from './pages/InternalSchedulePage';
-import PricingPage from './pages/PricingPage';
-import SalesPage from './pages/SalesPage';
-import AssistantWidgetPage from './pages/AssistantWidgetPage';
-import PendingApprovalPage from './pages/PendingApprovalPage';
-import SuspendedPage from './pages/SuspendedPage';
-import ApprovalsPage from './pages/ApprovalsPage';
 import type { AuthUser } from './types';
+
+// 라우트 페이지는 지연 로딩(코드 스플리팅) — 초기 번들을 줄여 첫 로딩을 빠르게 한다.
+//  방문한 화면의 청크만 그때 받으므로, 무거운 페이지(단가표·AI·PDF 등)가 초기 로딩을 막지 않는다.
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const SignupPage = lazy(() => import('./pages/SignupPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const DailySchedulePage = lazy(() => import('./pages/DailySchedulePage'));
+const FullSchedulePage = lazy(() => import('./pages/FullSchedulePage'));
+const ClientSchedulePage = lazy(() => import('./pages/ClientSchedulePage'));
+const ClientManagementPage = lazy(() => import('./pages/ClientManagementPage'));
+const VendorManagementPage = lazy(() => import('./pages/VendorManagementPage'));
+const ClientPortalPage = lazy(() => import('./pages/ClientPortalPage'));
+const TimetablePage = lazy(() => import('./pages/TimetablePage'));
+const AIPlanningPage = lazy(() => import('./pages/AIPlanningPage'));
+const AIResultsPage = lazy(() => import('./pages/AIResultsPage'));
+const KeywordToolPage = lazy(() => import('./pages/KeywordToolPage'));
+const AccountListPage = lazy(() => import('./pages/AccountListPage'));
+const SiteListPage = lazy(() => import('./pages/SiteListPage'));
+const RequestsPage = lazy(() => import('./pages/RequestsPage'));
+const InternalSchedulePage = lazy(() => import('./pages/InternalSchedulePage'));
+const PricingPage = lazy(() => import('./pages/PricingPage'));
+const SalesPage = lazy(() => import('./pages/SalesPage'));
+const AssistantWidgetPage = lazy(() => import('./pages/AssistantWidgetPage'));
+const PendingApprovalPage = lazy(() => import('./pages/PendingApprovalPage'));
+const SuspendedPage = lazy(() => import('./pages/SuspendedPage'));
+const ApprovalsPage = lazy(() => import('./pages/ApprovalsPage'));
 
 // 역할별 첫 화면
 function homeFor(user: AuthUser): string {
@@ -97,6 +99,7 @@ function AppRoutes() {
   if (loading) return <FullScreenLoader />;
 
   return (
+    <Suspense fallback={<FullScreenLoader />}>
     <Routes>
       <Route path="/login" element={user ? <Navigate to={homeFor(user)} replace /> : <LoginPage />} />
       <Route path="/signup" element={user ? <Navigate to={homeFor(user)} replace /> : <SignupPage />} />
@@ -120,9 +123,7 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
       <Route path="/schedule/daily" element={<ProtectedRoute><DailySchedulePage /></ProtectedRoute>} />
       <Route path="/schedule/full" element={<ProtectedRoute><FullSchedulePage /></ProtectedRoute>} />
-      {/* 파라미터 없는 진입(사이드바 '클라이언트별/카테고리별 스케줄') — 첫 항목으로. 클라이언트는 페이지가 첫 업체로 자동 이동 */}
-      <Route path="/category" element={<Navigate to="/category/sns" replace />} />
-      <Route path="/category/:category" element={<ProtectedRoute><CategoryPage /></ProtectedRoute>} />
+      {/* 파라미터 없는 진입(사이드바 '클라이언트별 스케줄') — 페이지가 첫 업체로 자동 이동 */}
       <Route path="/client" element={<ProtectedRoute><ClientSchedulePage /></ProtectedRoute>} />
       <Route path="/client/:clientId" element={<ProtectedRoute><ClientSchedulePage /></ProtectedRoute>} />
       <Route path="/clients" element={<ProtectedRoute><ClientManagementPage /></ProtectedRoute>} />
@@ -150,6 +151,7 @@ function AppRoutes() {
       <Route path="/" element={<Navigate to={user ? homeFor(user) : '/login'} replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   );
 }
 

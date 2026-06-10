@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, CalendarDays, Users, LogOut,
-  Hash, Globe,
+  Globe,
   BarChart3, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound, Inbox, CalendarClock, Tags, PhoneCall,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
@@ -17,7 +17,6 @@ const mainNav: NavItem[] = [
   { to: '/schedule/full', icon: <CalendarDays size={18} />, label: '전체 스케줄' },
   { to: '/timetable', icon: <CalendarRange size={18} />, label: '타임테이블' },
   { to: '/client', icon: <Building2 size={18} />, label: '클라이언트별 스케줄' },
-  { to: '/category', icon: <Hash size={18} />, label: '카테고리별 스케줄' },
   { to: '/internal', icon: <CalendarClock size={18} />, label: '내부 일정' },
   { to: '/ai-planning', icon: <Sparkles size={18} />, label: 'AI 기획' },
   { to: '/ai-results', icon: <FileText size={18} />, label: 'AI 기획 결과' },

@@ -1,5 +1,5 @@
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
+// html2canvas·jsPDF 는 무거우므로(합쳐 ~600KB) 정적 import 하지 않는다.
+//  → 실제 PDF 생성(renderHtmlToPdfBase64) 시점에만 동적 로드해, 대시보드 등 초기 화면을 가볍게 유지.
 
 export interface DailyReportRow {
   date: string;
@@ -85,6 +85,11 @@ export function buildDailyReportHtml(d: DailyReportData): string {
 // HTML 문자열을 화면 밖에서 렌더링 → html2canvas → jsPDF 로 PDF base64(접두사 없음) 반환.
 // 한글은 이미지로 렌더되므로 폰트 임베딩 없이도 정상 출력된다.
 export async function renderHtmlToPdfBase64(html: string): Promise<string> {
+  // 무거운 PDF 라이브러리는 여기서만 동적 로드(초기 번들에서 제외).
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+    import('html2canvas'),
+    import('jspdf'),
+  ]);
   const container = document.createElement('div');
   container.style.position = 'fixed';
   container.style.left = '-10000px';
