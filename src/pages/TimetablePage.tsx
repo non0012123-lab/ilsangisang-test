@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Sparkles, Calendar, X, CalendarRange, ExternalLink, Trash2, Repeat } from 'lucide-react';
+import { useMemo, useState, useRef, useEffect } from 'react';
+import { ChevronLeft, ChevronRight, Plus, Sparkles, Calendar, X, CalendarRange, ExternalLink, Trash2, Repeat, Search, User } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import TeamFilter from '../components/TeamFilter';
 import { orderedTeams } from '../data/org';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import ScheduleModal from '../components/ScheduleModal';
 import AIScheduleModal from '../components/AIScheduleModal';
 import type { ScheduleEntry } from '../types';
@@ -59,6 +60,29 @@ export default function TimetablePage() {
   const [filterTeam, setFilterTeam] = useState('all');
   const teamById = useMemo(() => new Map(members.map(m => [m.id, m.department])), [members]);
   const teams = useMemo(() => orderedTeams(members.map(m => m.department)), [members]);
+
+  // 담당자(개인) 필터 — 이름 검색 자동완성 + "내 일정" 빠른 선택
+  const { user } = useAuth();
+  const selfId = user?.id && members.some(m => m.id === user.id) ? user.id : '';
+  const [filterManagerId, setFilterManagerId] = useState('all');
+  const [mgrQuery, setMgrQuery] = useState('');
+  const [mgrOpen, setMgrOpen] = useState(false);
+  const mgrRef = useRef<HTMLDivElement>(null);
+  const selectedManager = members.find(m => m.id === filterManagerId);
+  const mgrSuggestions = useMemo(() => {
+    const q = mgrQuery.trim().toLowerCase();
+    const list = q ? members.filter(m => m.name.toLowerCase().includes(q)) : members;
+    return list.slice(0, 30);
+  }, [members, mgrQuery]);
+  // 바깥 클릭 시 자동완성 닫기
+  useEffect(() => {
+    if (!mgrOpen) return;
+    const onDown = (e: MouseEvent) => { if (mgrRef.current && !mgrRef.current.contains(e.target as Node)) setMgrOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [mgrOpen]);
+  const pickManager = (id: string) => { setFilterManagerId(id); setMgrQuery(''); setMgrOpen(false); };
+  const clearManager = () => { setFilterManagerId('all'); setMgrQuery(''); };
   const [catFilter, setCatFilter] = useState<string[]>([]); // 선택 카테고리(여러 개). 비어 있으면 전체
   const toggleCat = (cat: string) => setCatFilter(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
   const [curDate, setCurDate] = useState(new Date());
@@ -77,7 +101,8 @@ export default function TimetablePage() {
   const monthEntries = entries.filter(e =>
     overlapsRange(e, monthStart, monthEnd) &&
     (clientId === 'all' || e.clientId === clientId) &&
-    (filterTeam === 'all' || teamById.get(e.managerId) === filterTeam)
+    (filterTeam === 'all' || teamById.get(e.managerId) === filterTeam) &&
+    (filterManagerId === 'all' || e.managerId === filterManagerId)
   );
   // 카테고리 칩 목록: 기본 색상표 + 이번 달 실제 일정에 등장한 커스텀 카테고리
   const catList = Array.from(new Set([...Object.keys(CAT_COLOR), ...monthEntries.map(e => e.category)])).filter(Boolean);
@@ -160,6 +185,52 @@ export default function TimetablePage() {
                 <option value="all">전체 업체</option>
                 {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+
+              {/* 담당자(개인) 필터 — 이름 검색 자동완성 + "내 일정" */}
+              <div className="relative" ref={mgrRef}>
+                {selectedManager ? (
+                  // 선택됨: "○○님 일정만 ✕" 칩
+                  <div className="flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 rounded-xl text-sm font-semibold bg-blue-600 text-white">
+                    <User size={14} className="shrink-0" />
+                    <span className="whitespace-nowrap">{selectedManager.name}님 일정만</span>
+                    <button onClick={clearManager} title="담당자 필터 해제"
+                      className="p-0.5 rounded hover:bg-white/20 transition-colors"><X size={14} /></button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <div className="relative">
+                      <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input type="text" value={mgrQuery}
+                        onChange={e => { setMgrQuery(e.target.value); setMgrOpen(true); }}
+                        onFocus={() => setMgrOpen(true)}
+                        placeholder="담당자 이름…"
+                        className="w-32 sm:w-36 pl-8 pr-2 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    {selfId && (
+                      <button onClick={() => pickManager(selfId)} title="내 담당 일정만 보기"
+                        className="flex items-center gap-1 px-3 py-2 rounded-xl text-sm font-semibold border border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors whitespace-nowrap">
+                        <User size={14} /> 내 일정
+                      </button>
+                    )}
+                  </div>
+                )}
+                {/* 자동완성 드롭다운 */}
+                {mgrOpen && !selectedManager && (
+                  <div className="absolute z-30 left-0 mt-1 w-48 max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-lg py-1">
+                    {mgrSuggestions.length === 0 ? (
+                      <p className="px-3 py-2 text-xs text-gray-400">일치하는 담당자가 없습니다</p>
+                    ) : mgrSuggestions.map(m => (
+                      <button key={m.id} onMouseDown={e => { e.preventDefault(); pickManager(m.id); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors">
+                        <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-500 text-xs font-bold flex items-center justify-center shrink-0">{m.name[0]}</span>
+                        <span className="truncate flex-1">{m.name}</span>
+                        {m.department && <span className="text-xs text-gray-400 shrink-0">{m.department}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="flex items-center gap-1">
                 <button onClick={() => setCurDate(new Date(year, month - 1, 1))}
                   className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
