@@ -291,7 +291,7 @@ export interface Report {
 // localStorage(기기별)에만 저장하고 Supabase 동기화는 하지 않는다.
 export interface AppNotification {
   id: string;
-  type: 'schedule' | 'ai-plan' | 'ai-image' | 'assistant' | 'request' | 'internal';
+  type: 'schedule' | 'ai-plan' | 'ai-image' | 'assistant' | 'request' | 'internal' | 'rank';
   title: string;
   body?: string;
   link?: string;        // 클릭 시 이동할 라우트 (예: '/ai-results', '/schedule/daily')
@@ -354,6 +354,41 @@ export interface InternalEvent {
   notes?: string;
   reminder?: ReminderOption;   // 시작 N분 전 PC+스티커 알림 (참여자 전원)
   createdAt: number;
+}
+
+// ── 순위 보장 (순위가 잡혀야 카운팅되는 보장형 상품) ──────
+// 키워드(항목) 단건이 "1건". 항목의 rank 가 채워지면(값 존재) 카운트되고,
+// 보장 목표(guaranteedCount)에 도달하면 연장 여부를 체크한다. 목표 N건 전(alertOffset)에 알림.
+//  • 카운트는 저장값이 아니라 items 에서 매번 파생(파생 규칙은 utils/rankGuarantee.ts).
+//  • status 는 파생 결과를 캐시한 값 — 전이(active→due_soon→reached) 감지로 알림을 1회만 띄운다.
+//  • 다른 업무 데이터와 동일하게 localStorage 캐시 + Supabase(rank_guarantees) + realtime 으로 공유.
+export type RankGuaranteeStatus = 'active' | 'due_soon' | 'reached' | 'closed';
+//  진행중      / 임박(목표-offset 도달) / 도달(목표 달성)    / 종료(연장 안 함)
+
+// 항목 1개 = "1건". rank 값이 있으면 카운트 대상.
+export interface RankGuaranteeItem {
+  id: string;
+  cycle: number;       // 소속 회차(연장 시 +1) — 현재 회차 항목만 카운트
+  keyword: string;     // 키워드/항목명
+  rank?: number;       // 순위. 값이 있으면 '유효=카운트'(1~N위 제한 없음)
+  rankedAt?: string;   // 순위 최초 기재일 YYYY-MM-DD
+  memo?: string;
+}
+
+export interface RankGuarantee {
+  id: string;
+  clientId: string;        // Client 참조(임베드 아님)
+  clientName: string;      // 표시 캐시(클라이언트명 변경 시 갱신)
+  title: string;           // 상품/캠페인명 (예: "네이버 자동완성 보장")
+  guaranteedCount: number; // 보장 목표 건수 (입력 가능, 기본 20)
+  alertOffset: number;     // 목표 몇 건 전에 알림 (입력 가능, 기본 2)
+  cycle: number;           // 현재 회차 (연장 시 +1)
+  closed?: boolean;        // 종료(연장 안 함) — true 면 카운팅/알림 멈춤
+  status: RankGuaranteeStatus; // 파생 결과 캐시 + 전이 감지용
+  items: RankGuaranteeItem[];
+  reachedAt?: string;      // 목표 도달일 YYYY-MM-DD (도달 시 기록)
+  createdAt: number;
+  updatedAt: number;
 }
 
 // ── 단가표 ────────────────────────────────────────────

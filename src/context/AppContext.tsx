@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply, AssistantProposalUpdate } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply, AssistantProposalUpdate, RankGuarantee } from '../types';
+import { deriveStatus, countAchieved } from '../utils/rankGuarantee';
 import { USERS } from '../data/mockData';
 import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
 import type { ReminderOption } from '../types';
@@ -89,6 +90,10 @@ interface AppContextType {
   priceProgress: { done: number; total: number } | null; // 수집 진행률(상품 수)
   priceUpdatedAt: number | null;            // 마지막 수집 시각(ms)
   refreshPriceTable: () => Promise<{ count: number } | null>;
+  // 순위 보장 — 순위가 잡혀야 카운팅되는 보장형 상품. 목표 도달 시 연장 체크, 임박/도달 알림.
+  rankGuarantees: RankGuarantee[];
+  saveRankGuarantee: (rg: RankGuarantee) => void;
+  removeRankGuarantee: (id: string) => void;
   // 업무 요청(요청함) — 다른 담당자에게 보낸/받은 요청. realtime 으로 상대 화면에 반영됨.
   requests: WorkRequest[];
   sendRequest: (toId: string, title: string, body?: string) => void;
@@ -148,6 +153,7 @@ const lsImportance = (key: string): number => {
   if (key.includes('schedule')) return 100;
   if (key.includes('clients')) return 90;
   if (key.includes('request')) return 85; // 다른 담당자와 주고받는 업무 요청 — 핵심에 가깝게 보존
+  if (key.includes('rankg')) return 82; // 순위 보장 — 계약 상품이라 높게 보존
   if (key.includes('internal')) return 75; // 내부 일정 — 업무 데이터급으로 보존
   if (key.includes('vendors')) return 80;
   if (key.includes('price')) return 65; // 단가표 — 외부에서 다시 받을 수 있으나 자주 안 바뀌어 중간 보존
@@ -182,6 +188,7 @@ const REPORTS_LS_KEY = 'ilsangisang.reports.v1';
 const AI_PLANS_LS_KEY = 'ilsangisang.aiplans.v1';
 const REQUESTS_LS_KEY = 'ilsangisang.requests.v1';
 const PRICE_TABLE_LS_KEY = 'ilsangisang.priceTable.v1';
+const RANK_GUARANTEES_LS_KEY = 'ilsangisang.rankGuarantees.v1';
 const INTERNAL_EVENTS_LS_KEY = 'ilsangisang.internalEvents.v1';
 const INTERNAL_CATS_LS_KEY = 'ilsangisang.internalCategories.v1';
 const FIRED_REMINDERS_LS_KEY = 'ilsangisang.firedReminders.v1'; // 이미 띄운 내부일정 리마인더(기기별, 중복 방지)
@@ -234,6 +241,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [conversations, activeConversationId],
   );
   const [requests, setRequests] = useState<WorkRequest[]>(() => lsLoad<WorkRequest>(REQUESTS_LS_KEY));
+  // 순위 보장 — 공유 데이터(Supabase 소스) + 로컬 캐시 + realtime.
+  const [rankGuarantees, setRankGuarantees] = useState<RankGuarantee[]>(() => lsLoad<RankGuarantee>(RANK_GUARANTEES_LS_KEY));
   // 영업관리(상담 로그) — 민감정보라 메모리+Supabase 만(로컬 캐시 없음). RLS 로 권한자만 데이터 수신.
   const [salesEntries, setSalesEntries] = useState<SalesEntry[]>([]);
   const salesAccess = user?.role === 'admin' || !!user?.salesAccess;
@@ -319,6 +328,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const requestsRef = useRef(requests);
   useEffect(() => { requestsRef.current = requests; }, [requests]);
   useEffect(() => { lsSave(REQUESTS_LS_KEY, requests); }, [requests]);
+  // 순위 보장: 공유 데이터지만 로컬 캐시로 새로고침·일시 네트워크 문제에도 즉시 표시
+  const rankGuaranteesRef = useRef(rankGuarantees);
+  useEffect(() => { rankGuaranteesRef.current = rankGuarantees; }, [rankGuarantees]);
+  useEffect(() => { lsSave(RANK_GUARANTEES_LS_KEY, rankGuarantees); }, [rankGuarantees]);
   // 영업관리(상담 로그) — 어시스턴트가 조회/수정할 때 최신 목록 참조용
   const salesEntriesRef = useRef(salesEntries);
   useEffect(() => { salesEntriesRef.current = salesEntries; }, [salesEntries]);
@@ -489,6 +502,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeRequest = useCallback((id: string) => {
     setRequests(prev => prev.filter(r => r.id !== id));
     persistDelete('requests', id);
+  }, []);
+
+  // ── 순위 보장 ──
+  // 항목/순위/설정/연장/종료를 저장한다(전체 객체 upsert — jsonb 라 항목은 배열로 임베드).
+  //  • status 는 여기서 items 로부터 다시 파생해 저장한다(단일 진실원: 카운트는 항상 items 에서 센다).
+  //  • 상태가 active→due_soon→reached 로 "전이"되는 순간에만 알림을 1회 띄운다(중복 방지).
+  //    본인이 일으킨 변경은 여기서 직접 알림. 다른 사람의 변경은 realtime 구독이 처리(에코는 prev 비교로 dedup).
+  const saveRankGuarantee = useCallback((rg: RankGuarantee) => {
+    const prev = rankGuaranteesRef.current.find(x => x.id === rg.id);
+    const status = deriveStatus(rg);
+    const next: RankGuarantee = {
+      ...rg,
+      status,
+      // 도달 시점 기록(아직 도달 전이었을 때만 — 회차/순위가 줄었다 다시 차도 최초 도달일 유지)
+      reachedAt: status === 'reached' && prev?.status !== 'reached' ? todayStr() : rg.reachedAt,
+      updatedAt: nowMs(),
+    };
+    setRankGuarantees(list => list.some(x => x.id === next.id) ? list.map(x => x.id === next.id ? next : x) : [next, ...list]);
+    persistOne('rank_guarantees', next);
+    // 전이 알림 — 새로 임박/도달에 진입했을 때만.
+    if (prev && prev.status !== status && (status === 'due_soon' || status === 'reached')) {
+      const n = countAchieved(next);
+      const reached = status === 'reached';
+      const title = reached ? '순위 보장 건수 도달' : '순위 보장 곧 도달';
+      const tail = reached ? '연장 또는 종료를 결정하세요' : '연장 여부를 확인하세요';
+      const body = `${next.clientName} · ${next.title} (${n}/${next.guaranteedCount}건) — ${tail}`;
+      pushNotification({ type: 'rank', title, body, link: '/rank-guarantee' });
+      pushStickyNotice({ type: 'rank', title, body: `${next.clientName} ${n}/${next.guaranteedCount}건`, link: '/rank-guarantee' });
+    }
+  }, [pushNotification, pushStickyNotice]);
+  const removeRankGuarantee = useCallback((id: string) => {
+    setRankGuarantees(prev => prev.filter(r => r.id !== id));
+    persistDelete('rank_guarantees', id);
   }, []);
 
   // ── 내부 일정 ──
@@ -1611,6 +1657,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     load<SiteEntry>('site_entries').then(guard(sites => syncLocalFirst('site_entries', sites, siteEntriesRef.current, setSiteEntries)));
     load<Report>('reports').then(guard(rep => syncLocalFirst('reports', rep, reportsRef.current, setReports)));
     load<WorkRequest>('requests').then(guard(reqs => syncLocalFirst('requests', reqs, requestsRef.current, setRequests)));
+    load<RankGuarantee>('rank_guarantees').then(guard(rows => syncLocalFirst('rank_guarantees', rows, rankGuaranteesRef.current, setRankGuarantees)));
     load<PriceProduct>('price_table').then(guard(rows => syncLocalFirst('price_table', rows, priceTableRef.current, setPriceTable)));
     // 영업관리: 권한 없으면 RLS 가 빈 결과를 주므로 항상 시도해도 안전(로컬 캐시 없음).
     load<SalesEntry>('sales_entries').then(guard(rows => { if (rows) setSalesEntries(rows); }));
@@ -1710,6 +1757,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .subscribe();
     return () => { sb.removeChannel(channel); };
   }, [uid, pushNotification]);
+
+  // 순위 보장 실시간 구독: 다른 담당자가 순위를 입력해 임박/도달로 바뀌면 새로고침 없이 반영 + 알림.
+  //  • 0018_rank_guarantees.sql 로 realtime publication + REPLICA IDENTITY FULL 이 설정돼 있어야 한다.
+  //  • 내가 일으킨 변경은 saveRankGuarantee 에서 이미 알림을 띄웠고, 에코 시 prev.status===새 status 라 스킵된다.
+  useEffect(() => {
+    if (!supabase || !uid) return;
+    const sb = supabase;
+    const channel = sb
+      .channel(`rt-rankg-${uid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rank_guarantees' }, payload => {
+        if (payload.eventType === 'DELETE') {
+          const oldId = (payload.old as { id?: string })?.id;
+          if (oldId) setRankGuarantees(prev => prev.filter(r => r.id !== oldId));
+          return;
+        }
+        const rg = (payload.new as { data?: RankGuarantee })?.data;
+        if (!rg || !rg.id) return;
+        const prev = rankGuaranteesRef.current.find(x => x.id === rg.id);
+        setRankGuarantees(list => list.some(x => x.id === rg.id) ? list.map(x => x.id === rg.id ? rg : x) : [rg, ...list]);
+        // 다른 사람이 순위를 입력해 임박/도달로 전이된 경우만 알림(내 변경은 prev 와 같아 스킵).
+        if (prev && prev.status !== rg.status && (rg.status === 'due_soon' || rg.status === 'reached')) {
+          const n = countAchieved(rg);
+          const reached = rg.status === 'reached';
+          const title = reached ? '순위 보장 건수 도달' : '순위 보장 곧 도달';
+          const tail = reached ? '연장 또는 종료를 결정하세요' : '연장 여부를 확인하세요';
+          const body = `${rg.clientName} · ${rg.title} (${n}/${rg.guaranteedCount}건) — ${tail}`;
+          pushNotification({ type: 'rank', title, body, link: '/rank-guarantee' });
+          pushStickyNotice({ type: 'rank', title, body: `${rg.clientName} ${n}/${rg.guaranteedCount}건`, link: '/rank-guarantee' });
+        }
+      })
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [uid, pushNotification, pushStickyNotice]);
 
   // 내부 일정 실시간 구독: 다른 사람이 등록/수정/삭제하면 새로고침 없이 목록 반영(알림은 없음 — 조회용).
   useEffect(() => {
@@ -1813,6 +1893,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       internalEvents, internalCategories, saveInternalEvent, removeInternalEvent, saveInternalCategory, removeInternalCategory,
       salesEntries, salesAccess, saveSalesEntry, removeSalesEntry, addSalesReply, removeSalesReply,
       priceTable, priceRefreshing, priceProgress, priceUpdatedAt, refreshPriceTable,
+      rankGuarantees, saveRankGuarantee, removeRankGuarantee,
       requests, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
       stickyNotices, dismissStickyNotice,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,

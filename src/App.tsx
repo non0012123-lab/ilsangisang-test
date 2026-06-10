@@ -24,6 +24,7 @@ const KeywordToolPage = lazy(() => import('./pages/KeywordToolPage'));
 const AccountListPage = lazy(() => import('./pages/AccountListPage'));
 const SiteListPage = lazy(() => import('./pages/SiteListPage'));
 const RequestsPage = lazy(() => import('./pages/RequestsPage'));
+const RankGuaranteePage = lazy(() => import('./pages/RankGuaranteePage'));
 const InternalSchedulePage = lazy(() => import('./pages/InternalSchedulePage'));
 const PricingPage = lazy(() => import('./pages/PricingPage'));
 const SalesPage = lazy(() => import('./pages/SalesPage'));
@@ -137,6 +138,7 @@ function AppRoutes() {
       <Route path="/sites" element={<ProtectedRoute><SiteListPage /></ProtectedRoute>} />
       <Route path="/requests" element={<ProtectedRoute><RequestsPage /></ProtectedRoute>} />
       <Route path="/internal" element={<ProtectedRoute><InternalSchedulePage /></ProtectedRoute>} />
+      <Route path="/rank-guarantee" element={<ProtectedRoute><RankGuaranteePage /></ProtectedRoute>} />
       <Route path="/pricing" element={<ProtectedRoute><PricingPage /></ProtectedRoute>} />
       <Route path="/sales" element={<ProtectedRoute requireSales><SalesPage /></ProtectedRoute>} />
       {/* 데스크톱 앱 트레이용 어시스턴트 퀵바(별도 webview 창) — 네비/헤더 없이 어시스턴트만 */}

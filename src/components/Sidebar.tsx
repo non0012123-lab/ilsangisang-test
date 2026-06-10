@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, CalendarDays, Users, LogOut,
   Globe,
-  BarChart3, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound, Inbox, CalendarClock, Tags, PhoneCall,
+  BarChart3, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound, Inbox, CalendarClock, Tags, PhoneCall, Target,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -18,6 +18,7 @@ const mainNav: NavItem[] = [
   { to: '/timetable', icon: <CalendarRange size={18} />, label: '타임테이블' },
   { to: '/client', icon: <Building2 size={18} />, label: '클라이언트별 스케줄' },
   { to: '/internal', icon: <CalendarClock size={18} />, label: '내부 일정' },
+  { to: '/rank-guarantee', icon: <Target size={18} />, label: '순위 보장' },
   { to: '/ai-planning', icon: <Sparkles size={18} />, label: 'AI 기획' },
   { to: '/ai-results', icon: <FileText size={18} />, label: 'AI 기획 결과' },
   { to: '/keyword-tool', icon: <Search size={18} />, label: '키워드 조회' },

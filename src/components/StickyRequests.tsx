@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, CheckCheck, X, Inbox, CalendarClock, FileText, Image as ImageIcon, Sparkles, Bell } from 'lucide-react';
+import { Check, CheckCheck, X, Inbox, CalendarClock, FileText, Image as ImageIcon, Sparkles, Bell, Target } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { AppNotification } from '../types';
@@ -18,6 +18,7 @@ const NOTICE_ICON: Record<AppNotification['type'], React.ReactNode> = {
   assistant: <Sparkles size={13} className="text-amber-500" />,
   request: <Inbox size={13} className="text-emerald-500" />,
   internal: <CalendarClock size={13} className="text-cyan-500" />,
+  rank: <Target size={13} className="text-orange-500" />,
 };
 
 export default function StickyRequests() {
