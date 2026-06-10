@@ -1,8 +1,8 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, CalendarDays, Users, LogOut,
-  Hash, PlayCircle, Globe, Video, Paintbrush, ChevronDown, ChevronRight,
-  BarChart3, MessageSquare, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound, Inbox, CalendarClock, Tags, PhoneCall,
+  Hash, Globe,
+  BarChart3, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound, Inbox, CalendarClock, Tags, PhoneCall,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -16,6 +16,8 @@ const mainNav: NavItem[] = [
   { to: '/schedule/daily', icon: <Calendar size={18} />, label: '일일 스케줄' },
   { to: '/schedule/full', icon: <CalendarDays size={18} />, label: '전체 스케줄' },
   { to: '/timetable', icon: <CalendarRange size={18} />, label: '타임테이블' },
+  { to: '/client', icon: <Building2 size={18} />, label: '클라이언트별 스케줄' },
+  { to: '/category', icon: <Hash size={18} />, label: '카테고리별 스케줄' },
   { to: '/internal', icon: <CalendarClock size={18} />, label: '내부 일정' },
   { to: '/ai-planning', icon: <Sparkles size={18} />, label: 'AI 기획' },
   { to: '/ai-results', icon: <FileText size={18} />, label: 'AI 기획 결과' },
@@ -25,24 +27,11 @@ const mainNav: NavItem[] = [
   { to: '/pricing', icon: <Tags size={18} />, label: '단가표' },
 ];
 
-const categoryNav: NavItem[] = [
-  { to: '/category/sns',            icon: <Hash size={16} />,          label: 'SNS' },
-  { to: '/category/youtube',        icon: <PlayCircle size={16} />,    label: '유튜브' },
-  { to: '/category/naver',          icon: <Globe size={16} />,         label: '네이버' },
-  { to: '/category/video',          icon: <Video size={16} />,         label: '영상제작' },
-  { to: '/category/design',         icon: <Paintbrush size={16} />,    label: '디자인제작' },
-  { to: '/category/naver-opinion',  icon: <MessageSquare size={16} />, label: '네이버 여론작업' },
-];
-
 export default function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
-  const [catOpen, setCatOpen] = useState(false);
-  const [cliOpen, setCliOpen] = useState(false);
   const { user, logout } = useAuth();
-  const { clients, requests, salesAccess } = useApp();
+  const { requests, salesAccess } = useApp();
   // 받은 요청 중 아직 확인 안 한(대기중) 건수 — 사이드바 뱃지
   const pendingReqCount = requests.filter(r => r.toUid === user?.id && r.status === 'pending').length;
-  // 활성 클라이언트는 등록 즉시 자동으로 이 목록에 표시·연동됨
-  const navClients = clients.filter(c => c.status !== 'inactive');
 
   const isAdmin = user?.role === 'admin';
   const [pendingCount, setPendingCount] = useState(0);
@@ -100,50 +89,6 @@ export default function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: 
             }
           ><PhoneCall size={18} />영업관리</NavLink>
         )}
-
-        {/* Category section */}
-        <div className="pt-2">
-          <button onClick={() => setCatOpen(v => !v)}
-            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider hover:text-slate-300 transition-colors">
-            <span>카테고리별</span>
-            {catOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </button>
-
-          {catOpen && (
-            <div className="mt-1 space-y-0.5">
-              {categoryNav.map(item => (
-                <NavLink key={item.to} to={item.to} onClick={onClose}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ml-2 ${isActive ? 'bg-blue-600/20 text-blue-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
-                  }
-                >{item.icon}{item.label}</NavLink>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Client section (등록된 클라이언트 자동 연동) */}
-        <div className="pt-1">
-          <button onClick={() => setCliOpen(v => !v)}
-            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider hover:text-slate-300 transition-colors">
-            <span>클라이언트별</span>
-            {cliOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </button>
-
-          {cliOpen && (
-            <div className="mt-1 space-y-0.5">
-              {navClients.length === 0 ? (
-                <p className="px-3 py-2 ml-2 text-xs text-slate-600">등록된 클라이언트 없음</p>
-              ) : navClients.map(c => (
-                <NavLink key={c.id} to={`/client/${c.id}`} onClick={onClose}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ml-2 ${isActive ? 'bg-blue-600/20 text-blue-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
-                  }
-                ><Building2 size={16} className="shrink-0" /><span className="truncate">{c.name}</span></NavLink>
-              ))}
-            </div>
-          )}
-        </div>
 
         <div className="pt-2 border-t border-slate-700/50 space-y-0.5">
           <NavLink to="/clients" onClick={onClose}

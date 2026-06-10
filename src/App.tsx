@@ -120,7 +120,10 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
       <Route path="/schedule/daily" element={<ProtectedRoute><DailySchedulePage /></ProtectedRoute>} />
       <Route path="/schedule/full" element={<ProtectedRoute><FullSchedulePage /></ProtectedRoute>} />
+      {/* 파라미터 없는 진입(사이드바 '클라이언트별/카테고리별 스케줄') — 첫 항목으로. 클라이언트는 페이지가 첫 업체로 자동 이동 */}
+      <Route path="/category" element={<Navigate to="/category/sns" replace />} />
       <Route path="/category/:category" element={<ProtectedRoute><CategoryPage /></ProtectedRoute>} />
+      <Route path="/client" element={<ProtectedRoute><ClientSchedulePage /></ProtectedRoute>} />
       <Route path="/client/:clientId" element={<ProtectedRoute><ClientSchedulePage /></ProtectedRoute>} />
       <Route path="/clients" element={<ProtectedRoute><ClientManagementPage /></ProtectedRoute>} />
       <Route path="/vendors" element={<ProtectedRoute><VendorManagementPage /></ProtectedRoute>} />
