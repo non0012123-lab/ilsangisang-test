@@ -1113,6 +1113,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return clientsRef.current.find(x => name.includes(x.name) || x.name.includes(name))?.id ?? '';
     };
     const clientNameOf = (id: string) => clientsRef.current.find(c => c.id === id)?.name ?? created.find(c => c.id === id)?.name ?? '';
+    // 일정(entries)이 참조하는 업체를 보장한다: 기존/이번에 만든 업체에서 찾고, 없으면 자동 생성.
+    //  • AI 가 일정만 보내고 업체(clients[])는 안 담는 경우가 있어, 그대로 두면 clientId 가 비어
+    //    일정이 통째로 버려진다(클라이언트 페이지에 안 뜸). 그걸 막기 위해 업체를 즉시 만든다.
+    const ensureClient = (name?: string): string => {
+      const found = resolveClient(name);
+      if (found) return found;
+      const nm = (name ?? '').trim();
+      if (!nm) return '';
+      const id = `cl-${Date.now()}-${created.length}-${Math.random().toString(36).slice(2, 4)}`;
+      saveClient({ id, name: nm, industry: '', contactPerson: '', email: '', phone: '', startDate: todayStr(), categories: [], status: 'active', description: '', reportAnchorDate: undefined });
+      created.push({ name: nm, id });
+      undo.clientIds.push(id);
+      return id;
+    };
 
     // 1.5) 신규 외주사 등록
     (msg.vendors ?? []).forEach((v, i) => {
@@ -1148,8 +1162,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const newEntries: ScheduleEntry[] = [];
     (msg.entries ?? []).forEach((e, i) => {
       const managerId = matchManager(e.managerName) || selfId;
-      const clientId = resolveClient(e.clientName);
-      if (!e.date || !managerId || !clientId) return;
+      const clientId = ensureClient(e.clientName); // 업체명이 있으면 없을 때 자동 생성해 일정이 버려지지 않게
+      if (!e.date || !managerId || !clientId) return; // 날짜/담당자/업체명이 모두 없을 때만 건너뜀
       const category = ((ASSISTANT_CATEGORIES as string[]).includes(e.category ?? '') ? e.category : (ASSISTANT_CATEGORIES.find(c => e.category?.includes(c)) ?? '기타')) as Category;
       const endDate = e.endDate && e.endDate !== 'null' && e.endDate > e.date ? e.endDate : undefined;
       const base = {
