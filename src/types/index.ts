@@ -65,8 +65,10 @@ export interface AiPlanResult {
 
 // ── 대시보드 AI 어시스턴트 ──
 // 어시스턴트가 제안하는 액션들 (사용자가 "적용" 해야 반영됨)
-export interface AssistantProposalEntry { date?: string; endDate?: string | null; managerName?: string; clientName?: string; category?: string; keyword?: string; status?: string; link?: string; rank?: number; recurrence?: Recurrence }
-export interface AssistantProposalUpdate { id?: string; date?: string | null; endDate?: string | null; managerName?: string | null; status?: string | null; link?: string | null; rank?: number | null }
+export interface AssistantProposalEntry { date?: string; endDate?: string | null; managerName?: string; clientName?: string; category?: string; keyword?: string; status?: string; link?: string; rank?: number | string; recurrence?: Recurrence }
+// 변경 대상 식별: id 가 1순위지만, AI 가 긴 내부 id 를 틀리게 옮기는 경우가 많아
+// clientName·keyword·matchDate(=대상 일정의 날짜) 로도 기존 일정을 찾을 수 있게 한다.
+export interface AssistantProposalUpdate { id?: string; clientName?: string; keyword?: string; matchDate?: string | null; date?: string | null; endDate?: string | null; managerName?: string | null; status?: string | null; link?: string | null; rank?: number | string | null }
 // 클라이언트는 추가/수정/삭제를 op 로 구분 (수정·삭제는 id 사용). reportAnchorDate = 월간 보고 기준 시작일.
 export interface AssistantProposalClient { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; industry?: string; categories?: string[]; contactPerson?: string; phone?: string; email?: string; status?: 'active' | 'inactive' | 'pending'; reportAnchorDate?: string }
 export interface AssistantProposalHandover { clientName?: string; overview?: string }

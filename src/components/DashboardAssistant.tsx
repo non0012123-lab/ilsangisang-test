@@ -309,14 +309,21 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                       </div>
                     ))}
                     {(m.updates ?? []).map((u, i) => {
-                      const cur = entries.find(en => en.id === u.id);
+                      // id 가 틀려도 보조필드(업체·키워드·날짜)로 대상을 찾아 미리보기에 표시한다(적용 로직과 동일 기준).
+                      const incl = (a?: string, b?: string) => !!a && !!b && (a.includes(b) || b.includes(a));
+                      const cur = entries.find(en => en.id === u.id)
+                        ?? entries.find(en => (!u.clientName || en.clientName === u.clientName || incl(en.clientName, u.clientName))
+                          && (!u.keyword || incl(en.keyword, u.keyword))
+                          && (!u.matchDate || u.matchDate === 'null' || en.date === u.matchDate));
+                      const target = cur ? `${cur.clientName} ${cur.category}${cur.keyword ? ` (${cur.keyword})` : ''}` : (u.clientName || u.id || '대상 미상');
+                      const rankN = u.rank != null && u.rank !== 'null' ? parseInt(String(u.rank).replace(/[^0-9]/g, ''), 10) : NaN;
                       return (
                         <div key={`u${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                           <Pencil size={13} className="text-amber-500 shrink-0 mt-0.5" />
                           <span>
-                            <strong>일정 변경</strong> {cur ? `${cur.clientName} ${cur.category}${cur.keyword ? ` (${cur.keyword})` : ''}` : u.id}
+                            <strong>일정 변경</strong> {target}
                             {' → '}
-                            {[u.date && u.date !== 'null' ? `날짜 ${u.date}` : '', u.managerName && u.managerName !== 'null' ? `담당 ${u.managerName}` : '', u.status && u.status !== 'null' ? STATUS_LABEL[u.status] ?? u.status : '', u.link != null && u.link !== 'null' ? (u.link ? '🔗 링크 변경' : '🔗 링크 삭제') : ''].filter(Boolean).join(', ')}
+                            {[u.date && u.date !== 'null' ? `날짜 ${u.date}` : '', u.managerName && u.managerName !== 'null' ? `담당 ${u.managerName}` : '', u.status && u.status !== 'null' ? STATUS_LABEL[u.status] ?? u.status : '', u.link != null && u.link !== 'null' ? (u.link ? '🔗 링크 변경' : '🔗 링크 삭제') : '', Number.isFinite(rankN) && rankN > 0 ? `순위 ${rankN}위` : ''].filter(Boolean).join(', ')}
                           </span>
                         </div>
                       );

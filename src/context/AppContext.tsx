@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply, AssistantProposalUpdate } from '../types';
 import { USERS } from '../data/mockData';
 import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
 import type { ReminderOption } from '../types';
@@ -1054,6 +1054,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (ex) return ex.id;
       return mem.find(m => name.includes(m.name) || m.name.includes(name))?.id ?? '';
     };
+    // "4위", "3등", " 5 " 같은 비정형 표기에서도 순위 숫자를 뽑아낸다(신규 등록·기존 변경 공용).
+    const parseRank = (v: unknown): number | undefined => {
+      if (v === null || v === undefined || v === 'null' || v === '') return undefined;
+      const n = typeof v === 'number' ? v : parseInt(String(v).replace(/[^0-9]/g, ''), 10);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    };
+    const includesEither = (a: string, b: string) => !!a && !!b && (a.includes(b) || b.includes(a));
 
     // 1) 클라이언트 추가/수정/삭제
     const created: { name: string; id: string }[] = [];
@@ -1147,7 +1154,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         managerId, managerName: mem.find(m => m.id === managerId)?.name ?? '',
         category, keyword: e.keyword || undefined, clientId, clientName: clientNameOf(clientId),
         link: e.link || undefined,
-        rank: Number(e.rank) > 0 ? Number(e.rank) : undefined, // "키워드 N위로 등록" → 순위 N
+        rank: parseRank(e.rank), // "키워드 N위로 등록" → 순위 N ("3위"/"3등" 등 비정형 표기도 허용)
         status: (['pending', 'in-progress', 'completed'].includes(e.status ?? '') ? e.status : 'pending') as ScheduleStatus,
       };
       // 반복("매월 7일", "매주 화요일" 등) → 해당 날짜마다 실제 일정 N개 생성 + seriesId 로 묶음(수동 등록과 동일 로직).
@@ -1175,10 +1182,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    // 4) 기존 일정 변경 (배분/재배치)
+    // 4) 기존 일정 변경 (배분/재배치 · 링크/순위 추가 등)
+    //  대상 식별: id 가 1순위. 단 AI 가 긴 내부 id 를 틀리게 옮기는 경우가 많아,
+    //  id 가 없거나 안 맞으면 clientName·keyword·matchDate(대상 날짜)로 기존 일정을 찾는다.
+    //  이렇게 해야 "엊그제/일주일 전/6/5 철산역치과 순위 변경"처럼 오래된 일정도 처리된다.
+    const findUpdateTarget = (up: AssistantProposalUpdate): ScheduleEntry | undefined => {
+      if (up.id) {
+        const byId = entriesRef.current.find(en => en.id === up.id);
+        if (byId) return byId;
+      }
+      const cname = (up.clientName ?? '').trim();
+      const kw = (up.keyword ?? '').trim();
+      const md = up.matchDate && up.matchDate !== 'null' ? up.matchDate : '';
+      if (!cname && !kw && !md) return undefined; // 식별 단서가 전혀 없으면 추측하지 않음
+      const cands = entriesRef.current.filter(en => {
+        const okClient = !cname || en.clientName === cname || includesEither(en.clientName, cname);
+        const okKw = !kw || includesEither(en.keyword ?? '', kw);
+        const okDate = !md || en.date === md;
+        return okClient && okKw && okDate;
+      });
+      if (cands.length === 0) return undefined;
+      // 여러 건이면: 날짜 일치 우선 → 그다음 최신순(같은 날 여러 개면 가장 최근 등록분).
+      return [...cands].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))[0];
+    };
+    const patchedIds = new Set<string>(); // 같은 대상에 여러 update 가 와도 중복 카운트/스냅샷 방지
     (msg.updates ?? []).forEach(up => {
-      if (!up.id) return;
-      const cur = entriesRef.current.find(en => en.id === up.id);
+      const cur = findUpdateTarget(up);
       if (!cur) return;
       const patch: Partial<ScheduleEntry> = {};
       if (up.date && up.date !== 'null') patch.date = up.date;
@@ -1191,8 +1220,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // 스케줄 링크: 문자열이면 추가/수정, 빈 문자열("")이면 삭제, null/생략이면 변경 안 함
       if (up.link !== undefined && up.link !== null && up.link !== 'null') patch.link = up.link ? up.link : undefined;
       // 순위: 양수면 변경, null/생략이면 변경 안 함 ("신사피부과 5위로 바꿔줘")
-      if (Number(up.rank) > 0) patch.rank = Number(up.rank);
-      if (Object.keys(patch).length) { undo.updatedPrev.push({ ...cur }); patchEntry(up.id, patch); count += 1; }
+      const r = parseRank(up.rank);
+      if (r !== undefined) patch.rank = r;
+      if (Object.keys(patch).length) {
+        if (!patchedIds.has(cur.id)) { undo.updatedPrev.push({ ...cur }); patchedIds.add(cur.id); count += 1; }
+        patchEntry(cur.id, patch);
+      }
     });
 
     // 5) 일정 삭제/취소
