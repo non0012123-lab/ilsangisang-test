@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply, AssistantProposalUpdate, RankGuarantee } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply, AssistantProposalUpdate, RankGuarantee, RankGuaranteeItem } from '../types';
 import { deriveStatus, countAchieved } from '../utils/rankGuarantee';
 import { USERS } from '../data/mockData';
 import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
@@ -410,37 +410,108 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  // ── 순위 보장 ──
+  // 항목/순위/설정/연장/종료를 저장한다(전체 객체 upsert — jsonb 라 항목은 배열로 임베드).
+  //  • status 는 여기서 items 로부터 다시 파생해 저장한다(단일 진실원: 카운트는 항상 items 에서 센다).
+  //  • 상태가 active→due_soon→reached 로 "전이"되는 순간에만 알림을 1회 띄운다(중복 방지).
+  //    본인이 일으킨 변경은 여기서 직접 알림. 다른 사람의 변경은 realtime 구독이 처리(에코는 prev 비교로 dedup).
+  const saveRankGuarantee = useCallback((rg: RankGuarantee) => {
+    const prev = rankGuaranteesRef.current.find(x => x.id === rg.id);
+    const status = deriveStatus(rg);
+    const next: RankGuarantee = {
+      ...rg,
+      status,
+      // 도달 시점 기록(아직 도달 전이었을 때만 — 회차/순위가 줄었다 다시 차도 최초 도달일 유지)
+      reachedAt: status === 'reached' && prev?.status !== 'reached' ? todayStr() : rg.reachedAt,
+      updatedAt: nowMs(),
+    };
+    setRankGuarantees(list => list.some(x => x.id === next.id) ? list.map(x => x.id === next.id ? next : x) : [next, ...list]);
+    persistOne('rank_guarantees', next);
+    // 전이 알림 — 새로 임박/도달에 진입했을 때만.
+    if (prev && prev.status !== status && (status === 'due_soon' || status === 'reached')) {
+      const n = countAchieved(next);
+      const reached = status === 'reached';
+      const title = reached ? '순위 보장 건수 도달' : '순위 보장 곧 도달';
+      const tail = reached ? '연장 또는 종료를 결정하세요' : '연장 여부를 확인하세요';
+      const body = `${next.clientName} · ${next.title} (${n}/${next.guaranteedCount}건) — ${tail}`;
+      pushNotification({ type: 'rank', title, body, link: '/rank-guarantee' });
+      pushStickyNotice({ type: 'rank', title, body: `${next.clientName} ${n}/${next.guaranteedCount}건`, link: '/rank-guarantee' });
+    }
+  }, [pushNotification, pushStickyNotice]);
+  const removeRankGuarantee = useCallback((id: string) => {
+    setRankGuarantees(prev => prev.filter(r => r.id !== id));
+    persistDelete('rank_guarantees', id);
+  }, []);
+  // 일정 → 순위 보장 단방향 동기화: 변경된 일정에 연결된(entryId 일치) 항목의 키워드·링크·순위 스냅샷을
+  // 일정 값으로 갱신하고, 바뀐 캠페인만 한 번씩 재저장한다(saveRankGuarantee 가 카운트·알림 재계산).
+  //  • 일정을 편집한 본인 쪽에서만 돈다 → 보장 행이 갱신되면 realtime 으로 다른 사람에게 전파/알림된다.
+  //  • 같은 캠페인이 여러 일정에 걸려도 캠페인당 1회만 저장(루프 중 prev 가 어긋나지 않게).
+  const syncEntriesToGuarantees = useCallback((list: ScheduleEntry[]) => {
+    if (!list.length) return;
+    const byId = new Map(list.map(e => [e.id, e]));
+    rankGuaranteesRef.current.forEach(rg => {
+      let changed = false;
+      const items = rg.items.map(it => {
+        const e = it.entryId ? byId.get(it.entryId) : undefined;
+        if (!e) return it;
+        const rank = e.rank;
+        const updated: RankGuaranteeItem = {
+          ...it,
+          keyword: e.keyword || it.keyword,
+          link: e.link,
+          rank,
+          rankedAt: rank != null && it.rankedAt == null ? todayStr() : it.rankedAt,
+        };
+        if (updated.keyword !== it.keyword || updated.link !== it.link || updated.rank !== it.rank) changed = true;
+        return updated;
+      });
+      if (changed) saveRankGuarantee({ ...rg, items });
+    });
+  }, [saveRankGuarantee]);
+  // 일정 삭제 시: 그 일정에 연결된 항목을 '동결'(entryId 해제 + frozen)해 마지막 스냅샷을 보존한다.
+  const freezeGuaranteeLinks = useCallback((entryId: string) => {
+    rankGuaranteesRef.current.forEach(rg => {
+      if (!rg.items.some(it => it.entryId === entryId)) return;
+      const items = rg.items.map(it => it.entryId === entryId ? { ...it, entryId: undefined, frozen: true } : it);
+      saveRankGuarantee({ ...rg, items });
+    });
+  }, [saveRankGuarantee]);
+
   // ── 스케줄 ──
   const saveEntry = useCallback((entry: ScheduleEntry) => {
     setEntries(prev => prev.some(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [entry, ...prev]);
     persistOne('schedule_entries', entry);
-  }, []);
+    syncEntriesToGuarantees([entry]);
+  }, [syncEntriesToGuarantees]);
   const saveEntries = useCallback((list: ScheduleEntry[]) => {
     setEntries(prev => {
       const ids = new Set(list.map(e => e.id));
       return [...list, ...prev.filter(e => !ids.has(e.id))];
     });
     persistMany('schedule_entries', list);
-  }, []);
+    syncEntriesToGuarantees(list);
+  }, [syncEntriesToGuarantees]);
   const patchEntry = useCallback((id: string, patch: Partial<ScheduleEntry>) => {
     const cur = entriesRef.current.find(e => e.id === id);
     if (!cur) return;
     const updated = { ...cur, ...patch };
     setEntries(prev => prev.map(e => e.id === id ? updated : e));
     persistOne('schedule_entries', updated);
-  }, []);
+    syncEntriesToGuarantees([updated]);
+  }, [syncEntriesToGuarantees]);
   const removeEntry = useCallback((id: string) => {
     setEntries(prev => prev.filter(e => e.id !== id));
     persistDelete('schedule_entries', id);
-  }, []);
+    freezeGuaranteeLinks(id);
+  }, [freezeGuaranteeLinks]);
   // 반복(시리즈) 일괄 삭제: 같은 seriesId 의 일정 제거. fromDate 가 있으면 그 날짜 이후 회차만(=이후 전체).
   const removeSeries = useCallback((seriesId: string, fromDate?: string) => {
     const targets = entriesRef.current.filter(e => e.seriesId === seriesId && (!fromDate || e.date >= fromDate));
     if (targets.length === 0) return;
     const ids = new Set(targets.map(e => e.id));
     setEntries(prev => prev.filter(e => !ids.has(e.id)));
-    targets.forEach(e => persistDelete('schedule_entries', e.id));
-  }, []);
+    targets.forEach(e => { persistDelete('schedule_entries', e.id); freezeGuaranteeLinks(e.id); });
+  }, [freezeGuaranteeLinks]);
 
   // ── 업무 요청(요청함) ──
   // 다른 담당자에게 요청을 보낸다(일정과 무관하게 "이거 해줘/확인해줘"). 상대 화면엔 realtime 으로 뜬다.
@@ -502,39 +573,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeRequest = useCallback((id: string) => {
     setRequests(prev => prev.filter(r => r.id !== id));
     persistDelete('requests', id);
-  }, []);
-
-  // ── 순위 보장 ──
-  // 항목/순위/설정/연장/종료를 저장한다(전체 객체 upsert — jsonb 라 항목은 배열로 임베드).
-  //  • status 는 여기서 items 로부터 다시 파생해 저장한다(단일 진실원: 카운트는 항상 items 에서 센다).
-  //  • 상태가 active→due_soon→reached 로 "전이"되는 순간에만 알림을 1회 띄운다(중복 방지).
-  //    본인이 일으킨 변경은 여기서 직접 알림. 다른 사람의 변경은 realtime 구독이 처리(에코는 prev 비교로 dedup).
-  const saveRankGuarantee = useCallback((rg: RankGuarantee) => {
-    const prev = rankGuaranteesRef.current.find(x => x.id === rg.id);
-    const status = deriveStatus(rg);
-    const next: RankGuarantee = {
-      ...rg,
-      status,
-      // 도달 시점 기록(아직 도달 전이었을 때만 — 회차/순위가 줄었다 다시 차도 최초 도달일 유지)
-      reachedAt: status === 'reached' && prev?.status !== 'reached' ? todayStr() : rg.reachedAt,
-      updatedAt: nowMs(),
-    };
-    setRankGuarantees(list => list.some(x => x.id === next.id) ? list.map(x => x.id === next.id ? next : x) : [next, ...list]);
-    persistOne('rank_guarantees', next);
-    // 전이 알림 — 새로 임박/도달에 진입했을 때만.
-    if (prev && prev.status !== status && (status === 'due_soon' || status === 'reached')) {
-      const n = countAchieved(next);
-      const reached = status === 'reached';
-      const title = reached ? '순위 보장 건수 도달' : '순위 보장 곧 도달';
-      const tail = reached ? '연장 또는 종료를 결정하세요' : '연장 여부를 확인하세요';
-      const body = `${next.clientName} · ${next.title} (${n}/${next.guaranteedCount}건) — ${tail}`;
-      pushNotification({ type: 'rank', title, body, link: '/rank-guarantee' });
-      pushStickyNotice({ type: 'rank', title, body: `${next.clientName} ${n}/${next.guaranteedCount}건`, link: '/rank-guarantee' });
-    }
-  }, [pushNotification, pushStickyNotice]);
-  const removeRankGuarantee = useCallback((id: string) => {
-    setRankGuarantees(prev => prev.filter(r => r.id !== id));
-    persistDelete('rank_guarantees', id);
   }, []);
 
   // ── 내부 일정 ──

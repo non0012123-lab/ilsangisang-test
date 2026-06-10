@@ -366,13 +366,19 @@ export type RankGuaranteeStatus = 'active' | 'due_soon' | 'reached' | 'closed';
 //  진행중      / 임박(목표-offset 도달) / 도달(목표 달성)    / 종료(연장 안 함)
 
 // 항목 1개 = "1건". rank 값이 있으면 카운트 대상.
+//  • 일정(ScheduleEntry)을 연결하면(entryId) 키워드·링크·순위는 그 일정이 원천이 된다(단방향 스냅샷).
+//    연동 항목은 보장함에서 읽기전용 — 순위는 일정에서만 바뀐다(일정 저장 시 자동 동기화).
+//  • 원본 일정이 삭제되면 '동결'(entryId 해제 + frozen)되어 마지막 스냅샷을 그대로 보존한다.
 export interface RankGuaranteeItem {
   id: string;
   cycle: number;       // 소속 회차(연장 시 +1) — 현재 회차 항목만 카운트
-  keyword: string;     // 키워드/항목명
+  keyword: string;     // 키워드/항목명 (연동 시 일정에서 스냅샷)
   rank?: number;       // 순위. 값이 있으면 '유효=카운트'(1~N위 제한 없음)
   rankedAt?: string;   // 순위 최초 기재일 YYYY-MM-DD
   memo?: string;
+  entryId?: string;    // 연결된 일정 id (있으면 '연동 항목' — 읽기전용)
+  link?: string;       // 일정에서 가져온 링크 (연동/동결 시 스냅샷)
+  frozen?: boolean;    // 원본 일정 삭제로 연동이 끊긴 항목(마지막 순위 보존)
 }
 
 export interface RankGuarantee {

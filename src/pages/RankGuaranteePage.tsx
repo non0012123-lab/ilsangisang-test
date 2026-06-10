@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   Plus, Search, X, Pencil, Trash2, Target, ListChecks, RotateCw, CheckCircle2, PlayCircle,
+  CalendarPlus, ExternalLink, Link2, Lock, Unlink,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
@@ -8,7 +9,7 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { todayStr } from '../utils/today';
 import { countAchieved, thresholdOf, isAchieved, STATUS_LABEL } from '../utils/rankGuarantee';
-import type { RankGuarantee, RankGuaranteeItem, RankGuaranteeStatus } from '../types';
+import type { RankGuarantee, RankGuaranteeItem, RankGuaranteeStatus, ScheduleEntry } from '../types';
 
 const genId = (p: string) => `${p}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -48,7 +49,7 @@ const STATUS_FILTERS: { key: 'all' | RankGuaranteeStatus; label: string }[] = [
 ];
 
 export default function RankGuaranteePage() {
-  const { rankGuarantees, saveRankGuarantee, removeRankGuarantee, clients } = useApp();
+  const { rankGuarantees, saveRankGuarantee, removeRankGuarantee, clients, entries } = useApp();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
@@ -242,7 +243,7 @@ export default function RankGuaranteePage() {
 
       {/* 항목 관리(상세) 모달 */}
       {detail && (
-        <DetailModal rg={detail} onClose={() => setDetailId(null)} onChange={saveRankGuarantee} />
+        <DetailModal rg={detail} entries={entries} onClose={() => setDetailId(null)} onChange={saveRankGuarantee} />
       )}
     </Layout>
   );
@@ -250,11 +251,16 @@ export default function RankGuaranteePage() {
 
 // ── 항목 관리 모달 ──────────────────────────────────────
 // 현재 회차 항목을 표로 보여주고, 순위 입력 시 즉시 저장(카운트·알림 재계산). 연장/종료 액션 포함.
-function DetailModal({ rg, onClose, onChange }: { rg: RankGuarantee; onClose: () => void; onChange: (rg: RankGuarantee) => void }) {
+//  • 연동 항목(entryId): 일정이 원천이라 키워드·순위 읽기전용. 순위는 일정에서 바뀌면 자동 동기화됨.
+//  • 동결 항목(frozen): 원본 일정이 삭제돼 끊긴 항목 — 마지막 순위를 보존하며 다시 수동 편집 가능.
+//  • 수동 항목: 보장함에서 직접 입력.
+function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; entries: ScheduleEntry[]; onClose: () => void; onChange: (rg: RankGuarantee) => void }) {
   const [newKeyword, setNewKeyword] = useState('');
+  const [picking, setPicking] = useState(false);
   const items = rg.items.filter(it => it.cycle === rg.cycle);
   const n = countAchieved(rg);
   const reached = rg.status === 'reached';
+  const linkedEntryIds = new Set(rg.items.filter(it => it.entryId).map(it => it.entryId));
 
   const commitItems = (nextItems: RankGuaranteeItem[]) => onChange({ ...rg, items: nextItems });
 
@@ -272,6 +278,20 @@ function DetailModal({ rg, onClose, onChange }: { rg: RankGuarantee; onClose: ()
     patchItem(it.id, { rank, rankedAt: rank != null && it.rankedAt == null ? todayStr() : it.rankedAt });
   };
   const removeItem = (id: string) => commitItems(rg.items.filter(it => it.id !== id));
+  // 연동 항목을 수동으로 전환(연동 해제) — 일정과의 연결만 끊고 스냅샷은 보존.
+  const unlinkItem = (id: string) => commitItems(rg.items.map(it => it.id === id ? { ...it, entryId: undefined, frozen: true } : it));
+
+  // 일정에서 선택한 항목들을 연동 항목으로 생성(키워드·링크·순위 스냅샷). 이미 연결된 일정은 picker 에서 제외됨.
+  const addFromEntries = (picked: ScheduleEntry[]) => {
+    if (!picked.length) return;
+    const created: RankGuaranteeItem[] = picked.map(e => ({
+      id: genId('rgi'), cycle: rg.cycle, entryId: e.id,
+      keyword: e.keyword || '(키워드 없음)', link: e.link,
+      rank: e.rank, rankedAt: e.rank != null ? todayStr() : undefined,
+    }));
+    commitItems([...rg.items, ...created]);
+    setPicking(false);
+  };
 
   // 연장: 회차 +1, 종료 해제. 과거 회차 항목은 보존(이력). 새 회차는 빈 상태로 시작.
   const extend = () => {
@@ -314,12 +334,16 @@ function DetailModal({ rg, onClose, onChange }: { rg: RankGuarantee; onClose: ()
           </div>
         )}
 
-        {/* 항목 추가 */}
-        <div className="px-6 pt-4">
+        {/* 항목 추가 — 일정에서 불러오기(연동) + 수동 추가 */}
+        <div className="px-6 pt-4 space-y-2">
+          <button onClick={() => setPicking(true)}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
+            <CalendarPlus size={15} /> 일정에서 불러오기 (키워드·링크·순위 연동)
+          </button>
           <div className="flex gap-2">
             <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') addItem(); }}
-              placeholder="키워드(항목) 추가 — 예: 강남 임플란트"
+              placeholder="또는 수동 키워드 추가 — 예: 강남 임플란트"
               className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             <button onClick={addItem} className="flex items-center gap-1 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
               <Plus size={15} /> 추가
@@ -330,7 +354,7 @@ function DetailModal({ rg, onClose, onChange }: { rg: RankGuarantee; onClose: ()
         {/* 항목 표 */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {items.length === 0 ? (
-            <p className="text-center text-sm text-gray-400 py-10">항목이 없습니다. 위에서 키워드를 추가하세요.</p>
+            <p className="text-center text-sm text-gray-400 py-10">항목이 없습니다. ‘일정에서 불러오기’ 또는 수동으로 추가하세요.</p>
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -342,24 +366,47 @@ function DetailModal({ rg, onClose, onChange }: { rg: RankGuarantee; onClose: ()
                 </tr>
               </thead>
               <tbody>
-                {items.map(it => (
-                  <tr key={it.id} className="border-b border-gray-50">
-                    <td className="py-2 pl-1">
-                      <input defaultValue={it.keyword} onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.keyword) patchItem(it.id, { keyword: v }); }}
-                        className="w-full bg-transparent focus:outline-none focus:bg-blue-50/50 rounded px-1 py-0.5" />
-                    </td>
-                    <td className="py-2">
-                      <input defaultValue={it.rank != null ? String(it.rank) : ''} onBlur={e => setRank(it, e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                        placeholder="미반영"
-                        className={`w-20 border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${isAchieved(it) ? 'border-green-300 bg-green-50 text-green-700 font-semibold' : 'border-gray-200 text-gray-400'}`} />
-                    </td>
-                    <td className="py-2 text-xs text-gray-400">{it.rankedAt ?? '—'}</td>
-                    <td className="py-2 text-right">
-                      <button onClick={() => removeItem(it.id)} className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="항목 삭제"><Trash2 size={14} /></button>
-                    </td>
-                  </tr>
-                ))}
+                {items.map(it => {
+                  const linked = !!it.entryId;
+                  return (
+                    <tr key={it.id} className="border-b border-gray-50">
+                      <td className="py-2 pl-1">
+                        <div className="flex items-center gap-1.5">
+                          {linked && <Link2 size={13} className="text-blue-500 shrink-0" />}
+                          {it.frozen && <Lock size={12} className="text-gray-400 shrink-0" />}
+                          {linked ? (
+                            <span className="px-1 py-0.5 text-gray-800">{it.keyword}</span>
+                          ) : (
+                            <input defaultValue={it.keyword} onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.keyword) patchItem(it.id, { keyword: v }); }}
+                              className="w-full bg-transparent focus:outline-none focus:bg-blue-50/50 rounded px-1 py-0.5" />
+                          )}
+                          {it.link && (
+                            <a href={it.link} target="_blank" rel="noreferrer" className="text-gray-300 hover:text-blue-600 shrink-0" title={it.link}><ExternalLink size={13} /></a>
+                          )}
+                        </div>
+                        {it.frozen && <span className="ml-[18px] text-[10px] text-gray-400">원본 일정 삭제됨</span>}
+                      </td>
+                      <td className="py-2">
+                        {linked ? (
+                          <span className={`inline-block w-20 text-center border rounded-lg px-2 py-1 text-sm ${isAchieved(it) ? 'border-green-200 bg-green-50 text-green-700 font-semibold' : 'border-gray-100 bg-gray-50 text-gray-400'}`}
+                            title="순위는 일정에서 수정됩니다">{it.rank != null ? it.rank : '미반영'}</span>
+                        ) : (
+                          <input defaultValue={it.rank != null ? String(it.rank) : ''} onBlur={e => setRank(it, e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                            placeholder="미반영"
+                            className={`w-20 border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${isAchieved(it) ? 'border-green-300 bg-green-50 text-green-700 font-semibold' : 'border-gray-200 text-gray-400'}`} />
+                        )}
+                      </td>
+                      <td className="py-2 text-xs text-gray-400">{it.rankedAt ?? '—'}</td>
+                      <td className="py-2 text-right whitespace-nowrap">
+                        {linked && (
+                          <button onClick={() => unlinkItem(it.id)} className="p-1 text-gray-300 hover:text-amber-500 transition-colors" title="연동 해제(수동 전환)"><Unlink size={13} /></button>
+                        )}
+                        <button onClick={() => removeItem(it.id)} className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="항목 삭제"><Trash2 size={14} /></button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -376,6 +423,82 @@ function DetailModal({ rg, onClose, onChange }: { rg: RankGuarantee; onClose: ()
               <RotateCw size={15} /> 연장 ({rg.cycle + 1}차)
             </button>
           </div>
+        </div>
+      </div>
+
+      {picking && (
+        <EntryPicker
+          clientId={rg.clientId}
+          entries={entries}
+          excludeIds={linkedEntryIds}
+          onClose={() => setPicking(false)}
+          onConfirm={addFromEntries}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── 일정 선택기 ─────────────────────────────────────────
+// 해당 클라이언트의 일정 중 이미 연결되지 않은 건을 보여주고, 다중선택해 연동 항목으로 추가한다.
+function EntryPicker({ clientId, entries, excludeIds, onClose, onConfirm }: {
+  clientId: string; entries: ScheduleEntry[]; excludeIds: Set<string | undefined>;
+  onClose: () => void; onConfirm: (picked: ScheduleEntry[]) => void;
+}) {
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [onlyRanked, setOnlyRanked] = useState(false);
+  const candidates = useMemo(() => entries
+    .filter(e => e.clientId === clientId && !excludeIds.has(e.id) && (!onlyRanked || e.rank != null))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+    [entries, clientId, excludeIds, onlyRanked]);
+
+  const toggle = (id: string) => setSel(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">일정에서 불러오기</h3>
+            <p className="text-xs text-gray-400">선택한 일정의 키워드·링크·순위가 연동됩니다(순위는 일정에서 관리)</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18} /></button>
+        </div>
+        <div className="px-6 py-3 border-b border-gray-50">
+          <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+            <input type="checkbox" checked={onlyRanked} onChange={e => setOnlyRanked(e.target.checked)} className="rounded" />
+            순위가 있는 일정만 보기
+          </label>
+        </div>
+        <div className="flex-1 overflow-y-auto px-3 py-2">
+          {candidates.length === 0 ? (
+            <p className="text-center text-sm text-gray-400 py-10">연결할 수 있는 일정이 없습니다.</p>
+          ) : candidates.map(e => (
+            <button key={e.id} onClick={() => toggle(e.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${sel.has(e.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+              <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${sel.has(e.id) ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300'}`}>
+                {sel.has(e.id) && <CheckCircle2 size={12} />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-800 truncate">{e.keyword || <span className="text-gray-400">(키워드 없음)</span>}</span>
+                  {e.rank != null && <span className="text-xs font-semibold text-green-600 shrink-0">{e.rank}위</span>}
+                </div>
+                <p className="text-xs text-gray-400 truncate">{e.date} · {e.category}{e.link ? ' · 링크 있음' : ''}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">취소</button>
+          <button onClick={() => onConfirm(candidates.filter(e => sel.has(e.id)))} disabled={sel.size === 0}
+            className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg transition-colors">
+            {sel.size > 0 ? `${sel.size}건 연동` : '연동'}
+          </button>
         </div>
       </div>
     </div>
