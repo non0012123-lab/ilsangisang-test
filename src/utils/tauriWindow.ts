@@ -6,6 +6,18 @@ function isTauri(): boolean {
   return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
 }
 
+// 현재 webview 창의 라벨(데스크톱 앱). 웹/비-Tauri 면 null.
+//  • 어시스턴트 퀵바 창은 라벨이 'assistant' — 이 창을 항상 /widget 에 고정하기 위한 식별용.
+export async function getWindowLabel(): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    return getCurrentWindow().label;
+  } catch {
+    return null;
+  }
+}
+
 // 현재 창을 숨긴다(데스크톱 앱에서만). 셸이 단축키로 다시 보여준다.
 export async function hideCurrentWindow(): Promise<void> {
   if (!isTauri()) return;

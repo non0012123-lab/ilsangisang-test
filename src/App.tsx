@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import { runSilentUpdate } from './utils/tauriUpdate';
+import { getWindowLabel } from './utils/tauriWindow';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import DashboardPage from './pages/DashboardPage';
@@ -35,6 +36,32 @@ function homeFor(user: AuthUser): string {
   if (user.role === 'pending') return '/pending';
   if (user.role === 'client') return '/client-portal';
   return '/dashboard';
+}
+
+// 데스크톱 트레이 어시스턴트 퀵바(라벨 'assistant' 창)를 항상 /widget 에 고정한다.
+//  • 이 창의 URL 이 어떤 이유로든(절전 후 webview 리로드·경로 변형 등) /widget 을 벗어나면
+//    기본 라우트가 /dashboard 로 튕겨 위젯 대신 대시보드가 떠버린다(닫기·최소화 버튼도 사라짐).
+//    단축키는 show/hide 만 하므로 한 번 어긋나면 스스로 복구되지 않는다.
+//  • 그래서 로그인된 직원이 이 창에서 /widget 을 벗어나면 즉시 되돌린다(자가복구).
+//    인증 전(user 없음)·클라이언트는 위젯 대상이 아니므로 건드리지 않는다(리다이렉트 루프 방지).
+function AssistantWindowGuard() {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [isAssistant, setIsAssistant] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void getWindowLabel().then(label => { if (active && label === 'assistant') setIsAssistant(true); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!isAssistant || loading || !user || user.role === 'client') return;
+    if (location.pathname !== '/widget') navigate('/widget', { replace: true });
+  }, [isAssistant, user, loading, location.pathname, navigate]);
+
+  return null;
 }
 
 function FullScreenLoader() {
@@ -130,6 +157,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <AppProvider>
+          <AssistantWindowGuard />
           <AppRoutes />
         </AppProvider>
       </AuthProvider>
