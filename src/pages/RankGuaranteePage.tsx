@@ -267,8 +267,10 @@ export default function RankGuaranteePage() {
 function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; entries: ScheduleEntry[]; onClose: () => void; onChange: (rg: RankGuarantee) => void }) {
   const [newKeyword, setNewKeyword] = useState('');
   const [picking, setPicking] = useState(false);
-  const [extendMenu, setExtendMenu] = useState(false); // '연장' 클릭 시 진행/종료 선택 노출
-  const items = rg.items.filter(it => it.cycle === rg.cycle);
+  const [viewCycle, setViewCycle] = useState(rg.cycle); // 보고 있는 회차(기본=현재). 과거 회차는 읽기전용 이력.
+  const isCurrent = viewCycle === rg.cycle;             // 현재 회차만 편집/추가 가능
+  const items = rg.items.filter(it => it.cycle === viewCycle);
+  const viewAchieved = items.filter(isAchieved).length; // 보는 회차의 달성 건수(내보내기 라벨/대상)
   const n = countAchieved(rg);
   const reached = rg.status === 'reached';
   const linkedEntryIds = new Set(rg.items.filter(it => it.entryId).map(it => it.entryId));
@@ -324,18 +326,39 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
   };
 
   // 연장 진행: 회차 +1, 종료 해제. 과거 회차 항목은 보존(이력). 새 회차는 빈 상태로 시작.
-  const extend = () => { setExtendMenu(false); onChange({ ...rg, cycle: rg.cycle + 1, closed: false }); };
+  const extend = () => {
+    if (!window.confirm(`${rg.cycle + 1}차로 연장할까요?\n현재 회차 기록은 이력으로 보존되고, 새 회차가 빈 상태로 시작됩니다.`)) return;
+    const next = rg.cycle + 1;
+    onChange({ ...rg, cycle: next, closed: false });
+    setViewCycle(next);
+  };
   // 연장 종료: 더 연장하지 않고 이 보장을 종료(카운팅·알림 멈춤, 재개 가능).
-  const endGuarantee = () => { setExtendMenu(false); onChange({ ...rg, closed: true }); };
+  const endGuarantee = () => {
+    if (!window.confirm('이 순위 보장을 종료할까요?\n카운팅과 알림이 멈춥니다. (나중에 재개할 수 있습니다)')) return;
+    onChange({ ...rg, closed: true });
+  };
   const reopen = () => onChange({ ...rg, closed: false });
+  // 되돌리기: 잘못 연장했거나 이전 회차로 돌아갈 때 — 현재 회차를 한 단계 낮춘다(상위 회차 항목은 데이터에 보존돼 재연장 시 복원).
+  const revertCycle = () => {
+    if (rg.cycle <= 1) return;
+    const hasItems = rg.items.some(it => it.cycle === rg.cycle);
+    const msg = hasItems
+      ? `${rg.cycle}차를 접고 ${rg.cycle - 1}차로 되돌릴까요?\n${rg.cycle}차에 입력한 항목은 보존되며, 다시 연장하면 복원됩니다.`
+      : `${rg.cycle - 1}차로 되돌릴까요? (잘못 누른 연장 취소)`;
+    if (!window.confirm(msg)) return;
+    const prev = rg.cycle - 1;
+    onChange({ ...rg, cycle: prev, closed: false });
+    setViewCycle(prev);
+  };
 
-  // 순위가 잡힌 항목만 엑셀(CSV)로 내보낸다 — 보장 건수 도달 시 전달용. 순위 오름차순 정렬.
-  const exportCsv = () => {
+  // 순위가 잡힌 항목만 엑셀(CSV)로 내보낸다 — 보장 건수 도달 시 전달용. 보고 있는 회차 기준, 순위 오름차순.
+  const exportCsv = async () => {
     const ranked = items.filter(isAchieved).sort((a, b) => (a.rank! - b.rank!));
-    if (ranked.length === 0) { alert('순위가 잡힌 항목이 없습니다.'); return; }
+    if (ranked.length === 0) { alert('이 회차에 순위가 잡힌 항목이 없습니다.'); return; }
     const rows = ranked.map((it, i) => [i + 1, it.keyword, `${it.rank}위`, it.link ?? '', it.rankedAt ?? '']);
     const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '_').trim();
-    downloadCsv(`${safe(rg.clientName)}_${safe(rg.title)}_순위보장_${todayStr()}`,
+    const cyc = rg.cycle > 1 ? `_${viewCycle}차` : '';
+    await downloadCsv(`${safe(rg.clientName)}_${safe(rg.title)}${cyc}_순위보장_${todayStr()}`,
       ['번호', '키워드', '순위', '링크', '순위기재일'], rows);
   };
 
@@ -369,26 +392,49 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
           </div>
         )}
 
-        {/* 항목 추가 — 일정에서 불러오기(연동) + 수동 추가 */}
-        <div className="px-6 pt-4 space-y-2">
-          <p className="text-[11px] text-gray-400 leading-relaxed">
-            이 업체의 일정에 <b className="text-gray-500">순위를 입력하면 자동으로 여기에 편입</b>됩니다(순위는 일정에서 관리).
-            순위 없는 일정을 미리 담거나 직접 입력하려면 아래에서 추가하세요.
-          </p>
-          <button onClick={() => setPicking(true)}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
-            <CalendarPlus size={15} /> 일정에서 불러오기 (키워드·링크·순위 연동)
-          </button>
-          <div className="flex gap-2">
-            <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') addItem(); }}
-              placeholder="또는 수동 키워드 추가 — 예: 강남 임플란트"
-              className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <button onClick={addItem} className="flex items-center gap-1 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
-              <Plus size={15} /> 추가
+        {/* 회차 탭 — 2차 이상이면 과거 회차 이력을 볼 수 있다(과거는 읽기전용). '되돌리기'로 잘못된 연장 취소. */}
+        {rg.cycle > 1 && (
+          <div className="px-6 pt-4 flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-gray-400">회차</span>
+            {Array.from({ length: rg.cycle }, (_, i) => i + 1).map(c => (
+              <button key={c} onClick={() => setViewCycle(c)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${c === viewCycle ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                {c}차{c === rg.cycle ? ' (현재)' : ''}
+              </button>
+            ))}
+            <button onClick={revertCycle} title="잘못 연장했거나 이전 회차로 되돌리기"
+              className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-amber-600 hover:bg-amber-50 transition-colors">
+              <RotateCw size={12} className="-scale-x-100" /> 이전 회차로 되돌리기
             </button>
           </div>
-        </div>
+        )}
+
+        {/* 항목 추가 — 현재 회차에서만(과거 회차는 이력 열람 전용) */}
+        {isCurrent ? (
+          <div className="px-6 pt-4 space-y-2">
+            <p className="text-[11px] text-gray-400 leading-relaxed">
+              이 업체의 일정에 <b className="text-gray-500">순위를 입력하면 자동으로 여기에 편입</b>됩니다(순위는 일정에서 관리).
+              순위 없는 일정을 미리 담거나 직접 입력하려면 아래에서 추가하세요.
+            </p>
+            <button onClick={() => setPicking(true)}
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
+              <CalendarPlus size={15} /> 일정에서 불러오기 (키워드·링크·순위 연동)
+            </button>
+            <div className="flex gap-2">
+              <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addItem(); }}
+                placeholder="또는 수동 키워드 추가 — 예: 강남 임플란트"
+                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <button onClick={addItem} className="flex items-center gap-1 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+                <Plus size={15} /> 추가
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mx-6 mt-4 text-xs text-gray-400 bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5">
+            {viewCycle}차 이력입니다(읽기전용). 편집은 현재 회차에서만 가능합니다.
+          </div>
+        )}
 
         {/* 항목 표 */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -407,17 +453,18 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
               <tbody>
                 {items.map(it => {
                   const linked = !!it.entryId;
+                  const editable = isCurrent && !linked; // 현재 회차의 수동 항목만 직접 편집
                   return (
                     <tr key={it.id} className="border-b border-gray-50">
                       <td className="py-2 pl-1">
                         <div className="flex items-center gap-1.5">
                           {linked && <Link2 size={13} className="text-blue-500 shrink-0" />}
                           {it.frozen && <Lock size={12} className="text-gray-400 shrink-0" />}
-                          {linked ? (
-                            <span className="px-1 py-0.5 text-gray-800">{it.keyword}</span>
-                          ) : (
+                          {editable ? (
                             <input defaultValue={it.keyword} onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.keyword) patchItem(it.id, { keyword: v }); }}
                               className="w-full bg-transparent focus:outline-none focus:bg-blue-50/50 rounded px-1 py-0.5" />
+                          ) : (
+                            <span className="px-1 py-0.5 text-gray-800">{it.keyword}</span>
                           )}
                           {it.link && (
                             <a href={it.link} target="_blank" rel="noreferrer" className="text-gray-300 hover:text-blue-600 shrink-0" title={it.link}><ExternalLink size={13} /></a>
@@ -426,22 +473,24 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
                         {it.frozen && <span className="ml-[18px] text-[10px] text-gray-400">원본 일정 삭제됨</span>}
                       </td>
                       <td className="py-2">
-                        {linked ? (
-                          <span className={`inline-block w-20 text-center border rounded-lg px-2 py-1 text-sm ${isAchieved(it) ? 'border-green-200 bg-green-50 text-green-700 font-semibold' : 'border-gray-100 bg-gray-50 text-gray-400'}`}
-                            title="순위는 일정에서 수정됩니다">{it.rank != null ? it.rank : '미반영'}</span>
-                        ) : (
+                        {editable ? (
                           <input defaultValue={it.rank != null ? String(it.rank) : ''} onBlur={e => setRank(it, e.target.value)}
                             onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
                             placeholder="미반영"
                             className={`w-20 border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${isAchieved(it) ? 'border-green-300 bg-green-50 text-green-700 font-semibold' : 'border-gray-200 text-gray-400'}`} />
+                        ) : (
+                          <span className={`inline-block w-20 text-center border rounded-lg px-2 py-1 text-sm ${isAchieved(it) ? 'border-green-200 bg-green-50 text-green-700 font-semibold' : 'border-gray-100 bg-gray-50 text-gray-400'}`}
+                            title={linked ? '순위는 일정에서 수정됩니다' : undefined}>{it.rank != null ? it.rank : '미반영'}</span>
                         )}
                       </td>
                       <td className="py-2 text-xs text-gray-400">{it.rankedAt ?? '—'}</td>
                       <td className="py-2 text-right whitespace-nowrap">
-                        {linked && (
+                        {isCurrent && linked && (
                           <button onClick={() => unlinkItem(it.id)} className="p-1 text-gray-300 hover:text-amber-500 transition-colors" title="연동 해제(수동 전환)"><Unlink size={13} /></button>
                         )}
-                        <button onClick={() => removeItem(it.id)} className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="항목 삭제"><Trash2 size={14} /></button>
+                        {isCurrent && (
+                          <button onClick={() => removeItem(it.id)} className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="항목 삭제"><Trash2 size={14} /></button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -451,33 +500,29 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
           )}
         </div>
 
-        {/* 하단 액션: 내보내기 / 연장·종료 */}
-        <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-gray-100">
+        {/* 하단 액션: 내보내기 · 닫기 · 연장 진행/종료 (항상 노출) */}
+        <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-gray-100 flex-wrap">
           <button onClick={exportCsv} title="순위가 잡힌 항목을 엑셀(CSV)로 내보내기"
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors">
-            <FileSpreadsheet size={15} /> 엑셀 내보내기 ({n}건)
+            <FileSpreadsheet size={15} /> 엑셀 내보내기 ({viewAchieved}건)
           </button>
-          {extendMenu ? (
-            // '연장' 클릭 후: 다음 회차로 진행할지, 여기서 종료할지 선택
-            <div className="flex items-center gap-2">
-              <button onClick={extend} className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
-                <RotateCw size={15} /> 연장 진행 ({rg.cycle + 1}차)
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 rounded-lg transition-colors">닫기</button>
+            {rg.closed ? (
+              <button onClick={reopen} className="flex items-center gap-1.5 px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+                <PlayCircle size={15} /> 재개
               </button>
-              <button onClick={endGuarantee} className="px-4 py-2 text-sm font-semibold text-red-600 border border-red-200 hover:bg-red-50 rounded-lg transition-colors">
-                연장 종료
-              </button>
-              <button onClick={() => setExtendMenu(false)} className="px-3 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">취소</button>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 rounded-lg transition-colors">닫기</button>
-              {!rg.closed && (
-                <button onClick={() => setExtendMenu(true)} className="flex items-center gap-1.5 px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
-                  <RotateCw size={15} /> 연장
+            ) : (
+              <>
+                <button onClick={extend} className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+                  <RotateCw size={15} /> 연장 진행 ({rg.cycle + 1}차)
                 </button>
-              )}
-            </div>
-          )}
+                <button onClick={endGuarantee} className="px-4 py-2 text-sm font-semibold text-red-600 border border-red-200 hover:bg-red-50 rounded-lg transition-colors">
+                  연장 종료
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
