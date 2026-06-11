@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import {
   Plus, Search, X, Pencil, Trash2, Target, ListChecks, RotateCw, CheckCircle2, PlayCircle,
-  CalendarPlus, ExternalLink, Link2, Lock, Unlink,
+  CalendarPlus, ExternalLink, Link2, Lock, Unlink, FileSpreadsheet,
 } from 'lucide-react';
+import { downloadCsv } from '../utils/exportCsv';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -92,9 +93,18 @@ export default function RankGuaranteePage() {
       // 설정만 바꾼다(items·cycle 보존). saveRankGuarantee 가 status 를 다시 파생한다.
       saveRankGuarantee({ ...cur, clientId: client.id, clientName: client.name, title: form.title.trim(), guaranteedCount, alertOffset });
     } else {
+      // 백필: 이 캠페인이 그 업체의 첫 진행중 캠페인이면, 이미 순위가 잡힌 기존 일정을 자동으로 항목에 담는다.
+      //  (이후 일정은 AppContext.syncEntriesToGuarantees 가 저장 시점에 자동 편입한다.)
+      const soleActive = !rankGuarantees.some(r => r.clientId === client.id && !r.closed);
+      const seed: RankGuaranteeItem[] = soleActive
+        ? entries.filter(e => e.clientId === client.id && e.rank != null).map(e => ({
+            id: genId('rgi'), cycle: 1, entryId: e.id,
+            keyword: e.keyword || '(키워드 없음)', link: e.link, rank: e.rank, rankedAt: todayStr(),
+          }))
+        : [];
       saveRankGuarantee({
         id: genId('rg'), clientId: client.id, clientName: client.name, title: form.title.trim(),
-        guaranteedCount, alertOffset, cycle: 1, closed: false, status: 'active', items: [],
+        guaranteedCount, alertOffset, cycle: 1, closed: false, status: 'active', items: seed,
         createdAt: Date.now(), updatedAt: Date.now(),
       });
     }
@@ -304,6 +314,16 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
   };
   const reopen = () => onChange({ ...rg, closed: false });
 
+  // 순위가 잡힌 항목만 엑셀(CSV)로 내보낸다 — 보장 건수 도달 시 전달용. 순위 오름차순 정렬.
+  const exportCsv = () => {
+    const ranked = items.filter(isAchieved).sort((a, b) => (a.rank! - b.rank!));
+    if (ranked.length === 0) { alert('순위가 잡힌 항목이 없습니다.'); return; }
+    const rows = ranked.map((it, i) => [i + 1, it.keyword, `${it.rank}위`, it.link ?? '', it.rankedAt ?? '']);
+    const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '_').trim();
+    downloadCsv(`${safe(rg.clientName)}_${safe(rg.title)}_순위보장_${todayStr()}`,
+      ['번호', '키워드', '순위', '링크', '순위기재일'], rows);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
@@ -336,6 +356,10 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
 
         {/* 항목 추가 — 일정에서 불러오기(연동) + 수동 추가 */}
         <div className="px-6 pt-4 space-y-2">
+          <p className="text-[11px] text-gray-400 leading-relaxed">
+            이 업체의 일정에 <b className="text-gray-500">순위를 입력하면 자동으로 여기에 편입</b>됩니다(순위는 일정에서 관리).
+            순위 없는 일정을 미리 담거나 직접 입력하려면 아래에서 추가하세요.
+          </p>
           <button onClick={() => setPicking(true)}
             className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
             <CalendarPlus size={15} /> 일정에서 불러오기 (키워드·링크·순위 연동)
@@ -412,9 +436,12 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
           )}
         </div>
 
-        {/* 하단 액션: 연장/종료 */}
+        {/* 하단 액션: 내보내기 / 연장·종료 */}
         <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-gray-100">
-          <p className="text-xs text-gray-400">순위 값이 채워진 항목만 카운트됩니다.</p>
+          <button onClick={exportCsv} title="순위가 잡힌 항목을 엑셀(CSV)로 내보내기"
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors">
+            <FileSpreadsheet size={15} /> 엑셀 내보내기 ({n}건)
+          </button>
           <div className="flex gap-2">
             {!rg.closed && (
               <button onClick={close} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 rounded-lg transition-colors">종료</button>

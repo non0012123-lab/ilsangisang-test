@@ -442,16 +442,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRankGuarantees(prev => prev.filter(r => r.id !== id));
     persistDelete('rank_guarantees', id);
   }, []);
-  // 일정 → 순위 보장 단방향 동기화: 변경된 일정에 연결된(entryId 일치) 항목의 키워드·링크·순위 스냅샷을
-  // 일정 값으로 갱신하고, 바뀐 캠페인만 한 번씩 재저장한다(saveRankGuarantee 가 카운트·알림 재계산).
-  //  • 일정을 편집한 본인 쪽에서만 돈다 → 보장 행이 갱신되면 realtime 으로 다른 사람에게 전파/알림된다.
+  // 일정 → 순위 보장 단방향 동기화. 두 가지를 한다(둘 다 일정 편집 본인 쪽에서만 돌고, 보장 행이 갱신되면 realtime 전파):
+  //  (1) 이미 연결된(entryId 일치) 항목의 키워드·링크·순위 스냅샷을 일정 값으로 갱신.
+  //  (2) 자동 편입(밀기): 순위가 채워진 일정을 그 업체의 '유일한 진행중 캠페인'에 미연결이면 항목으로 새로 추가.
+  //      → 순위보장 페이지에서 매칭하지 않아도 일정에 순위만 넣으면 보장함에 들어온다.
+  //      업체에 진행중 캠페인이 2개 이상이면 어디로 보낼지 모호하므로 자동 편입은 멈추고 수동 '불러오기'에 맡긴다.
   //  • 같은 캠페인이 여러 일정에 걸려도 캠페인당 1회만 저장(루프 중 prev 가 어긋나지 않게).
   const syncEntriesToGuarantees = useCallback((list: ScheduleEntry[]) => {
     if (!list.length) return;
     const byId = new Map(list.map(e => [e.id, e]));
-    rankGuaranteesRef.current.forEach(rg => {
+    const all = rankGuaranteesRef.current;
+    // 업체별 진행중(미종료) 캠페인 수 — 자동 편입은 정확히 1개일 때만.
+    const activeByClient = new Map<string, number>();
+    all.forEach(rg => { if (!rg.closed) activeByClient.set(rg.clientId, (activeByClient.get(rg.clientId) || 0) + 1); });
+
+    all.forEach(rg => {
       let changed = false;
-      const items = rg.items.map(it => {
+      // (1) 연결된 항목 갱신
+      let items = rg.items.map(it => {
         const e = it.entryId ? byId.get(it.entryId) : undefined;
         if (!e) return it;
         const rank = e.rank;
@@ -465,6 +473,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (updated.keyword !== it.keyword || updated.link !== it.link || updated.rank !== it.rank) changed = true;
         return updated;
       });
+      // (2) 자동 편입: 순위가 있는 미연결 일정을 항목으로 추가
+      if (!rg.closed && activeByClient.get(rg.clientId) === 1) {
+        const linked = new Set(items.map(it => it.entryId).filter(Boolean));
+        list.forEach(e => {
+          if (e.clientId !== rg.clientId || e.rank == null || linked.has(e.id)) return;
+          items = [...items, {
+            id: `rgi-${nowMs()}-${Math.random().toString(36).slice(2, 6)}`,
+            cycle: rg.cycle, entryId: e.id,
+            keyword: e.keyword || '(키워드 없음)', link: e.link,
+            rank: e.rank, rankedAt: todayStr(),
+          }];
+          linked.add(e.id);
+          changed = true;
+        });
+      }
       if (changed) saveRankGuarantee({ ...rg, items });
     });
   }, [saveRankGuarantee]);
