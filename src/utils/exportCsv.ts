@@ -15,7 +15,14 @@ const isTouchDevice = (): boolean => {
   return typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
 };
 
-export async function downloadCsv(filename: string, headers: Cell[], rows: Cell[][]) {
+// 호출 측이 완료 표시(토스트)를 띄울 수 있게 어떤 방식으로 처리됐는지 알려준다.
+export type DownloadResult =
+  | { kind: 'saved'; path: string }  // 데스크톱 앱: 네이티브로 다운로드 폴더에 저장
+  | { kind: 'shared' }               // 모바일: 공유 시트로 내보냄
+  | { kind: 'downloaded' }           // 브라우저: 다운로드 시작
+  | { kind: 'cancelled' };           // 사용자가 공유를 취소
+
+export async function downloadCsv(filename: string, headers: Cell[], rows: Cell[][]): Promise<DownloadResult> {
   const name = filename.endsWith('.csv') ? filename : `${filename}.csv`;
   const body = [headers, ...rows].map(r => r.map(escapeCell).join(',')).join('\r\n');
   const text = '\uFEFF' + body; // 엑셀 한글용 BOM 포함 본문
@@ -27,8 +34,7 @@ export async function downloadCsv(filename: string, headers: Cell[], rows: Cell[
   if (tauri?.core?.invoke) {
     try {
       const savedPath = await tauri.core.invoke('save_text_file', { filename: name, contents: text });
-      alert(`다운로드 폴더에 저장되었습니다.\n${savedPath}`);
-      return;
+      return { kind: 'saved', path: String(savedPath) };
     } catch {
       // 명령 미존재(구버전) 등 → 아래 웹 표준 경로로 폴백
     }
@@ -41,9 +47,9 @@ export async function downloadCsv(filename: string, headers: Cell[], rows: Cell[
     if (nav.canShare({ files: [file] })) {
       try {
         await nav.share({ files: [file], title: name } as ShareData);
-        return;
+        return { kind: 'shared' };
       } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return; // 사용자가 취소 → 종료
+        if (err instanceof DOMException && err.name === 'AbortError') return { kind: 'cancelled' };
         // 그 외 오류는 아래 앵커 다운로드로 폴백
       }
     }
@@ -59,4 +65,5 @@ export async function downloadCsv(filename: string, headers: Cell[], rows: Cell[
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { kind: 'downloaded' };
 }

@@ -267,6 +267,8 @@ export default function RankGuaranteePage() {
 function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; entries: ScheduleEntry[]; onClose: () => void; onChange: (rg: RankGuarantee) => void }) {
   const [newKeyword, setNewKeyword] = useState('');
   const [picking, setPicking] = useState(false);
+  const [toast, setToast] = useState<string | null>(null); // 내보내기 완료 등 일시 안내
+  const flash = (m: string) => { setToast(m); window.setTimeout(() => setToast(null), 4000); };
   const [viewCycle, setViewCycle] = useState(rg.cycle); // 보고 있는 회차(기본=현재). 과거 회차는 읽기전용 이력.
   const isCurrent = viewCycle === rg.cycle;             // 현재 회차만 편집/추가 가능
   const items = rg.items.filter(it => it.cycle === viewCycle);
@@ -358,12 +360,20 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
     const rows = ranked.map((it, i) => [i + 1, it.keyword, `${it.rank}위`, it.link ?? '', it.rankedAt ?? '']);
     const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '_').trim();
     const cyc = rg.cycle > 1 ? `_${viewCycle}차` : '';
-    await downloadCsv(`${safe(rg.clientName)}_${safe(rg.title)}${cyc}_순위보장_${todayStr()}`,
+    const res = await downloadCsv(`${safe(rg.clientName)}_${safe(rg.title)}${cyc}_순위보장_${todayStr()}`,
       ['번호', '키워드', '순위', '링크', '순위기재일'], rows);
+    if (res.kind === 'saved') flash(`✓ 다운로드 폴더에 저장했어요 (${ranked.length}건)\n${res.path}`);
+    else if (res.kind === 'downloaded') flash(`✓ 다운로드를 시작했어요 — 다운로드 폴더를 확인하세요 (${ranked.length}건)`);
+    else if (res.kind === 'shared') flash(`✓ 공유로 내보냈어요 (${ranked.length}건)`);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] max-w-md bg-gray-900 text-white text-sm rounded-xl px-4 py-3 shadow-lg whitespace-pre-line text-center break-all">
+          {toast}
+        </div>
+      )}
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div className="min-w-0">

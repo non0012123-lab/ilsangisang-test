@@ -473,12 +473,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (updated.keyword !== it.keyword || updated.link !== it.link || updated.rank !== it.rank) changed = true;
         return updated;
       });
-      // (2) 자동 편입: 순위가 있는 미연결 일정을 항목으로 추가 (제외 목록 제외)
+      // (2) 자동 편입: 순위가 있는 미연결 일정을 항목으로 추가.
+      //     이 함수는 '사용자가 일정을 직접 저장(순위 입력/수정)'한 경우에만 돈다(reconcile 과 별개).
+      //     따라서 예전에 보장함에서 삭제해 제외(excludedEntryIds)된 일정이라도, 일정에서 순위를 다시 넣으면
+      //     '재연동 의사'로 보고 제외를 풀고 다시 편입한다(수동 삭제 직후 reconcile 자동 되살아남은 그대로 막힘).
+      let nextExcluded = rg.excludedEntryIds;
       if (!rg.closed && activeByClient.get(rg.clientId) === 1) {
         const linked = new Set(items.map(it => it.entryId).filter(Boolean));
         const excluded = new Set(rg.excludedEntryIds ?? []);
         list.forEach(e => {
-          if (e.clientId !== rg.clientId || e.rank == null || linked.has(e.id) || excluded.has(e.id)) return;
+          if (e.clientId !== rg.clientId || e.rank == null || linked.has(e.id)) return;
+          excluded.delete(e.id); // 일정에서 순위를 (다시) 넣음 → 제외 해제하고 재연동
           items = [...items, {
             id: `rgi-${nowMs()}-${Math.random().toString(36).slice(2, 6)}`,
             cycle: rg.cycle, entryId: e.id,
@@ -488,8 +493,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           linked.add(e.id);
           changed = true;
         });
+        nextExcluded = [...excluded];
       }
-      if (changed) saveRankGuarantee({ ...rg, items });
+      if (changed) saveRankGuarantee({ ...rg, items, excludedEntryIds: nextExcluded });
     });
   }, [saveRankGuarantee]);
   // 일정 삭제 시: 그 일정에 연결된 항목을 '동결'(entryId 해제 + frozen)해 마지막 스냅샷을 보존한다.
