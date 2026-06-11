@@ -392,20 +392,29 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
           </div>
         )}
 
-        {/* 회차 탭 — 2차 이상이면 과거 회차 이력을 볼 수 있다(과거는 읽기전용). '되돌리기'로 잘못된 연장 취소. */}
+        {/* 회차 기록 — 탭으로 지난 회차를 '보기'(읽기전용). 현재 회차는 그대로 유지되며 버리지 않는다.
+            '되돌리기'(롤백)는 보기와 구분해 별도 링크로 둔다(잘못 누른 연장 취소용). */}
         {rg.cycle > 1 && (
-          <div className="px-6 pt-4 flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-gray-400">회차</span>
-            {Array.from({ length: rg.cycle }, (_, i) => i + 1).map(c => (
-              <button key={c} onClick={() => setViewCycle(c)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${c === viewCycle ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                {c}차{c === rg.cycle ? ' (현재)' : ''}
-              </button>
-            ))}
-            <button onClick={revertCycle} title="잘못 연장했거나 이전 회차로 되돌리기"
-              className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-amber-600 hover:bg-amber-50 transition-colors">
-              <RotateCw size={12} className="-scale-x-100" /> 이전 회차로 되돌리기
-            </button>
+          <div className="px-6 pt-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-gray-500">회차 기록</span>
+              <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                {Array.from({ length: rg.cycle }, (_, i) => i + 1).map(c => (
+                  <button key={c} onClick={() => setViewCycle(c)}
+                    className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${c === viewCycle ? 'bg-white shadow-sm text-blue-700' : 'text-gray-500 hover:text-gray-700'}`}>
+                    {c}차{c === rg.cycle ? ' · 현재' : ''}
+                  </button>
+                ))}
+              </div>
+              {!isCurrent && (
+                <button onClick={() => setViewCycle(rg.cycle)} className="text-xs font-medium text-blue-600 hover:underline">현재 회차로 →</button>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1.5">
+              탭을 눌러 지난 회차 기록을 봅니다(읽기전용). 현재 회차는 그대로 유지돼요.
+              {' '}잘못 연장했다면{' '}
+              <button onClick={revertCycle} className="text-amber-600 hover:underline font-medium">현재 회차를 이전으로 되돌리기</button>.
+            </p>
           </div>
         )}
 
