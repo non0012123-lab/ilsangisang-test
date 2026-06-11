@@ -54,9 +54,48 @@ fn toggle_assistant(app: &tauri::AppHandle) {
     }
 }
 
+// 원격 웹에서 호출하는 파일 저장 명령 — 데스크톱 앱은 WebView 의 <a download> 가 막혀 있어
+// 엑셀(CSV) 같은 다운로드를 여기서 처리한다. 다운로드 폴더에 저장하고, 같은 이름이 있으면 (1),(2)… 를 붙여 덮어쓰지 않는다.
+#[tauri::command]
+fn save_text_file(app: tauri::AppHandle, filename: String, contents: String) -> Result<String, String> {
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("다운로드 폴더를 찾지 못했습니다: {e}"))?;
+    // 경로 조작 방지: 전달된 값에서 파일명만 사용
+    let base = std::path::Path::new(&filename)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("download.csv")
+        .to_string();
+    let mut path = dir.join(&base);
+    if path.exists() {
+        let p = std::path::Path::new(&base);
+        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("download").to_string();
+        let ext = p
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|e| format!(".{e}"))
+            .unwrap_or_default();
+        let mut i = 1;
+        loop {
+            let cand = dir.join(format!("{stem} ({i}){ext}"));
+            if !cand.exists() {
+                path = cand;
+                break;
+            }
+            i += 1;
+        }
+    }
+    std::fs::write(&path, contents.as_bytes()).map_err(|e| format!("저장 실패: {e}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 원격 웹(배포 사이트)이 IPC 로 호출하는 네이티브 명령
+        .invoke_handler(tauri::generate_handler![save_text_file])
         // 이미 실행 중이면 새 창을 띄우지 않고 기존 창을 보여줌
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             show_main(app);
