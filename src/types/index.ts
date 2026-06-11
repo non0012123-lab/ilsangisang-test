@@ -392,6 +392,7 @@ export interface RankGuarantee {
   closed?: boolean;        // 종료(연장 안 함) — true 면 카운팅/알림 멈춤
   status: RankGuaranteeStatus; // 파생 결과 캐시 + 전이 감지용
   items: RankGuaranteeItem[];
+  excludedEntryIds?: string[]; // 자동 편입에서 제외할 일정 id(삭제·연동해제한 건) — reconcile 이 되살리지 않게
   reachedAt?: string;      // 목표 도달일 YYYY-MM-DD (도달 시 기록)
   createdAt: number;
   updatedAt: number;

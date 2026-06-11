@@ -267,6 +267,7 @@ export default function RankGuaranteePage() {
 function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; entries: ScheduleEntry[]; onClose: () => void; onChange: (rg: RankGuarantee) => void }) {
   const [newKeyword, setNewKeyword] = useState('');
   const [picking, setPicking] = useState(false);
+  const [extendMenu, setExtendMenu] = useState(false); // '연장' 클릭 시 진행/종료 선택 노출
   const items = rg.items.filter(it => it.cycle === rg.cycle);
   const n = countAchieved(rg);
   const reached = rg.status === 'reached';
@@ -287,9 +288,22 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
     if (rank === it.rank) return; // 값 변화 없으면 저장 안 함(불필요한 알림·쓰기 방지)
     patchItem(it.id, { rank, rankedAt: rank != null && it.rankedAt == null ? todayStr() : it.rankedAt });
   };
-  const removeItem = (id: string) => commitItems(rg.items.filter(it => it.id !== id));
-  // 연동 항목을 수동으로 전환(연동 해제) — 일정과의 연결만 끊고 스냅샷은 보존.
-  const unlinkItem = (id: string) => commitItems(rg.items.map(it => it.id === id ? { ...it, entryId: undefined, frozen: true } : it));
+  // 항목 삭제 — 일정 연동 항목이면 그 일정 id 를 제외 목록에 넣어 자동 보정(reconcile)이 되살리지 않게 한다.
+  const withExcluded = (entryId: string | undefined) =>
+    entryId ? Array.from(new Set([...(rg.excludedEntryIds ?? []), entryId])) : rg.excludedEntryIds;
+  const removeItem = (id: string) => {
+    const it = rg.items.find(x => x.id === id);
+    onChange({ ...rg, items: rg.items.filter(x => x.id !== id), excludedEntryIds: withExcluded(it?.entryId) });
+  };
+  // 연동 항목을 수동으로 전환(연동 해제) — 일정과의 연결만 끊고 스냅샷은 보존. 같은 일정의 '쌍둥이' 재편입을 막기 위해 제외 목록에 등록.
+  const unlinkItem = (id: string) => {
+    const it = rg.items.find(x => x.id === id);
+    onChange({
+      ...rg,
+      items: rg.items.map(x => x.id === id ? { ...x, entryId: undefined, frozen: true } : x),
+      excludedEntryIds: withExcluded(it?.entryId),
+    });
+  };
 
   // 일정에서 선택한 항목들을 연동 항목으로 생성(키워드·링크·순위 스냅샷). 이미 연결된 일정은 picker 에서 제외됨.
   const addFromEntries = (picked: ScheduleEntry[]) => {
@@ -299,19 +313,20 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
       keyword: e.keyword || '(키워드 없음)', link: e.link,
       rank: e.rank, rankedAt: e.rank != null ? todayStr() : undefined,
     }));
-    commitItems([...rg.items, ...created]);
+    // 수동으로 다시 불러온 일정은 제외 목록에서 해제(이전에 삭제/연동해제했더라도 사용자가 명시적으로 다시 담음).
+    const pickedIds = new Set(picked.map(e => e.id));
+    onChange({
+      ...rg,
+      items: [...rg.items, ...created],
+      excludedEntryIds: (rg.excludedEntryIds ?? []).filter(id => !pickedIds.has(id)),
+    });
     setPicking(false);
   };
 
-  // 연장: 회차 +1, 종료 해제. 과거 회차 항목은 보존(이력). 새 회차는 빈 상태로 시작.
-  const extend = () => {
-    if (!window.confirm(`${rg.cycle + 1}차로 연장할까요? 현재 회차 기록은 보존되고 새 회차가 시작됩니다.`)) return;
-    onChange({ ...rg, cycle: rg.cycle + 1, closed: false });
-  };
-  const close = () => {
-    if (!window.confirm('이 순위 보장을 종료할까요? 카운팅과 알림이 멈춥니다. (다시 재개할 수 있습니다)')) return;
-    onChange({ ...rg, closed: true });
-  };
+  // 연장 진행: 회차 +1, 종료 해제. 과거 회차 항목은 보존(이력). 새 회차는 빈 상태로 시작.
+  const extend = () => { setExtendMenu(false); onChange({ ...rg, cycle: rg.cycle + 1, closed: false }); };
+  // 연장 종료: 더 연장하지 않고 이 보장을 종료(카운팅·알림 멈춤, 재개 가능).
+  const endGuarantee = () => { setExtendMenu(false); onChange({ ...rg, closed: true }); };
   const reopen = () => onChange({ ...rg, closed: false });
 
   // 순위가 잡힌 항목만 엑셀(CSV)로 내보낸다 — 보장 건수 도달 시 전달용. 순위 오름차순 정렬.
@@ -442,14 +457,27 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors">
             <FileSpreadsheet size={15} /> 엑셀 내보내기 ({n}건)
           </button>
-          <div className="flex gap-2">
-            {!rg.closed && (
-              <button onClick={close} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 rounded-lg transition-colors">종료</button>
-            )}
-            <button onClick={extend} className="flex items-center gap-1.5 px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
-              <RotateCw size={15} /> 연장 ({rg.cycle + 1}차)
-            </button>
-          </div>
+          {extendMenu ? (
+            // '연장' 클릭 후: 다음 회차로 진행할지, 여기서 종료할지 선택
+            <div className="flex items-center gap-2">
+              <button onClick={extend} className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+                <RotateCw size={15} /> 연장 진행 ({rg.cycle + 1}차)
+              </button>
+              <button onClick={endGuarantee} className="px-4 py-2 text-sm font-semibold text-red-600 border border-red-200 hover:bg-red-50 rounded-lg transition-colors">
+                연장 종료
+              </button>
+              <button onClick={() => setExtendMenu(false)} className="px-3 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">취소</button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 rounded-lg transition-colors">닫기</button>
+              {!rg.closed && (
+                <button onClick={() => setExtendMenu(true)} className="flex items-center gap-1.5 px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+                  <RotateCw size={15} /> 연장
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

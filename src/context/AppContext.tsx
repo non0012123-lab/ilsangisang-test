@@ -473,11 +473,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (updated.keyword !== it.keyword || updated.link !== it.link || updated.rank !== it.rank) changed = true;
         return updated;
       });
-      // (2) 자동 편입: 순위가 있는 미연결 일정을 항목으로 추가
+      // (2) 자동 편입: 순위가 있는 미연결 일정을 항목으로 추가 (제외 목록 제외)
       if (!rg.closed && activeByClient.get(rg.clientId) === 1) {
         const linked = new Set(items.map(it => it.entryId).filter(Boolean));
+        const excluded = new Set(rg.excludedEntryIds ?? []);
         list.forEach(e => {
-          if (e.clientId !== rg.clientId || e.rank == null || linked.has(e.id)) return;
+          if (e.clientId !== rg.clientId || e.rank == null || linked.has(e.id) || excluded.has(e.id)) return;
           items = [...items, {
             id: `rgi-${nowMs()}-${Math.random().toString(36).slice(2, 6)}`,
             cycle: rg.cycle, entryId: e.id,
@@ -499,6 +500,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveRankGuarantee({ ...rg, items });
     });
   }, [saveRankGuarantee]);
+  // 정합성 보정(reconcile): 순위가 잡힌 일정인데 아직 항목에 없는 건을 빠짐없이 자동 편입한다.
+  //  • 저장 이벤트 기반(syncEntriesToGuarantees)으로는 과거 일정·다른 기기 realtime·캠페인 생성 전 데이터가 누락되므로,
+  //    entries/rankGuarantees 가 바뀔 때마다 전수 검사해 보충한다. add 전용(스냅샷 갱신은 sync 가 담당).
+  //  • 라우팅이 모호한 '진행중 캠페인 2개 이상' 업체는 건너뜀. 삭제·연동해제한 건(excludedEntryIds)은 되살리지 않음.
+  //  • 추가가 있을 때만 저장 → 다음 렌더에선 누락 0 이라 멈춤(루프 없음).
+  useEffect(() => {
+    if (!entries.length || !rankGuarantees.length) return;
+    const activeByClient = new Map<string, number>();
+    rankGuarantees.forEach(rg => { if (!rg.closed) activeByClient.set(rg.clientId, (activeByClient.get(rg.clientId) || 0) + 1); });
+    rankGuarantees.forEach(rg => {
+      if (rg.closed || activeByClient.get(rg.clientId) !== 1) return;
+      const linked = new Set(rg.items.map(it => it.entryId).filter(Boolean));
+      const excluded = new Set(rg.excludedEntryIds ?? []);
+      const missing = entries.filter(e => e.clientId === rg.clientId && e.rank != null && !linked.has(e.id) && !excluded.has(e.id));
+      if (!missing.length) return;
+      const added: RankGuaranteeItem[] = missing.map(e => ({
+        id: `rgi-${nowMs()}-${Math.random().toString(36).slice(2, 6)}`,
+        cycle: rg.cycle, entryId: e.id,
+        keyword: e.keyword || '(키워드 없음)', link: e.link,
+        rank: e.rank, rankedAt: todayStr(),
+      }));
+      saveRankGuarantee({ ...rg, items: [...rg.items, ...added] });
+    });
+  }, [entries, rankGuarantees, saveRankGuarantee]);
 
   // ── 스케줄 ──
   const saveEntry = useCallback((entry: ScheduleEntry) => {
