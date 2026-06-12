@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply, AssistantProposalUpdate, RankGuarantee, RankGuaranteeItem } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, Notice, NoticeAudience, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply, AssistantProposalUpdate, RankGuarantee, RankGuaranteeItem } from '../types';
 import { deriveStatus, countAchieved } from '../utils/rankGuarantee';
 import { USERS } from '../data/mockData';
 import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
@@ -101,6 +101,9 @@ interface AppContextType {
   completeRequest: (id: string, note?: string) => void;  // note: 결과물 경로 등 선택 메모(요청자에게 전달)
   returnRequest: (id: string) => void;   // 요청자가 잘못 보낸 요청을 회수/반려
   removeRequest: (id: string) => void;
+  notices: Notice[];
+  sendNotice: (audience: NoticeAudience, audienceLabel: string, title: string, body?: string) => void;
+  removeNotice: (id: string) => void;
   // 내가 보낸 요청이 확인/완료됐을 때 요청자 화면에 잠깐 띄우는 스티커(휘발성, 닫으면 사라짐)
   outgoingAlerts: WorkRequest[];
   dismissOutgoingAlert: (id: string) => void;
@@ -187,6 +190,7 @@ const SITES_LS_KEY = 'ilsangisang.sites.v1';
 const REPORTS_LS_KEY = 'ilsangisang.reports.v1';
 const AI_PLANS_LS_KEY = 'ilsangisang.aiplans.v1';
 const REQUESTS_LS_KEY = 'ilsangisang.requests.v1';
+const NOTICES_LS_KEY = 'ilsangisang.notices.v1';
 const PRICE_TABLE_LS_KEY = 'ilsangisang.priceTable.v1';
 const RANK_GUARANTEES_LS_KEY = 'ilsangisang.rankGuarantees.v1';
 const INTERNAL_EVENTS_LS_KEY = 'ilsangisang.internalEvents.v1';
@@ -241,6 +245,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [conversations, activeConversationId],
   );
   const [requests, setRequests] = useState<WorkRequest[]>(() => lsLoad<WorkRequest>(REQUESTS_LS_KEY));
+  // 공지 — 요청과 같은 공유 데이터(로컬 캐시 + Supabase + realtime). 팀/전체 브로드캐스트.
+  const [notices, setNotices] = useState<Notice[]>(() => lsLoad<Notice>(NOTICES_LS_KEY));
   // 순위 보장 — 공유 데이터(Supabase 소스) + 로컬 캐시 + realtime.
   const [rankGuarantees, setRankGuarantees] = useState<RankGuarantee[]>(() => lsLoad<RankGuarantee>(RANK_GUARANTEES_LS_KEY));
   // 영업관리(상담 로그) — 민감정보라 메모리+Supabase 만(로컬 캐시 없음). RLS 로 권한자만 데이터 수신.
@@ -328,6 +334,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const requestsRef = useRef(requests);
   useEffect(() => { requestsRef.current = requests; }, [requests]);
   useEffect(() => { lsSave(REQUESTS_LS_KEY, requests); }, [requests]);
+  // 공지: 공유 데이터지만 로컬 캐시로 새로고침·일시 네트워크 문제에도 즉시 표시
+  const noticesRef = useRef(notices);
+  useEffect(() => { noticesRef.current = notices; }, [notices]);
+  useEffect(() => { lsSave(NOTICES_LS_KEY, notices); }, [notices]);
   // 순위 보장: 공유 데이터지만 로컬 캐시로 새로고침·일시 네트워크 문제에도 즉시 표시
   const rankGuaranteesRef = useRef(rankGuarantees);
   useEffect(() => { rankGuaranteesRef.current = rankGuarantees; }, [rankGuarantees]);
@@ -627,6 +637,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeRequest = useCallback((id: string) => {
     setRequests(prev => prev.filter(r => r.id !== id));
     persistDelete('requests', id);
+  }, []);
+
+  // ── 공지(팀/전체) ──
+  // 팀 전원 또는 전 직원에게 한 번에 뿌리는 브로드캐스트. 받는 사람 화면엔 realtime 으로 뜬다.
+  // audience='all'(전체) 또는 팀 이름(마케팅팀 등). 작성자 본인은 알림을 받지 않는다(보낸 사람이므로).
+  const sendNotice = useCallback((audience: NoticeAudience, audienceLabel: string, title: string, body?: string) => {
+    const u = userRef.current;
+    const text = title.trim();
+    if (!u || !audience || !text) return;
+    const notice: Notice = {
+      id: `nt-${nowMs()}-${Math.random().toString(36).slice(2, 6)}`,
+      fromUid: u.id, fromName: u.name, fromDept: u.department,
+      audience, audienceLabel: audienceLabel || (audience === 'all' ? '전체' : audience),
+      title: text, body: body?.trim() || undefined,
+      createdAt: nowMs(),
+    };
+    setNotices(prev => [notice, ...prev]);
+    persistOne('notices', notice);
+  }, []);
+  const removeNotice = useCallback((id: string) => {
+    setNotices(prev => prev.filter(n => n.id !== id));
+    persistDelete('notices', id);
   }, []);
 
   // ── 내부 일정 ──
@@ -1108,6 +1140,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
               doneNote: r.doneNote ? r.doneNote.slice(0, 120) : undefined,
             };
           }),
+          // 공지 — "올라온 공지", "우리팀 공지" 조회용. 내 대상(전체/내 팀)이거나 내가 올린 것만.
+          existingNotices: noticesRef.current
+            .filter(n => n.audience === 'all' || n.audience === (u?.department ?? '') || n.fromUid === (u?.id ?? ''))
+            .slice(0, 60)
+            .map(n => {
+              const d = new Date(n.createdAt); const p = (k: number) => String(k).padStart(2, '0');
+              return {
+                audienceLabel: n.audienceLabel, fromName: n.fromName, fromMe: n.fromUid === (u?.id ?? ''),
+                title: n.title, body: (n.body ?? '').slice(0, 120),
+                date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+              };
+            }),
           entries: scoped.map(e => ({
             id: e.id, date: e.date, endDate: e.endDate ?? null,
             managerName: e.managerName, clientName: e.clientName,
@@ -1134,6 +1178,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         accounts: Array.isArray(data.accounts) ? data.accounts : [],
         sites: Array.isArray(data.sites) ? data.sites : [],
         requests: Array.isArray(data.requests) ? data.requests : [],
+        notices: Array.isArray(data.notices) ? data.notices : [],
         internalEvents: Array.isArray(data.internalEvents) ? data.internalEvents : [],
         sales: salesEnabled && Array.isArray(data.sales) ? data.sales : [], // 권한 없으면 무시
         accountLookups: Array.isArray(data.accountLookups) ? data.accountLookups.filter((x: unknown) => typeof x === 'string') : [],
@@ -1181,7 +1226,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 되돌리기용 스냅샷(생성 id + 삭제/수정 전 원본)
     const undo: AssistantUndo = {
       entryIds: [], clientIds: [], vendorIds: [], handoverIds: [], deletedEntries: [], updatedPrev: [],
-      accountIds: [], siteIds: [], requestIds: [], internalEventIds: [], updatedInternalPrev: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
+      accountIds: [], siteIds: [], requestIds: [], noticeIds: [], internalEventIds: [], updatedInternalPrev: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
       deletedClients: [], updatedClientsPrev: [], deletedHandovers: [],
       salesIds: [], updatedSalesPrev: [],
     };
@@ -1471,6 +1516,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    // 8.5) 팀/전체 공지 ("마케팅팀에 ~~ 전달해줘", "회사 전부에게 ~~ 공지해줘")
+    const newNotices: Notice[] = [];
+    const knownTeams = Array.from(new Set(mem.map(m => m.department).filter((d): d is string => !!d)));
+    const resolveAudience = (raw?: string): { audience: NoticeAudience; label: string } | null => {
+      const a = (raw ?? '').trim();
+      if (!a) return null;
+      if (/^all$/i.test(a) || /전체|전\s*직원|모든|모두|회사\s*전부|전사/.test(a)) return { audience: 'all', label: '전체' };
+      // 팀 이름 매칭 — 정확히 또는 부분 포함(예: "마케팅" → "마케팅팀")
+      const team = knownTeams.find(t => t === a) ?? knownTeams.find(t => a.includes(t) || t.includes(a));
+      return team ? { audience: team, label: team } : null;
+    };
+    (msg.notices ?? []).forEach(nt => {
+      const resolved = resolveAudience(nt.audience);
+      const title = (nt.title ?? '').trim();
+      if (!resolved || !title) return;
+      const ntId = `nt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const notice: Notice = {
+        id: ntId, fromUid: u?.id ?? '', fromName: u?.name ?? '', fromDept: u?.department,
+        audience: resolved.audience, audienceLabel: resolved.label,
+        title, body: nt.body?.trim() || undefined, createdAt: nowMs(),
+      };
+      setNotices(prev => [notice, ...prev]);
+      persistOne('notices', notice);
+      undo.noticeIds!.push(ntId);
+      newNotices.push(notice);
+      count += 1;
+    });
+
     // 9) 내부 일정 생성/수정 (회의/미팅/면접/촬영/휴가 등 — 클라이언트로 안 넘어가는 사내 일정)
     const newInternal: InternalEvent[] = [];
     const ensureCat = (name?: string, seed = 0) => {
@@ -1633,6 +1706,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (count > 0) {
       const head = newEntries[0];
       const reqHead = newRequests[0];
+      const ntHead = newNotices[0];
       const intHead = newInternal[0];
       const more = (n: number) => n > 1 ? ` 외 ${n - 1}건` : '';
       let title: string, body: string, link = '/schedule/daily';
@@ -1653,6 +1727,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } else if (reqHead) {
         title = '업무 요청 전송';
         body = `${reqHead.toName || '담당자'} · ${reqHead.title}${newRequests.length > 1 ? ` 외 ${newRequests.length - 1}건` : ''}`;
+        link = '/requests';
+      } else if (ntHead) {
+        title = '공지 전송';
+        body = `[${ntHead.audienceLabel}] ${ntHead.title}${newNotices.length > 1 ? ` 외 ${newNotices.length - 1}건` : ''}`;
         link = '/requests';
       } else {
         title = '변경 반영됨';
@@ -1687,12 +1765,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (u.updatedAccountsPrev ?? []).forEach(a => saveAccount(a));
     (u.updatedSitesPrev ?? []).forEach(s => saveSite(s));
     (u.requestIds ?? []).forEach(id => removeRequest(id)); // 보낸 업무 요청 취소
+    (u.noticeIds ?? []).forEach(id => removeNotice(id)); // 올린 공지 취소
     (u.internalEventIds ?? []).forEach(id => removeInternalEvent(id)); // 생성한 내부 일정 취소
     (u.updatedInternalPrev ?? []).forEach(ev => saveInternalEvent(ev)); // 수정한 내부 일정 복원
     (u.salesIds ?? []).forEach(id => removeSalesEntry(id)); // 생성한 상담 기록 취소
     (u.updatedSalesPrev ?? []).forEach(e => saveSalesEntry(e)); // 수정한 상담 복원
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, undone: true } : m));
-  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, removeRequest, removeInternalEvent, saveInternalEvent, removeSalesEntry, saveSalesEntry, mutateMessages]);
+  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, removeRequest, removeNotice, removeInternalEvent, saveInternalEvent, removeSalesEntry, saveSalesEntry, mutateMessages]);
 
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
@@ -1749,6 +1828,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     load<SiteEntry>('site_entries').then(guard(sites => syncLocalFirst('site_entries', sites, siteEntriesRef.current, setSiteEntries)));
     load<Report>('reports').then(guard(rep => syncLocalFirst('reports', rep, reportsRef.current, setReports)));
     load<WorkRequest>('requests').then(guard(reqs => syncLocalFirst('requests', reqs, requestsRef.current, setRequests)));
+    load<Notice>('notices').then(guard(rows => syncLocalFirst('notices', rows, noticesRef.current, setNotices)));
     load<RankGuarantee>('rank_guarantees').then(guard(rows => syncLocalFirst('rank_guarantees', rows, rankGuaranteesRef.current, setRankGuarantees)));
     load<PriceProduct>('price_table').then(guard(rows => syncLocalFirst('price_table', rows, priceTableRef.current, setPriceTable)));
     // 영업관리: 권한 없으면 RLS 가 빈 결과를 주므로 항상 시도해도 안전(로컬 캐시 없음).
@@ -1849,6 +1929,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .subscribe();
     return () => { sb.removeChannel(channel); };
   }, [uid, pushNotification]);
+
+  // 공지 실시간 구독: 다른 사람이 팀/전체 공지를 올리면 새로고침 없이 반영 + 알림.
+  //  • 0019_notices.sql 로 notices 가 realtime publication 에 추가돼 있어야 한다(삭제 전파 위해 REPLICA IDENTITY FULL).
+  //  • 내 대상 공지(audience='all' 이거나 내 팀)면 종/PC + 스티커 알림. 내가 올린 공지(fromUid=나)는 알리지 않는다.
+  useEffect(() => {
+    if (!supabase || !uid) return;
+    const sb = supabase;
+    const channel = sb
+      .channel(`rt-notices-${uid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notices' }, payload => {
+        if (payload.eventType === 'DELETE') {
+          const oldId = (payload.old as { id?: string })?.id;
+          if (oldId) setNotices(prev => prev.filter(n => n.id !== oldId));
+          return;
+        }
+        const n = (payload.new as { data?: Notice })?.data;
+        if (!n || !n.id) return;
+        const prev = noticesRef.current.find(x => x.id === n.id);
+        setNotices(list => list.some(x => x.id === n.id) ? list.map(x => x.id === n.id ? n : x) : [n, ...list]);
+        // 새로 올라온 공지 중 "내 대상"이고 내가 올린 게 아니면 알림.
+        const myDept = userRef.current?.department;
+        const forMe = n.audience === 'all' || n.audience === myDept;
+        if (!prev && forMe && n.fromUid !== uid) {
+          const body = `[${n.audienceLabel}] ${n.title}`;
+          pushNotification({ type: 'notice', title: `${n.fromName || '동료'}님의 공지`, body, link: '/requests' });
+          pushStickyNotice({ type: 'notice', title: `📢 ${n.audienceLabel} 공지`, body: n.title, link: '/requests' });
+        }
+      })
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [uid, pushNotification, pushStickyNotice]);
 
   // 순위 보장 실시간 구독: 다른 담당자가 순위를 입력해 임박/도달로 바뀌면 새로고침 없이 반영 + 알림.
   //  • 0018_rank_guarantees.sql 로 realtime publication + REPLICA IDENTITY FULL 이 설정돼 있어야 한다.
@@ -1987,6 +2098,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       priceTable, priceRefreshing, priceProgress, priceUpdatedAt, refreshPriceTable,
       rankGuarantees, saveRankGuarantee, removeRankGuarantee,
       requests, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
+      notices, sendNotice, removeNotice,
       stickyNotices, dismissStickyNotice,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,
       desktopNotifyEnabled, enableDesktopNotify,

@@ -64,6 +64,7 @@ interface AssistantRequest {
   currentUser?: string; // 로그인한 본인 이름 — 담당자 미지정 시 기본 담당자, "나/내가" 매핑용
   currentUserId?: string;
   existingRequests?: CtxRequest[]; // 요청함(이미 등록된 업무 요청) — 조회용
+  existingNotices?: CtxNotice[];   // 공지(팀/전체) — 조회용
   managers?: ({ name?: string; department?: string; title?: string; position?: string } | string)[];
   clients?: {
     id?: string; name?: string; industry?: string; categories?: string[]; reportAnchorDate?: string; status?: string;
@@ -88,6 +89,11 @@ interface AssistantRequest {
 interface CtxRequest {
   id?: string; fromName?: string; toName?: string; fromMe?: boolean; toMe?: boolean;
   title?: string; body?: string; status?: string; date?: string; doneNote?: string;
+}
+
+// 공지 컨텍스트 — "올라온 공지", "우리팀 공지" 조회용
+interface CtxNotice {
+  audienceLabel?: string; fromName?: string; fromMe?: boolean; title?: string; body?: string; date?: string;
 }
 
 // 영업관리(상담 로그) 컨텍스트 — 권한자에게만 전달됨
@@ -270,6 +276,12 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     .map(r => `■ ${r.date ?? '-'} | ${r.fromName ?? '?'}${r.fromMe ? '(나)' : ''} → ${r.toName ?? '?'}${r.toMe ? '(나)' : ''} | 상태:${REQ_STATUS_LABEL[r.status ?? ''] ?? r.status ?? '-'} | ${r.title ?? ''}${r.body ? ` — ${r.body.slice(0, 50)}` : ''}${r.doneNote ? ` | 완료메모:${r.doneNote.slice(0, 50)}` : ''}`)
     .join('\n');
 
+  // 공지(팀/전체) 컨텍스트 — 대상·작성자·날짜를 표기
+  const noticeList = (Array.isArray(req.existingNotices) ? req.existingNotices : []).slice(0, 60);
+  const noticeContext = noticeList
+    .map(n => `■ ${n.date ?? '-'} | 대상:${n.audienceLabel ?? '?'} | 작성:${n.fromName ?? '?'}${n.fromMe ? '(나)' : ''} | ${n.title ?? ''}${n.body ? ` — ${n.body.slice(0, 60)}` : ''}`)
+    .join('\n');
+
   const developer = [
     '너는 한국 마케팅 대행사의 일정 관리 AI 어시스턴트다. 항상 한국어로, 친절하고 간결하게 답한다.',
     '반드시 아래 JSON 객체로만 응답해(코드펜스·설명문 금지):',
@@ -284,6 +296,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  "accounts": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "platform":"블로그|SNS|유튜브|기타", "grade":"블로그 등급(준최2~준최6/최적1~최적4)", "ownership":"client|inhouse", "username":"", "password":"", "category":"", "ip":"" } ],',
     '  "sites": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "url":"", "username":"", "password":"", "description":"" } ],',
     '  "requests": [ { "toName":"요청 받을 담당자 이름", "title":"요청 내용 한 줄(예: 디자인 제작)", "body":"상세 설명(없으면 생략)" } ],',
+    '  "notices": [ { "audience":"공지 대상 — \'전체\'(전 직원) 또는 팀 이름(마케팅팀/디자인팀/영상팀/총괄팀)", "title":"공지 내용 한 줄", "body":"상세 설명(없으면 생략)" } ],',
     '  "internalEvents": [ { "op":"add|update", "id":"수정 시 기존 내부일정 id", "title":"일정 제목", "category":"내부 일정 종류", "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "startTime":"HH:MM(없으면 생략)", "endTime":"HH:MM(없으면 생략)", "participantNames":["참여자 이름"], "location":"장소(없으면 생략)", "notes":"메모(없으면 생략)", "reminder":"off|1h|30m|10m|onTime" } ],',
     '  "sales": [ { "op":"add|update|reply", "id":"수정/답글 시 대상(부모) 상담 id", "consultedAt":"YYYY-MM-DD HH:mm 또는 YYYY-MM-DD", "channel":"phone|inquiry|referral|etc", "phone":"전화번호", "email":"이메일", "customerName":"고객/업체명", "content":"상담 내용", "sentiment":"very_positive|positive|neutral|negative|very_negative", "status":"new|absent|prospect|in_progress|done|hold", "followUpDate":"YYYY-MM-DD(있으면)", "nasLink":"첨부/자료 링크(있으면)", "result":"결과/메모(있으면)" } ],',
     '  "accountLookups": [ "조회 질문일 때 답으로 보여줄 아이디 목록 id" ],',
@@ -352,6 +365,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 블로그(platform=블로그)는 등급(grade)을 가진다: 준최2/준최3/준최4/준최5/준최6, 최적1/최적2/최적3/최적4. "최적3 블로그 보여줘", "준최 블로그 목록" 같은 조회는 grade 로 필터해 accountLookups 에 담고, 추가/수정 시 grade 를 채운다. 블로그가 아니면 grade 는 비운다.',
     '- accounts/sites 의 추가/수정/삭제를 제안할 때는 reply 에 무엇을 할지 요약하고 "적용"을 안내한다. 조회·답변만 할 때는 모든 액션 배열을 비운다.',
     '- 다른 담당자에게 업무 요청 보내기("방두환한테 디자인 제작 요청해줘", "○○한테 △△ 확인해달라고 해줘", "□□에게 이거 부탁해"): requests 배열에 담는다. toName 은 "담당자 목록" 중 가장 가까운 이름, title 은 요청 내용을 한 줄로(예: "디자인 제작"), 상세 내용이 있으면 body 에. 이것은 일정 등록이 아니라 "확인/처리 요청"이므로 entries 에는 담지 않는다(일정도 같이 만들라고 명시하면 그때만 entries 추가). reply 에는 누구에게 무엇을 요청할지 요약하고 "적용"하면 그 담당자 화면에 알림이 뜬다고 안내한다. 받는 담당자를 특정할 수 없으면 requests 를 비우고 reply 에서 누구에게 보낼지 되묻는다.',
+    '- 팀/전체 공지("마케팅팀에 ~~ 전달해줘", "디자인팀한테 ~~ 공지해줘", "회사 전부에게/전 직원에게/모두에게 ~~ 공지해줘"): notices 배열에 담는다. audience 는 회사 전체를 가리키면 "전체", 특정 팀이면 그 팀 이름(마케팅팀/디자인팀/영상팀/총괄팀 중 가장 가까운 것), title 은 공지 내용 한 줄, 상세 내용은 body 에. reply 에는 누구(어느 대상)에게 무엇을 공지할지 요약하고 "적용"하면 대상 인원 화면에 알림이 뜬다고 안내한다.',
+    '- ★ 공지 vs 업무 요청 구분(중요): 대상이 "팀 전체" 또는 "회사 전체"면 notices(공지), 대상이 "사람 한 명"이면 requests(업무 요청)다. 핵심 경계 — "디자인팀한테"=팀 전체 공지(notices), "디자인팀장한테"=그 팀의 팀장이라는 한 사람(requests). "마케팅팀에 알려줘"=notices, "마케팅 매니저한테 알려줘"=requests. 팀 이름 뒤에 직책(팀장/PD/매니저 등)이 붙으면 사람(requests), 안 붙고 팀만 가리키면 공지(notices). 한 번에 둘 다(예: "전체 공지하고 김대리한테 따로 요청도")면 notices 와 requests 모두 채운다.',
+    '- ★ 공지 조회("올라온 공지 있어?", "우리팀 공지 뭐 있어?", "전체 공지 알려줘"): 위 "공지" 목록을 근거로 답하고 액션 배열(notices 포함)은 비운다 — 새 공지를 만들지 않는다.',
     '- ★ 요청함 조회("오늘 들어온 요청 알려줘", "내가 받은 요청 뭐 있어?", "내가 보낸 요청 상태", "○○가 나한테 요청한 거", "처리 안 한 요청") : 위 "요청함" 목록을 근거로 답한다. "들어온/받은 요청"은 →(나)로 끝나는 항목(toMe), "보낸 요청"은 (나)→로 시작하는 항목(fromMe)이다. "오늘"이면 date 가 오늘과 같은 것만 추린다. 상태(대기/확인함/완료/반려)·요청자·내용을 정리해 reply 에 답하고, 맞는 게 없으면 "오늘 들어온 요청이 없다"처럼 구체적으로 안내한다(절대 "등록된 내용이 없어요"로 뭉뚱그리지 말 것). ★ 이건 조회이므로 모든 액션 배열(requests 포함)은 비운다 — 새 요청을 만들지 않는다.',
     '- 직책/직함/팀으로 사람 지목: 사용자가 이름 대신 "디자인팀장", "영상팀 PD/피디", "총괄팀 부장님", "마케팅 매니저", "대표님" 처럼 팀(department)·직책(position)·직함(title)으로 사람을 가리키면, 위 "담당자 명단"에서 팀·직책·직함이 맞는 사람을 찾아 그 사람의 "이름"을 managerName / 요청의 toName 에 넣는다(직책/직함 문자열이 아니라 반드시 이름). "PD" 와 "피디" 는 같은 직책이다. "팀장/대표/감독" 등은 팀과 함께 쓰면 그 팀의 해당 보직자를 가리킨다(예: "디자인팀장"=디자인팀 position 팀장). 조건에 맞는 사람이 명단에 없거나 두 명 이상이라 모호하면, 추측하지 말고 reply 에서 누구를 말하는지 되묻고 액션 배열은 비운다.',
     `- managerName(담당자): 사용자가 담당자를 명시적으로 지정했을 때만(예: "철수한테", "영희 담당으로", "디자인팀장한테") "담당자 목록" 중 가장 가까운 값을 넣는다. 담당자 언급이 전혀 없으면 절대 임의로 고르지 말고 managerName 을 빈 문자열("")로 둔다 — 그러면 시스템이 로그인한 본인을 자동 담당자로 넣는다. "나/내가/나한테/제가/저한테" 같은 1인칭 표현은 로그인 본인(${currentUser || '본인'})을 가리키므로 이때도 managerName 은 빈 문자열로 둔다.`,
@@ -404,6 +420,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '',
     '요청함(업무 요청 — "(나)"는 로그인 본인. 받은 요청=→(나), 보낸 요청=(나)→):',
     requestContext || '(등록된 업무 요청 없음)',
+    '공지(팀/전체 — 내 대상이거나 내가 올린 것. "(나)"는 내가 올린 공지):',
+    noticeContext || '(올라온 공지 없음)',
     ...(salesEnabled ? [
       '',
       '상담 목록(영업관리 — 상담 수정/조회 시 위 id 사용):',
@@ -457,7 +475,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const data = await aiRes.json();
   const content = extractText(data);
-  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; internalEvents?: unknown; sales?: unknown; accountLookups?: unknown; siteLookups?: unknown };
+  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; notices?: unknown; internalEvents?: unknown; sales?: unknown; accountLookups?: unknown; siteLookups?: unknown };
   try {
     parsed = JSON.parse(content);
   } catch {
@@ -474,6 +492,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     accounts: Array.isArray(parsed?.accounts) ? parsed.accounts : [],
     sites: Array.isArray(parsed?.sites) ? parsed.sites : [],
     requests: Array.isArray(parsed?.requests) ? parsed.requests : [],
+    notices: Array.isArray(parsed?.notices) ? parsed.notices : [],
     internalEvents: Array.isArray(parsed?.internalEvents) ? parsed.internalEvents : [],
     sales: salesEnabled && Array.isArray(parsed?.sales) ? parsed.sales : [],
     accountLookups: Array.isArray(parsed?.accountLookups) ? parsed.accountLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],

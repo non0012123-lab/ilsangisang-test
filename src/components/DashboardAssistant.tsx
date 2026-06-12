@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall, CornerDownRight } from 'lucide-react';
+import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall, CornerDownRight, Megaphone } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { AssistantMessage } from '../types';
@@ -138,7 +138,7 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
   };
 
   const proposalCount = (m: AssistantMessage) =>
-    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0) + (m.internalEvents?.length ?? 0) + (m.sales?.length ?? 0);
+    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0) + (m.notices?.length ?? 0) + (m.internalEvents?.length ?? 0) + (m.sales?.length ?? 0);
 
   const opLabel = (op?: string) => op === 'delete' ? '삭제' : op === 'update' ? '수정' : '추가';
 
@@ -278,6 +278,12 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                       <div key={`rq${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                         <Send size={13} className="text-blue-500 shrink-0 mt-0.5" />
                         <span><strong>업무 요청</strong> {r.toName || '담당자?'}에게 · {r.title || '내용?'}{r.body ? ` — ${r.body}` : ''}</span>
+                      </div>
+                    ))}
+                    {(m.notices ?? []).map((n, i) => (
+                      <div key={`nt${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                        <Megaphone size={13} className="text-indigo-500 shrink-0 mt-0.5" />
+                        <span><strong>공지</strong> {n.audience === 'all' || /전체|전직원|모두/.test(n.audience || '') ? '전체' : (n.audience || '대상?')}에게 · {n.title || '내용?'}{n.body ? ` — ${n.body}` : ''}</span>
                       </div>
                     ))}
                     {(m.internalEvents ?? []).map((iv, i) => {

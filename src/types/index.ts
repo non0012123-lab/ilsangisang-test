@@ -74,6 +74,9 @@ export interface AssistantProposalClient { op?: 'add' | 'update' | 'delete'; id?
 export interface AssistantProposalHandover { clientName?: string; overview?: string }
 // 다른 담당자에게 보낼 업무 요청 (예: "방두환한테 디자인 제작 요청해줘")
 export interface AssistantProposalRequest { toName?: string; title?: string; body?: string }
+// 팀/전체 공지 (예: "마케팅팀에 ~~ 전달해줘", "회사 전부에게 ~~ 공지해줘")
+// audience: 'all'(전체) 또는 팀 이름(마케팅팀/디자인팀/영상팀/총괄팀)
+export interface AssistantProposalNotice { audience?: string; title?: string; body?: string }
 // 사내 내부 일정 (예: "내일 3시 디자인팀 회의 잡아줘", "금요일 면접 일정")
 // op:'update' + id 면 기존 내부 일정 수정(참여자는 합쳐 추가). 생략/add 면 신규.
 export interface AssistantProposalInternal { op?: 'add' | 'update'; id?: string; title?: string; category?: string; date?: string; endDate?: string | null; startTime?: string; endTime?: string; participantNames?: string[]; location?: string; notes?: string; reminder?: string }
@@ -99,6 +102,7 @@ export interface AssistantUndo {
   accountIds: string[];
   siteIds: string[];
   requestIds?: string[];           // 어시스턴트로 생성한 업무 요청(되돌릴 때 삭제)
+  noticeIds?: string[];            // 어시스턴트로 생성한 공지(되돌릴 때 삭제)
   internalEventIds?: string[];     // 어시스턴트로 생성한 내부 일정(되돌릴 때 삭제)
   updatedInternalPrev?: InternalEvent[]; // 어시스턴트로 수정한 내부 일정의 이전 상태(되돌릴 때 복원)
   salesIds?: string[];             // 어시스턴트로 생성한 상담 기록(되돌릴 때 삭제)
@@ -119,6 +123,7 @@ export interface AssistantMessage {
   accounts?: AssistantAccountOp[];  // 아이디 목록 추가/수정/삭제
   sites?: AssistantSiteOp[];        // 홈페이지 목록 추가/수정/삭제
   requests?: AssistantProposalRequest[]; // 다른 담당자에게 보낼 업무 요청
+  notices?: AssistantProposalNotice[]; // 팀/전체 공지
   internalEvents?: AssistantProposalInternal[]; // 사내 내부 일정
   sales?: AssistantProposalSales[]; // 영업관리 상담 기록 추가/수정
   accountLookups?: string[];        // 조회 답변에 복사 카드로 표시할 아이디 목록 id
@@ -291,7 +296,7 @@ export interface Report {
 // localStorage(기기별)에만 저장하고 Supabase 동기화는 하지 않는다.
 export interface AppNotification {
   id: string;
-  type: 'schedule' | 'ai-plan' | 'ai-image' | 'assistant' | 'request' | 'internal' | 'rank';
+  type: 'schedule' | 'ai-plan' | 'ai-image' | 'assistant' | 'request' | 'internal' | 'rank' | 'notice';
   title: string;
   body?: string;
   link?: string;        // 클릭 시 이동할 라우트 (예: '/ai-results', '/schedule/daily')
@@ -329,6 +334,24 @@ export interface WorkRequest {
   doneAt?: number;
   doneNote?: string;   // 완료 시 담당자가 남기는 선택 메모(결과물 NAS 경로 등) → 요청자에게 전달
   returnedAt?: number;
+}
+
+// ── 공지 ───────────────────────────────────────────────
+// 요청(1:1)과 달리 팀 전체 또는 회사 전체에 한 번에 뿌리는 브로드캐스트.
+// 확인/완료 같은 라이프사이클이 없는 읽기 전용 알림. 받는 사람은 audience 로 결정된다:
+//   audience='all' → 전 직원,  audience=팀이름(마케팅팀 등) → 그 팀 전원.
+// 요청함과 동일하게 localStorage 캐시 + Supabase 영속 + realtime 으로 상대 화면에 반영.
+export type NoticeAudience = 'all' | string; // 'all' 또는 department 이름
+export interface Notice {
+  id: string;
+  fromUid: string;          // 작성자 (로그인 사용자 id)
+  fromName: string;
+  fromDept?: string;        // 작성자 팀(표시용)
+  audience: NoticeAudience; // 'all'(전체) 또는 팀 이름
+  audienceLabel: string;    // 표시용 라벨 ('전체' / '마케팅팀' 등)
+  title: string;            // 공지 제목/한 줄 내용
+  body?: string;            // 상세 내용 (선택)
+  createdAt: number;
 }
 
 // ── 내부 일정 ─────────────────────────────────────────

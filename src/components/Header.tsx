@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, Check, FileText, Image as ImageIcon, CalendarClock, Monitor, Sparkles, Inbox, Target } from 'lucide-react';
+import { Bell, Check, FileText, Image as ImageIcon, CalendarClock, Monitor, Sparkles, Inbox, Target, Megaphone } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
@@ -32,6 +32,7 @@ const TYPE_ICON: Record<AppNotification['type'], React.ReactNode> = {
   request: <Inbox size={15} className="text-emerald-500" />,
   internal: <CalendarClock size={15} className="text-cyan-500" />,
   rank: <Target size={15} className="text-orange-500" />,
+  notice: <Megaphone size={15} className="text-indigo-500" />,
 };
 
 export default function Header({ title, subtitle }: Props) {

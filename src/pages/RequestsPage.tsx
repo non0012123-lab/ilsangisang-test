@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Inbox, Send, Plus, X, Check, CheckCheck, Clock, Trash2, ArrowRight, Undo2, Archive, Copy } from 'lucide-react';
+import { Inbox, Send, Plus, X, Check, CheckCheck, Clock, Trash2, ArrowRight, Undo2, Archive, Copy, Megaphone, Users } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import type { WorkRequest, RequestStatus } from '../types';
 import LinkifiedText from '../components/LinkifiedText';
 import { convertNasInText } from '../utils/nasPath';
+import { orderedTeams } from '../data/org';
 
 const relTime = (ts: number): string => {
   const min = Math.floor((Date.now() - ts) / 60000);
@@ -27,7 +28,7 @@ const STATUS_META: Record<RequestStatus, { label: string; cls: string; icon: Rea
   returned:  { label: '반려',   cls: 'bg-rose-100 text-rose-700',       icon: <Undo2 size={12} /> },
 };
 
-type Tab = 'received' | 'sent' | 'done' | 'returned';
+type Tab = 'received' | 'sent' | 'done' | 'returned' | 'notices';
 
 function StatusBadge({ status }: { status: RequestStatus }) {
   const m = STATUS_META[status];
@@ -40,13 +41,37 @@ function StatusBadge({ status }: { status: RequestStatus }) {
 
 export default function RequestsPage() {
   const { user } = useAuth();
-  const { requests, members, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest } = useApp();
+  const { requests, members, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, notices, sendNotice, removeNotice } = useApp();
   const uid = user?.id;
+  const myDept = user?.department;
+  const isAdmin = user?.role === 'admin';
   const [tab, setTab] = useState<Tab>('received');
   const [showForm, setShowForm] = useState(false);
   const [toId, setToId] = useState('');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  // 공지 작성 폼
+  const [showNoticeForm, setShowNoticeForm] = useState(false);
+  const [audience, setAudience] = useState('all');
+  const [nTitle, setNTitle] = useState('');
+  const [nBody, setNBody] = useState('');
+  // 공지 대상 옵션: 전체 + 실제 존재하는 팀(대표 제외)
+  const teamOptions = useMemo(() => orderedTeams(members.map(m => m.department)), [members]);
+  const openNoticeForm = () => { setAudience('all'); setNTitle(''); setNBody(''); setShowNoticeForm(true); };
+  const handleSendNotice = () => {
+    if (!nTitle.trim()) { alert('공지 내용을 입력하세요.'); return; }
+    const label = audience === 'all' ? '전체' : audience;
+    sendNotice(audience, label, nTitle, nBody);
+    setShowNoticeForm(false);
+    setTab('notices');
+  };
+  // 내가 볼 공지: 전체 공지 + 내 팀 공지 + 내가 올린 공지 (최신순)
+  const visibleNotices = useMemo(
+    () => [...notices]
+      .filter(n => n.audience === 'all' || n.audience === myDept || n.fromUid === uid)
+      .sort((a, b) => b.createdAt - a.createdAt),
+    [notices, myDept, uid],
+  );
   const [completing, setCompleting] = useState<WorkRequest | null>(null); // 완료 메모 모달 대상
   const [doneNote, setDoneNote] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -83,7 +108,7 @@ export default function RequestsPage() {
 
   return (
     <Layout>
-      <Header title="요청함" subtitle="다른 담당자에게 보낸·받은 업무 요청을 관리합니다 (일정과 별개)" />
+      <Header title="요청함" subtitle="담당자 간 업무 요청과 팀·전체 공지를 관리합니다 (일정과 별개)" />
       <div className="flex-1 p-4 lg:p-6 space-y-4">
         {/* 탭 + 새 요청 */}
         <div className="flex items-center justify-between flex-wrap gap-3">
@@ -105,13 +130,61 @@ export default function RequestsPage() {
               className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-colors ${tab === 'returned' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               <Undo2 size={15} /> 반려
             </button>
+            <button onClick={() => setTab('notices')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-colors ${tab === 'notices' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              <Megaphone size={15} /> 공지
+            </button>
           </div>
-          <button onClick={openForm} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors">
-            <Plus size={16} /> 새 요청
-          </button>
+          {tab === 'notices' ? (
+            <button onClick={openNoticeForm} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-colors">
+              <Megaphone size={16} /> 새 공지
+            </button>
+          ) : (
+            <button onClick={openForm} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors">
+              <Plus size={16} /> 새 요청
+            </button>
+          )}
         </div>
 
-        {list.length === 0 ? (
+        {tab === 'notices' ? (
+          visibleNotices.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-gray-100 py-16 text-center text-sm text-gray-400">
+              등록된 공지가 없습니다. ‘새 공지’로 팀이나 전체에 알림을 보내세요.
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {visibleNotices.map(n => {
+                const mine = n.fromUid === uid;
+                const isAll = n.audience === 'all';
+                return (
+                  <div key={n.id} className={`bg-white rounded-2xl shadow-sm border p-4 ${isAll ? 'border-indigo-200' : 'border-gray-100'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${isAll ? 'bg-indigo-100 text-indigo-700' : 'bg-violet-100 text-violet-700'}`}>
+                            {isAll ? <Megaphone size={12} /> : <Users size={12} />} {n.audienceLabel}
+                          </span>
+                          <span className="text-xs text-gray-400">{relTime(n.createdAt)}</span>
+                        </div>
+                        <h3 className="font-bold text-gray-900 break-words">{n.title}</h3>
+                        {n.body && <p className="text-sm text-gray-500 mt-0.5 whitespace-pre-wrap break-words"><LinkifiedText text={n.body} /></p>}
+                        <p className="text-xs text-gray-400 mt-1.5">
+                          {mine ? '내가 올린 공지' : <>작성: <span className="font-medium text-gray-600">{n.fromName || '?'}</span>{n.fromDept ? ` · ${n.fromDept}` : ''}</>}
+                        </p>
+                      </div>
+                      {(mine || isAdmin) && (
+                        <button onClick={() => { if (window.confirm('이 공지를 삭제할까요? 모두의 화면에서 사라집니다.')) removeNotice(n.id); }}
+                          className="shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors" title="공지 삭제">
+                          <Trash2 size={13} /> 삭제
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : list.length === 0 ? (
           <div className="bg-white rounded-2xl border border-gray-100 py-16 text-center text-sm text-gray-400">
             {emptyMsg}
           </div>
@@ -214,6 +287,46 @@ export default function RequestsPage() {
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
               <button onClick={() => setShowForm(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">취소</button>
               <button onClick={handleSend} disabled={candidates.length === 0} className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 rounded-lg transition-colors">요청 보내기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 새 공지 모달 */}
+      {showNoticeForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white"><Megaphone size={16} /></div>
+                <h2 className="text-base font-bold text-gray-900">새 공지</h2>
+              </div>
+              <button onClick={() => setShowNoticeForm(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18} /></button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">공지 대상 *</label>
+                <select value={audience} onChange={e => setAudience(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="all">📢 전체 (전 직원)</option>
+                  {teamOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <p className="text-[11px] text-gray-400 mt-1">{audience === 'all' ? '회사 전 직원이 봅니다.' : `${audience} 소속 인원 전체가 봅니다.`}</p>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">공지 내용 *</label>
+                <input value={nTitle} onChange={e => setNTitle(e.target.value)} placeholder="예: 금요일 전사 회의 오후 3시"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">상세 설명 (선택)</label>
+                <textarea value={nBody} onChange={e => setNBody(e.target.value)} rows={3} placeholder="배경·일정·참고 링크 등"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
+              <button onClick={() => setShowNoticeForm(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">취소</button>
+              <button onClick={handleSendNotice} className="px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors">공지 보내기</button>
             </div>
           </div>
         </div>
