@@ -36,7 +36,7 @@ function padDate(year: number, month: number, day: number) {
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
+function ClientCalendar({ entries, hiddenCategories = [] }: { entries: ScheduleEntry[]; hiddenCategories?: string[] }) {
   const [curDate, setCurDate] = useState(new Date());
   const [selDay, setSelDay] = useState<number | null>(null);
 
@@ -235,7 +235,7 @@ function ClientCalendar({ entries }: { entries: ScheduleEntry[] }) {
 
       {/* Legend */}
       <div className="flex flex-wrap gap-3">
-        {Object.entries(CAT_COLOR).map(([cat, color]) => (
+        {Object.entries(CAT_COLOR).filter(([cat]) => !hiddenCategories.includes(cat)).map(([cat, color]) => (
           <span key={cat} className="flex items-center gap-1.5 text-xs text-gray-500">
             <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: color }} /> {cat}
           </span>
@@ -595,7 +595,7 @@ export default function ClientPortalPage() {
               <h3 className="font-bold text-gray-900">월별 타임테이블</h3>
               <span className="ml-auto text-xs text-gray-400">클릭하면 해당 날짜 일정을 확인할 수 있습니다</span>
             </div>
-            <ClientCalendar entries={entries} />
+            <ClientCalendar entries={entries} hiddenCategories={isDemo ? ['네이버 여론작업'] : []} />
           </div>
         )}
 

@@ -23,7 +23,7 @@ export const DEMO_CLIENT: Client = {
   phone: '010-0000-0000',
   startDate: daysAgo(120),
   contractEnd: daysAgo(-240),
-  categories: ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업'],
+  categories: ['SNS', '유튜브', '네이버', '영상제작', '디자인제작'],
   status: 'active',
   description: '포털 시연용 가상 클라이언트입니다. 모든 수치는 예시입니다.',
   monthlyBudget: '500',
@@ -87,25 +87,10 @@ export const DEMO_ENTRIES: ScheduleEntry[] = [
   entry(12, '디자인제작', '신상 앰플 패키지 키비주얼', { status: 'completed' }),
   entry(1, '영상제작', '7월 캠페인 콘티', { status: 'in-progress' }),
 
-  // 네이버 여론작업 (별도 탭 표시)
-  entry(2, '네이버 여론작업', '신상 앰플 반응', {
-    status: 'completed', link: 'https://example.com/op1',
-    metrics: { views: 5400, comments: 86 },
-  }),
-  entry(10, '네이버 여론작업', '브랜드 신뢰도 컨텐츠', {
-    status: 'completed', link: 'https://example.com/op2',
-    metrics: { views: 3900, comments: 54 },
-  }),
+  // 네이버 콘텐츠(후기·신뢰도)
+  entry(2, '네이버', '신상 앰플 실사용 후기', { rank: 8, views: 5400, link: 'https://example.com/c1' }),
+  entry(10, '네이버', '브랜드 신뢰도 콘텐츠', { rank: 10, views: 3900, link: 'https://example.com/c2' }),
 ];
-
-// 여론작업 본문/반응 채우기 (entry 헬퍼가 다루지 않는 필드 보강)
-DEMO_ENTRIES.forEach(e => {
-  if (e.category === '네이버 여론작업') {
-    e.opinionTitle = e.keyword;
-    e.opinionContent = '주요 커뮤니티/카페에서 신상 라인에 대한 긍정 여론을 형성했습니다. 발색·지속력 관련 실사용 후기가 자연스럽게 확산되었습니다.';
-    e.opinionComments = '발색 진짜 예쁘고 오래가요. 재구매 의사 있습니다!';
-  }
-});
 
 export const DEMO_REPORTS: Report[] = [
   {
