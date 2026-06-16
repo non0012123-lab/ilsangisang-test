@@ -7,6 +7,7 @@ import CategoryBadge from '../components/CategoryBadge';
 import ImageGallery from '../components/ImageGallery';
 import KeywordTool from '../components/KeywordTool';
 import MarketingCharts from '../components/MarketingCharts';
+import DemoInsight from '../components/DemoInsight';
 import { DEMO_CLIENT_ID, DEMO_CLIENT, DEMO_ENTRIES, DEMO_REPORTS } from '../data/demoData';
 import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
@@ -425,6 +426,9 @@ export default function ClientPortalPage() {
               )}
               <span className="ml-auto text-xs text-gray-400">{rangeLabel} · {rangeEntries.length}건</span>
             </div>
+
+            {/* AI 인사이트 — 데모 한정. 전문 마케터 브리핑 톤 요약 */}
+            {isDemo && <DemoInsight entries={rangeEntries} rangeLabel={rangeLabel} />}
 
             {/* Stats */}
             <div className="grid grid-cols-3 gap-4">

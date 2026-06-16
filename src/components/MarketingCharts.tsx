@@ -101,55 +101,6 @@ function PvBars({ data }: { data: { label: string; value: number }[] }) {
   );
 }
 
-// ── 라인: 날짜별 PV 추이 + 평균 순위(이중축 느낌, 단순화) ──
-function TrendLine({ points }: { points: { date: string; pv: number; rank: number | null }[] }) {
-  if (points.length < 2) return <Empty msg="추이를 그릴 데이터가 부족합니다." />;
-  const W = 520, H = 160, PL = 8, PR = 8, PT = 12, PB = 22;
-  const iw = W - PL - PR, ih = H - PT - PB;
-  const maxPv = Math.max(...points.map(p => p.pv), 1);
-  const x = (i: number) => PL + (points.length === 1 ? iw / 2 : (i / (points.length - 1)) * iw);
-  const yPv = (v: number) => PT + ih - (v / maxPv) * ih;
-  const pvPath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)} ${yPv(p.pv).toFixed(1)}`).join(' ');
-  const areaPath = `${pvPath} L${x(points.length - 1).toFixed(1)} ${PT + ih} L${x(0).toFixed(1)} ${PT + ih} Z`;
-  const ranks = points.filter(p => p.rank != null) as { date: string; pv: number; rank: number }[];
-  const maxRank = Math.max(...ranks.map(p => p.rank), 10);
-  const yRank = (v: number) => PT + ((v - 1) / Math.max(maxRank - 1, 1)) * ih; // 1위가 위, 큰 순위가 아래
-  const showLabels = points.length <= 12;
-  return (
-    <div className="overflow-x-auto">
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ minWidth: 360 }}>
-        <defs>
-          <linearGradient id="pvGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path d={areaPath} fill="url(#pvGrad)" />
-        <path d={pvPath} fill="none" stroke="#3b82f6" strokeWidth="2" />
-        {points.map((p, i) => (
-          <g key={i}>
-            <circle cx={x(i)} cy={yPv(p.pv)} r="3" fill="#3b82f6" />
-            {showLabels && <text x={x(i)} y={H - 6} textAnchor="middle" className="fill-gray-400" style={{ fontSize: 9 }}>{p.date.slice(5)}</text>}
-          </g>
-        ))}
-        {/* 순위 점선(있을 때만) */}
-        {ranks.length >= 2 && (
-          <path d={points.map((p, i) => p.rank == null ? '' : `${i === 0 || points[i - 1]?.rank == null ? 'M' : 'L'}${x(i).toFixed(1)} ${yRank(p.rank).toFixed(1)}`).join(' ')}
-            fill="none" stroke="#22c55e" strokeWidth="1.6" strokeDasharray="4 3" />
-        )}
-        {ranks.map((p) => {
-          const i = points.findIndex(pt => pt.date === p.date);
-          return <circle key={p.date} cx={x(i)} cy={yRank(p.rank)} r="2.5" fill="#22c55e" />;
-        })}
-      </svg>
-      <div className="flex items-center gap-4 justify-center mt-1">
-        <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-0.5 bg-blue-500" /> PV(조회수)</span>
-        {ranks.length >= 2 && <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-0.5 bg-green-500" style={{ borderTop: '1px dashed' }} /> 평균 순위</span>}
-      </div>
-    </div>
-  );
-}
-
 function Empty({ msg }: { msg: string }) {
   return <div className="flex items-center justify-center h-32 text-xs text-gray-400">{msg}</div>;
 }
@@ -183,35 +134,17 @@ export default function MarketingCharts({ entries }: { entries: ScheduleEntry[] 
       .slice(0, 8)
       .map(e => ({ label: e.keyword ?? e.category, rank: e.rank as number, channel: e.category }));
 
-    // 추이 — 날짜별 PV 합계 + 평균 순위
-    const byDate: Record<string, { pv: number; ranks: number[] }> = {};
-    entries.forEach(e => {
-      const d = (byDate[e.date] ??= { pv: 0, ranks: [] });
-      d.pv += pvOf(e);
-      if (e.rank != null) d.ranks.push(e.rank);
-    });
-    const trend = Object.keys(byDate).sort().map(date => ({
-      date,
-      pv: byDate[date].pv,
-      rank: byDate[date].ranks.length ? byDate[date].ranks.reduce((s, r) => s + r, 0) / byDate[date].ranks.length : null,
-    }));
-
     const totalPv = entries.reduce((s, e) => s + pvOf(e), 0);
-    return { channelCount, channelPv, rankItems, trend, totalPv };
+    return { channelCount, channelPv, rankItems, totalPv };
   }, [entries]);
 
   return (
     <div className="space-y-4">
-      {/* PV/순위 추이 — 전체 폭 */}
-      <Card title={`PV·순위 추이 (총 조회수 ${nf(charts.totalPv)})`}>
-        <TrendLine points={charts.trend} />
-      </Card>
-
       <div className="grid md:grid-cols-2 gap-4">
         <Card title="채널별 작업 비중">
           <Donut data={charts.channelCount} unit="건" />
         </Card>
-        <Card title="채널별 조회수(PV)">
+        <Card title={`채널별 조회수(PV) · 총 ${nf(charts.totalPv)}`}>
           <PvBars data={charts.channelPv} />
         </Card>
       </div>
