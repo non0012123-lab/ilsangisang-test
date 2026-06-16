@@ -6,6 +6,8 @@ import { duePeriods, reportIdFor, aggregateForPeriod, periodLabel, fallbackSumma
 import CategoryBadge from '../components/CategoryBadge';
 import ImageGallery from '../components/ImageGallery';
 import KeywordTool from '../components/KeywordTool';
+import MarketingCharts from '../components/MarketingCharts';
+import { DEMO_CLIENT_ID, DEMO_CLIENT, DEMO_ENTRIES, DEMO_REPORTS } from '../data/demoData';
 import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
 import { todayStr } from '../utils/today';
@@ -248,17 +250,22 @@ export default function ClientPortalPage() {
   const [tab, setTab] = useState<Tab>('dashboard');
 
   const clientId = user?.clientId ?? '';
-  const client = clients.find(c => c.id === clientId);
-  const entries = allEntries.filter(e => e.clientId === clientId);
+  // 데모(쇼케이스) 계정 — Supabase 공유 데이터 대신 코드 내장 정적 데이터를 주입한다.
+  // DB 에 아무것도 쓰지 않으므로 내부 시스템(관리/대시보드/보고서)에 절대 노출되지 않는다.
+  const isDemo = clientId === DEMO_CLIENT_ID;
+  const client = isDemo ? DEMO_CLIENT : clients.find(c => c.id === clientId);
+  const entries = isDemo ? DEMO_ENTRIES : allEntries.filter(e => e.clientId === clientId);
   const TODAY = todayStr();
 
   // 전송일이 지난 월간 보고서를 자동 생성(+AI 요약, 1회 후 저장)하고, 클라이언트에게 노출
-  const clientReports = allReports
-    .filter(r => r.clientId === clientId && (r.releaseDate ?? r.date) <= TODAY)
-    .sort((a, b) => (b.periodEnd ?? b.date).localeCompare(a.periodEnd ?? a.date));
+  const clientReports = isDemo
+    ? DEMO_REPORTS
+    : allReports
+        .filter(r => r.clientId === clientId && (r.releaseDate ?? r.date) <= TODAY)
+        .sort((a, b) => (b.periodEnd ?? b.date).localeCompare(a.periodEnd ?? a.date));
   const genRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!client) return;
+    if (!client || isDemo) return; // 데모는 DB 저장(saveReport)을 하지 않는다
     duePeriods(client, TODAY).forEach(p => {
       const id = reportIdFor(client.id, p.start);
       if (allReports.some(r => r.id === id) || genRef.current.has(id)) return;
@@ -295,7 +302,7 @@ export default function ClientPortalPage() {
         });
       })();
     });
-  }, [client, allReports, allEntries, TODAY, saveReport]);
+  }, [client, isDemo, allReports, allEntries, TODAY, saveReport]);
 
   // 마케팅 현황 기간 — 기본은 '당일'(오늘 작업 기준), 지난 7일/30일/기간 지정으로 전환 가능
   const [preset, setPreset] = useState<'day' | '7d' | '30d' | 'custom'>('day');
@@ -433,6 +440,9 @@ export default function ClientPortalPage() {
                 </div>
               ))}
             </div>
+
+            {/* 통계 시각화 — 채널·순위·PV. 내부 시스템 입력이 그대로 반영된다 */}
+            <MarketingCharts entries={rangeEntries} />
 
             {/* Recent Tasks */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
@@ -613,7 +623,7 @@ export default function ClientPortalPage() {
                       </p>
                     ))}
                     <button
-                      onClick={() => downloadReportPdf(report, client, allEntries)}
+                      onClick={() => downloadReportPdf(report, client, entries)}
                       className="w-full mt-2 flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors">
                       <Download size={13} /> PDF 보고서 다운로드
                     </button>
