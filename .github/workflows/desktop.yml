@@ -1,17 +1,22 @@
 name: desktop
 
-# 윈도우 설치파일(.exe) 빌드 — 이 저장소는 Cloudflare(웹)와 별개로 데스크톱 셸을 빌드한다.
-#  • desktop 브랜치 push / 수동 실행 → 빌드만(설치파일을 아티팩트로 업로드, 컴파일 검증용)
-#  • app-v* 태그 push → GitHub Release 초안 생성 + 자동 업데이트용 latest.json 발행
+# 윈도우 설치파일(.exe) 빌드 — 이 저장소(소스)는 비공개로 두고, 자동 업데이트용 릴리스는
+# 별도의 "공개 릴리스 저장소"(RELEASES_REPO)에만 발행한다.
+#  • desktop 브랜치 push / 수동 실행 → 빌드·서명만(설치파일을 아티팩트로 업로드, 컴파일 검증용)
+#  • app-v* 태그 push → 공개 릴리스 저장소에 GitHub Release 생성 + 자동 업데이트용 latest.json 발행
+# 자동 업데이트가 비공개 저장소의 릴리스 파일엔 접근할 수 없어(404) 공개 저장소로 분리한다.
 on:
   workflow_dispatch:
   push:
     branches: [desktop]
     tags: ['app-v*']
 
-# 태그 빌드에서 GitHub Release 를 생성하려면 contents: write 가 필요(기본 토큰은 읽기 전용).
 permissions:
   contents: write
+
+env:
+  # 자동 업데이트 채널이 될 공개 릴리스 저장소(소스 아님 — 설치파일/latest.json 만 보관).
+  RELEASES_REPO: non0012123-lab/ilsangisang-releases
 
 jobs:
   build:
@@ -35,21 +40,19 @@ jobs:
       - name: Install npm deps
         run: npm ci
 
-      - name: Build desktop app (and release on tag)
+      # 빌드 + 서명만(릴리스는 아래에서 공개 저장소에 발행).
+      #  createUpdaterArtifacts=true + 서명키가 있어 *-setup.exe 와 *-setup.exe.sig 가 생성된다.
+      - name: Build desktop app (sign only)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          # 태그일 때만 릴리스 생성, 브랜치 push 면 빌드만
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-          releaseName: '일상이상 데스크톱 ${{ github.ref_name }}'
-          # 자동 업데이트가 releases/latest 의 latest.json 을 읽으므로 초안(draft)이 아닌 "발행" 상태여야 한다.
-          releaseDraft: false
-          prerelease: false
+          tagName: ''   # 빈 값 → 이 저장소엔 릴리스를 만들지 않고 빌드/서명만 한다.
 
-      - name: Upload installer (빌드 검증용 아티팩트)
+      # 빌드 검증용 아티팩트(브랜치 push / 수동 실행 시).
+      - name: Upload installer artifact
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
@@ -58,3 +61,38 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/nsis/*.sig
           if-no-files-found: warn
+
+      # 태그(app-v*) 일 때만: 공개 릴리스 저장소에 설치파일 + latest.json 발행(자동 업데이트 채널).
+      #  • latest.json 의 다운로드 URL 을 "공개 저장소"로 가리켜야 설치된 앱이 받아올 수 있다.
+      #  • RELEASES_TOKEN = 공개 릴리스 저장소에 contents:write 권한이 있는 PAT(이 저장소의 Actions secret).
+      - name: Publish release to public repo
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          $repo    = "${env:RELEASES_REPO}"
+          $tag     = "${{ github.ref_name }}"
+          $version = $tag -replace '^app-v',''
+          $bundle  = "src-tauri/target/release/bundle/nsis"
+
+          $exe = Get-ChildItem "$bundle/*-setup.exe" | Select-Object -First 1
+          if (-not $exe) { throw "setup.exe 를 찾지 못했습니다($bundle)." }
+          $sigPath = "$($exe.FullName).sig"
+          if (-not (Test-Path $sigPath)) { throw "서명(.sig) 파일이 없습니다 — 서명키 secret 을 확인하세요." }
+          $sig = (Get-Content $sigPath -Raw).Trim()
+
+          # 자동 업데이트 매니페스트(latest.json) — 다운로드 URL 은 공개 릴리스 저장소를 가리킨다.
+          $url = "https://github.com/$repo/releases/download/$tag/$($exe.Name)"
+          $manifest = [ordered]@{
+            version   = $version
+            pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{ signature = $sig; url = $url }
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content -Path "$bundle/latest.json" -Encoding utf8
+
+          # 공개 저장소에 릴리스 발행(초안 아님 → releases/latest 가 즉시 이 버전을 가리킴).
+          gh release create $tag "$($exe.FullName)" "$sigPath" "$bundle/latest.json" `
+            --repo $repo --title "일상이상 데스크톱 $version" --notes "자동 업데이트 릴리스 $version"
