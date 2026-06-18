@@ -32,8 +32,10 @@ fn show_assistant(app: &tauri::AppHandle) {
         let _ = w.set_focus();
         // 이중 안전: 절전 후 webview 가 루트로 리로드돼 대시보드로 튕긴 경우, 보일 때
         // /widget 으로 되돌린다(웹의 AssistantWindowGuard 와 함께 작동, full reload 없이 react-router 이동).
+        // 더해서 새 배포 감지(__checkAppUpdate)를 즉시 호출 — 오래 떠 있던 위젯이 옛 번들이면
+        // 최신 버전으로 자동 새로고침된다(채팅은 Supabase 저장이라 손실 없음).
         let _ = w.eval(
-            "if(location.pathname!=='/widget'){history.replaceState(null,'','/widget');window.dispatchEvent(new PopStateEvent('popstate'));}",
+            "if(location.pathname!=='/widget'){history.replaceState(null,'','/widget');window.dispatchEvent(new PopStateEvent('popstate'));}window.__checkAppUpdate&&window.__checkAppUpdate();",
         );
     }
 }
