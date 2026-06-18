@@ -14,6 +14,7 @@
         "label": "main",
         "title": "일상이상 커뮤니케이션",
         "url": "https://ilsangisang-test.pages.dev",
+        "dragDropEnabled": false,
         "width": 1280,
         "height": 820,
         "minWidth": 380,
