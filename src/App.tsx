@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import { runSilentUpdate } from './utils/tauriUpdate';
+import { startVersionWatch } from './utils/versionCheck';
 import { getWindowLabel } from './utils/tauriWindow';
 import type { AuthUser } from './types';
 
@@ -162,6 +163,8 @@ function AppRoutes() {
 export default function App() {
   // 데스크톱 셸이면 시작 시 자동 업데이트 확인(웹에서는 no-op).
   useEffect(() => { void runSilentUpdate(); }, []);
+  // 새 배포 감지 자동 새로고침 — 포커스/가시성 전환·주기적 확인(오래 떠 있는 트레이 위젯 포함).
+  useEffect(() => { startVersionWatch(); }, []);
   return (
     <BrowserRouter>
       <AuthProvider>
