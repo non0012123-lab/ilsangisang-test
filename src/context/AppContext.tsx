@@ -1149,15 +1149,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
           sales: salesContext,     // 권한자에게만 전달되는 기존 상담 목록(조회/수정용)
           // 요청함(업무 요청) — "오늘 들어온 요청", "내가 보낸 요청", "○○가 요청한 거" 조회용.
           //  본인 기준 방향(받은/보낸)·날짜·상태를 줘서 어시스턴트가 필터해 답할 수 있게 한다.
-          existingRequests: requestsRef.current.slice(0, 80).map(r => {
-            const d = new Date(r.createdAt); const p = (n: number) => String(n).padStart(2, '0');
-            return {
-              id: r.id, fromName: r.fromName, toName: r.toName, fromMe: r.fromUid === (u?.id ?? ''), toMe: r.toUid === (u?.id ?? ''),
-              title: r.title, body: (r.body ?? '').slice(0, 120), status: r.status,
-              date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
-              doneNote: r.doneNote ? r.doneNote.slice(0, 120) : undefined,
-            };
-          }),
+          // ★ 나와 관련된(내가 받았거나 보낸) 요청만 어시스턴트에 전달한다.
+          //   requests RLS 가 전체 공개(using true)라 requestsRef 엔 남의 요청도 들어있어,
+          //   필터 없이 보내면 "다른 사람이 받은 요청"까지 답에 섞인다.
+          existingRequests: requestsRef.current
+            .filter(r => r.fromUid === (u?.id ?? '') || r.toUid === (u?.id ?? ''))
+            .slice(0, 80).map(r => {
+              const d = new Date(r.createdAt); const p = (n: number) => String(n).padStart(2, '0');
+              return {
+                id: r.id, fromName: r.fromName, toName: r.toName, fromMe: r.fromUid === (u?.id ?? ''), toMe: r.toUid === (u?.id ?? ''),
+                title: r.title, body: (r.body ?? '').slice(0, 120), status: r.status,
+                date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+                doneNote: r.doneNote ? r.doneNote.slice(0, 120) : undefined,
+              };
+            }),
           // 공지 — "올라온 공지", "우리팀 공지" 조회용. 내 대상(전체/내 팀)이거나 내가 올린 것만.
           existingNotices: noticesRef.current
             .filter(n => n.audience === 'all' || n.audience === (u?.department ?? '') || n.fromUid === (u?.id ?? ''))
