@@ -373,6 +373,7 @@ export interface Notice {
   title: string;            // 공지 제목/한 줄 내용
   body?: string;            // 상세 내용 (선택)
   createdAt: number;
+  readBy?: string[];        // 확인(읽음) 누른 사람들의 uid — "확인 N/M" + 미확인 뱃지 근거(작성자 제외)
 }
 
 // ── 내부 일정 ─────────────────────────────────────────

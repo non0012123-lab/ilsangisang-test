@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, CalendarDays, Users, LogOut,
   Globe,
-  BarChart3, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound, Inbox, CalendarClock, Tags, PhoneCall, Target,
+  BarChart3, CalendarRange, Sparkles, Building2, ShieldCheck, FileText, Search, Boxes, KeyRound, Inbox, CalendarClock, Tags, PhoneCall, Target, Megaphone,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -29,9 +29,12 @@ const mainNav: NavItem[] = [
 
 export default function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const { user, logout } = useAuth();
-  const { requests, salesAccess } = useApp();
+  const { requests, salesAccess, notices } = useApp();
   // 받은 요청 중 아직 확인 안 한(대기중) 건수 — 사이드바 뱃지
   const pendingReqCount = requests.filter(r => r.toUid === user?.id && r.status === 'pending').length;
+  // 내 대상 공지 중 내가 아직 '확인' 안 누른 건수(내가 올린 공지는 제외) — 공지사항 뱃지
+  const unreadNoticeCount = notices.filter(n =>
+    (n.audience === 'all' || n.audience === user?.department) && n.fromUid !== user?.id && !(n.readBy ?? []).includes(user?.id ?? '')).length;
 
   const isAdmin = user?.role === 'admin';
   const [pendingCount, setPendingCount] = useState(0);
@@ -62,7 +65,26 @@ export default function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: 
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
-        {mainNav.map(item => (
+        {/* 대시보드 */}
+        <NavLink to={mainNav[0].to} onClick={onClose}
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
+          }
+        >{mainNav[0].icon}{mainNav[0].label}</NavLink>
+
+        {/* 공지사항 (대시보드 바로 아래 · 내가 아직 확인 안 한 공지 수 뱃지) */}
+        <NavLink to="/notices" onClick={onClose}
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
+          }
+        ><Megaphone size={18} />공지사항
+          {unreadNoticeCount > 0 && (
+            <span className="ml-auto text-xs font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-full">{unreadNoticeCount > 9 ? '9+' : unreadNoticeCount}</span>
+          )}
+        </NavLink>
+
+        {/* 나머지 메뉴 */}
+        {mainNav.slice(1).map(item => (
           <NavLink key={item.to} to={item.to} onClick={onClose}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`

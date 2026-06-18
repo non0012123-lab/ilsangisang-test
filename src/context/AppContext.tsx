@@ -105,6 +105,7 @@ interface AppContextType {
   notices: Notice[];
   sendNotice: (audience: NoticeAudience, audienceLabel: string, title: string, body?: string) => void;
   removeNotice: (id: string) => void;
+  confirmNotice: (id: string) => void;
   // 내가 보낸 요청이 확인/완료됐을 때 요청자 화면에 잠깐 띄우는 스티커(휘발성, 닫으면 사라짐)
   outgoingAlerts: WorkRequest[];
   dismissOutgoingAlert: (id: string) => void;
@@ -660,6 +661,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeNotice = useCallback((id: string) => {
     setNotices(prev => prev.filter(n => n.id !== id));
     persistDelete('notices', id);
+  }, []);
+  // 공지 확인(읽음): 내 uid 를 readBy 에 추가. 작성자 본인/이미 확인했으면 무시.
+  //  • 최신 ref 와 병합해 저장 → realtime 으로 작성자·모두 화면의 "확인 N/M" 즉시 갱신.
+  //  • (소규모 팀 기준) 동시 확인 시 드물게 한쪽이 덮어써질 수 있으나 read-receipt 라 영향 미미.
+  const confirmNotice = useCallback((id: string) => {
+    const uid = userRef.current?.id;
+    if (!uid) return;
+    const cur = noticesRef.current.find(n => n.id === id);
+    if (!cur || cur.fromUid === uid || (cur.readBy ?? []).includes(uid)) return;
+    const updated: Notice = { ...cur, readBy: [...(cur.readBy ?? []), uid] };
+    setNotices(prev => prev.map(n => n.id === id ? updated : n));
+    persistOne('notices', updated);
   }, []);
 
   // ── 내부 일정 ──
@@ -1899,7 +1912,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } else if (ntHead) {
         title = '공지 전송';
         body = `[${ntHead.audienceLabel}] ${ntHead.title}${newNotices.length > 1 ? ` 외 ${newNotices.length - 1}건` : ''}`;
-        link = '/requests';
+        link = '/notices';
       } else {
         title = '변경 반영됨';
         body = `${count}건이 반영됐어요`;
@@ -2134,8 +2147,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const forMe = n.audience === 'all' || n.audience === myDept;
         if (!prev && forMe && n.fromUid !== uid) {
           const body = `[${n.audienceLabel}] ${n.title}`;
-          pushNotification({ type: 'notice', title: `${n.fromName || '동료'}님의 공지`, body, link: '/requests' });
-          pushStickyNotice({ type: 'notice', title: `📢 ${n.audienceLabel} 공지`, body: n.title, link: '/requests' });
+          pushNotification({ type: 'notice', title: `${n.fromName || '동료'}님의 공지`, body, link: '/notices' });
+          pushStickyNotice({ type: 'notice', title: `📢 ${n.audienceLabel} 공지`, body: n.title, link: '/notices' });
         }
       })
       .subscribe();
@@ -2310,7 +2323,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       priceTable, priceRefreshing, priceProgress, priceUpdatedAt, refreshPriceTable,
       rankGuarantees, saveRankGuarantee, removeRankGuarantee,
       requests, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
-      notices, sendNotice, removeNotice,
+      notices, sendNotice, removeNotice, confirmNotice,
       stickyNotices, dismissStickyNotice,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,
       desktopNotifyEnabled, enableDesktopNotify,

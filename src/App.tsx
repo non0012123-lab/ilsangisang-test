@@ -24,6 +24,7 @@ const KeywordToolPage = lazy(() => import('./pages/KeywordToolPage'));
 const AccountListPage = lazy(() => import('./pages/AccountListPage'));
 const SiteListPage = lazy(() => import('./pages/SiteListPage'));
 const RequestsPage = lazy(() => import('./pages/RequestsPage'));
+const NoticesPage = lazy(() => import('./pages/NoticesPage'));
 const RankGuaranteePage = lazy(() => import('./pages/RankGuaranteePage'));
 const InternalSchedulePage = lazy(() => import('./pages/InternalSchedulePage'));
 const PricingPage = lazy(() => import('./pages/PricingPage'));
@@ -137,6 +138,7 @@ function AppRoutes() {
       <Route path="/accounts" element={<ProtectedRoute><AccountListPage /></ProtectedRoute>} />
       <Route path="/sites" element={<ProtectedRoute><SiteListPage /></ProtectedRoute>} />
       <Route path="/requests" element={<ProtectedRoute><RequestsPage /></ProtectedRoute>} />
+      <Route path="/notices" element={<ProtectedRoute><NoticesPage /></ProtectedRoute>} />
       <Route path="/internal" element={<ProtectedRoute><InternalSchedulePage /></ProtectedRoute>} />
       <Route path="/rank-guarantee" element={<ProtectedRoute><RankGuaranteePage /></ProtectedRoute>} />
       <Route path="/pricing" element={<ProtectedRoute><PricingPage /></ProtectedRoute>} />
