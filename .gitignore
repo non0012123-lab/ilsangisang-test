@@ -34,3 +34,6 @@ dist-ssr
 
 # 참고 자료(대용량 PDF)는 커밋 제외
 *.pdf
+
+# 데스크톱 업데이터 서명 개인키 — 절대 커밋 금지(서명은 CI 의 secret 으로 수행)
+src-tauri/.updater-private-key
