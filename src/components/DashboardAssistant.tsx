@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall, CornerDownRight, Megaphone } from 'lucide-react';
+import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall, CornerDownRight, Megaphone, Target } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { AssistantMessage } from '../types';
@@ -138,7 +138,7 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
   };
 
   const proposalCount = (m: AssistantMessage) =>
-    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0) + (m.notices?.length ?? 0) + (m.internalEvents?.length ?? 0) + (m.sales?.length ?? 0);
+    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0) + (m.notices?.length ?? 0) + (m.internalEvents?.length ?? 0) + (m.sales?.length ?? 0) + (m.rankGuarantees?.length ?? 0);
 
   const opLabel = (op?: string) => op === 'delete' ? '삭제' : op === 'update' ? '수정' : '추가';
 
@@ -250,18 +250,24 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                         </div>
                       );
                     })}
-                    {(m.handovers ?? []).map((h, i) => (
-                      <div key={`h${i}`} className="flex items-start gap-2 text-xs text-gray-700">
-                        <ClipboardList size={13} className="text-blue-500 shrink-0 mt-0.5" />
-                        <span><strong>인수인계 문서</strong> {h.clientName || '업체?'}</span>
-                      </div>
-                    ))}
-                    {(m.vendors ?? []).map((v, i) => (
-                      <div key={`v${i}`} className="flex items-start gap-2 text-xs text-gray-700">
-                        <Boxes size={13} className="text-teal-500 shrink-0 mt-0.5" />
-                        <span><strong>신규 외주사</strong> {v.name || '외주사?'}{v.services ? ` · ${v.services}` : ''}</span>
-                      </div>
-                    ))}
+                    {(m.handovers ?? []).map((h, i) => {
+                      const hop = h.op ?? (h.id ? 'update' : 'add');
+                      return (
+                        <div key={`h${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                          {hop === 'delete' ? <Trash2 size={13} className="text-red-500 shrink-0 mt-0.5" /> : <ClipboardList size={13} className="text-blue-500 shrink-0 mt-0.5" />}
+                          <span><strong>인수인계 {opLabel(hop)}</strong> {h.clientName || '업체?'}</span>
+                        </div>
+                      );
+                    })}
+                    {(m.vendors ?? []).map((v, i) => {
+                      const vop = v.op ?? (v.id ? 'update' : 'add');
+                      return (
+                        <div key={`v${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                          {vop === 'delete' ? <Trash2 size={13} className="text-red-500 shrink-0 mt-0.5" /> : <Boxes size={13} className="text-teal-500 shrink-0 mt-0.5" />}
+                          <span><strong>외주사 {opLabel(vop)}</strong> {v.name || '외주사?'}{v.services ? ` · ${v.services}` : ''}</span>
+                        </div>
+                      );
+                    })}
                     {(m.accounts ?? []).map((a, i) => (
                       <div key={`ac${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                         <KeyRound size={13} className="text-indigo-500 shrink-0 mt-0.5" />
@@ -276,22 +282,32 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                     ))}
                     {(m.requests ?? []).map((r, i) => (
                       <div key={`rq${i}`} className="flex items-start gap-2 text-xs text-gray-700">
-                        <Send size={13} className="text-blue-500 shrink-0 mt-0.5" />
-                        <span><strong>업무 요청</strong> {r.toName || '담당자?'}에게 · {r.title || '내용?'}{r.body ? ` — ${r.body}` : ''}</span>
+                        {r.op === 'delete' ? <Trash2 size={13} className="text-red-500 shrink-0 mt-0.5" /> : <Send size={13} className="text-blue-500 shrink-0 mt-0.5" />}
+                        <span><strong>{r.op === 'delete' ? '요청 회수' : '업무 요청'}</strong> {r.toName || '담당자?'}{r.op === 'delete' ? '' : '에게'} · {r.title || '내용?'}{r.body ? ` — ${r.body}` : ''}</span>
                       </div>
                     ))}
                     {(m.notices ?? []).map((n, i) => (
                       <div key={`nt${i}`} className="flex items-start gap-2 text-xs text-gray-700">
-                        <Megaphone size={13} className="text-indigo-500 shrink-0 mt-0.5" />
-                        <span><strong>공지</strong> {n.audience === 'all' || /전체|전직원|모두/.test(n.audience || '') ? '전체' : (n.audience || '대상?')}에게 · {n.title || '내용?'}{n.body ? ` — ${n.body}` : ''}</span>
+                        {n.op === 'delete' ? <Trash2 size={13} className="text-red-500 shrink-0 mt-0.5" /> : <Megaphone size={13} className="text-indigo-500 shrink-0 mt-0.5" />}
+                        <span><strong>{n.op === 'delete' ? '공지 삭제' : '공지'}</strong> {n.op === 'delete' ? (n.title || '내용?') : `${n.audience === 'all' || /전체|전직원|모두/.test(n.audience || '') ? '전체' : (n.audience || '대상?')}에게 · ${n.title || '내용?'}`}{n.op !== 'delete' && n.body ? ` — ${n.body}` : ''}</span>
                       </div>
                     ))}
+                    {(m.rankGuarantees ?? []).map((g, i) => {
+                      const gop = g.op ?? (g.id ? 'update' : 'add');
+                      return (
+                        <div key={`rg${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                          {gop === 'delete' ? <Trash2 size={13} className="text-red-500 shrink-0 mt-0.5" /> : <Target size={13} className="text-rose-500 shrink-0 mt-0.5" />}
+                          <span><strong>순위보장 {opLabel(gop)}</strong> {g.clientName || '업체?'}{g.title ? ` · ${g.title}` : ''}{g.closed ? ' · 종료' : ''}{typeof g.guaranteedCount === 'number' ? ` · ${g.guaranteedCount}건` : ''}</span>
+                        </div>
+                      );
+                    })}
                     {(m.internalEvents ?? []).map((iv, i) => {
-                      const isUpdate = (iv.op ?? (iv.id ? 'update' : 'add')) === 'update';
+                      const op = iv.op ?? (iv.id ? 'update' : 'add');
+                      const isUpdate = op === 'update', isDelete = op === 'delete';
                       return (
                         <div key={`iv${i}`} className="flex items-start gap-2 text-xs text-gray-700">
-                          {isUpdate ? <Pencil size={13} className="text-cyan-600 shrink-0 mt-0.5" /> : <CalendarClock size={13} className="text-cyan-500 shrink-0 mt-0.5" />}
-                          <span><strong>내부 일정 {isUpdate ? '수정' : '추가'}</strong> {iv.date ? `${iv.date}` : ''}{iv.startTime ? ` ${iv.startTime}` : ''}{iv.category ? ` · ${iv.category}` : ''} · {iv.title || '제목?'}{iv.location ? ` @${iv.location}` : ''}{iv.participantNames?.length ? ` · ${isUpdate ? '+' : ''}${iv.participantNames.join(', ')}` : ''}{iv.reminder && iv.reminder !== 'off' ? ` · 🔔${REMINDER_TEXT[iv.reminder] ?? iv.reminder}` : ''}</span>
+                          {isDelete ? <Trash2 size={13} className="text-red-500 shrink-0 mt-0.5" /> : isUpdate ? <Pencil size={13} className="text-cyan-600 shrink-0 mt-0.5" /> : <CalendarClock size={13} className="text-cyan-500 shrink-0 mt-0.5" />}
+                          <span><strong>내부 일정 {isDelete ? '삭제' : isUpdate ? '수정' : '추가'}</strong> {iv.date ? `${iv.date}` : ''}{iv.startTime ? ` ${iv.startTime}` : ''}{iv.category ? ` · ${iv.category}` : ''} · {iv.title || '제목?'}{iv.location ? ` @${iv.location}` : ''}{iv.participantNames?.length ? ` · ${isUpdate ? '+' : ''}${iv.participantNames.join(', ')}` : ''}{iv.reminder && iv.reminder !== 'off' ? ` · 🔔${REMINDER_TEXT[iv.reminder] ?? iv.reminder}` : ''}</span>
                         </div>
                       );
                     })}
@@ -351,7 +367,15 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                         <div className="flex items-center gap-1.5 text-xs font-semibold text-green-600">
                           <Check size={13} /> {m.applied}건 적용됨 — 스케줄·업체·인수인계에 반영되었습니다.
                         </div>
-                        {m.undo && (m.undo.entryIds.length + m.undo.clientIds.length + m.undo.vendorIds.length + m.undo.handoverIds.length + m.undo.deletedEntries.length + m.undo.updatedPrev.length + (m.undo.requestIds?.length ?? 0) + (m.undo.internalEventIds?.length ?? 0) + (m.undo.updatedInternalPrev?.length ?? 0)) > 0 && (
+                        {(m.skipped?.length ?? 0) > 0 && (
+                          <div className="text-[11px] text-amber-600 leading-relaxed">
+                            <span className="font-semibold">⚠ 적용 못 한 항목 {m.skipped!.length}건</span>
+                            <ul className="mt-0.5 ml-3 list-disc">
+                              {m.skipped!.map((s, i) => <li key={i}>{s}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        {m.undo && (m.applied ?? 0) > 0 && (
                           m.undone ? (
                             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400"><RotateCcw size={12} /> 되돌림 완료</span>
                           ) : (

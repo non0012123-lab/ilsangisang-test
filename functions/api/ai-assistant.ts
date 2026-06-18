@@ -83,6 +83,13 @@ interface AssistantRequest {
   priceTable?: CtxPriceProduct[];
   salesEnabled?: boolean;   // 영업관리 권한 여부 — true 일 때만 상담 기록을 다룬다
   sales?: CtxSales[];       // 기존 상담 목록(조회/수정 대상 식별용)
+  rankGuarantees?: CtxRankG[]; // 순위 보장 캠페인(조회/수정/삭제 대상 식별용)
+}
+
+// 순위 보장 캠페인 컨텍스트 — "○○ 보장 몇 건 찼어?", "△△ 보장 종료" 등 조회/수정 근거
+interface CtxRankG {
+  id?: string; clientName?: string; title?: string; guaranteedCount?: number; achievedCount?: number;
+  alertOffset?: number; cycle?: number; closed?: boolean; status?: string;
 }
 
 // 요청함(업무 요청) 컨텍스트 — "오늘 들어온 요청", "내가 보낸 요청" 등 조회용
@@ -93,7 +100,7 @@ interface CtxRequest {
 
 // 공지 컨텍스트 — "올라온 공지", "우리팀 공지" 조회용
 interface CtxNotice {
-  audienceLabel?: string; fromName?: string; fromMe?: boolean; title?: string; body?: string; date?: string;
+  id?: string; audienceLabel?: string; fromName?: string; fromMe?: boolean; title?: string; body?: string; date?: string;
 }
 
 // 영업관리(상담 로그) 컨텍스트 — 권한자에게만 전달됨
@@ -269,17 +276,24 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     .map(s => `■ id=${s.id ?? '?'} | ${s.consultedAt ?? '-'} | 응대:${s.handlerName ?? '-'} | 채널:${s.channel ?? '-'} | 전화:${s.phone ?? '-'} | 이메일:${s.email ?? '-'} | 고객:${s.customerName ?? '-'} | 척도:${s.sentiment ?? '-'} | 상태:${s.status ?? '-'}${s.followUpDate ? ` | 후속:${s.followUpDate}` : ''} | 내용:${(s.content ?? '').slice(0, 80)}${s.replyCount ? ` | 답글 ${s.replyCount}개(최근:${s.lastReply ?? ''})` : ''}`)
     .join('\n');
 
+  // 순위 보장 컨텍스트 — 캠페인별 목표/달성/상태. "○○ 보장 현황", "△△ 종료/연장" 근거.
+  const RANKG_STATUS_LABEL: Record<string, string> = { active: '진행중', due_soon: '임박', reached: '도달', closed: '종료' };
+  const rankGList = (Array.isArray(req.rankGuarantees) ? req.rankGuarantees : []).slice(0, 80);
+  const rankGContext = rankGList
+    .map(g => `■ id=${g.id ?? '?'} | ${g.clientName ?? '-'} · ${g.title ?? '-'} | 달성:${g.achievedCount ?? 0}/${g.guaranteedCount ?? '?'}건 | ${g.cycle ? `${g.cycle}회차 | ` : ''}상태:${RANKG_STATUS_LABEL[g.status ?? ''] ?? g.status ?? '-'}${g.closed ? '(종료)' : ''}`)
+    .join('\n');
+
   // 요청함(업무 요청) 컨텍스트 — 받은/보낸 방향과 상태·날짜를 표기
   const REQ_STATUS_LABEL: Record<string, string> = { pending: '대기(미확인)', confirmed: '확인함(진행)', done: '완료', returned: '반려' };
   const requestList = (Array.isArray(req.existingRequests) ? req.existingRequests : []).slice(0, 80);
   const requestContext = requestList
-    .map(r => `■ ${r.date ?? '-'} | ${r.fromName ?? '?'}${r.fromMe ? '(나)' : ''} → ${r.toName ?? '?'}${r.toMe ? '(나)' : ''} | 상태:${REQ_STATUS_LABEL[r.status ?? ''] ?? r.status ?? '-'} | ${r.title ?? ''}${r.body ? ` — ${r.body.slice(0, 50)}` : ''}${r.doneNote ? ` | 완료메모:${r.doneNote.slice(0, 50)}` : ''}`)
+    .map(r => `■ id=${r.id ?? '?'} | ${r.date ?? '-'} | ${r.fromName ?? '?'}${r.fromMe ? '(나)' : ''} → ${r.toName ?? '?'}${r.toMe ? '(나)' : ''} | 상태:${REQ_STATUS_LABEL[r.status ?? ''] ?? r.status ?? '-'} | ${r.title ?? ''}${r.body ? ` — ${r.body.slice(0, 50)}` : ''}${r.doneNote ? ` | 완료메모:${r.doneNote.slice(0, 50)}` : ''}`)
     .join('\n');
 
   // 공지(팀/전체) 컨텍스트 — 대상·작성자·날짜를 표기
   const noticeList = (Array.isArray(req.existingNotices) ? req.existingNotices : []).slice(0, 60);
   const noticeContext = noticeList
-    .map(n => `■ ${n.date ?? '-'} | 대상:${n.audienceLabel ?? '?'} | 작성:${n.fromName ?? '?'}${n.fromMe ? '(나)' : ''} | ${n.title ?? ''}${n.body ? ` — ${n.body.slice(0, 60)}` : ''}`)
+    .map(n => `■ id=${n.id ?? '?'} | ${n.date ?? '-'} | 대상:${n.audienceLabel ?? '?'} | 작성:${n.fromName ?? '?'}${n.fromMe ? '(나)' : ''} | ${n.title ?? ''}${n.body ? ` — ${n.body.slice(0, 60)}` : ''}`)
     .join('\n');
 
   const developer = [
@@ -291,16 +305,17 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  "updates": [ { "id":"기존 일정 id(아래 목록에서 정확히 복사)", "clientName":"대상 업체명(식별 보조 — id 와 함께 항상 채움)", "keyword":"대상 일정의 키워드/제목(있으면)", "matchDate":"대상 일정의 날짜 YYYY-MM-DD(변경 전 그 일정이 잡힌 날, 식별용)", "date":"새 날짜 YYYY-MM-DD 또는 null(날짜를 옮길 때만)", "endDate":"YYYY-MM-DD 또는 null", "managerName":"문자열 또는 null", "status":"상태 또는 null", "link":"링크 URL(추가/수정) 또는 ""(빈문자열=링크 삭제) 또는 null(변경 안 함)", "rank":"순위 숫자(변경) 또는 null(변경 안 함)" } ],',
     '  "deletes": [ "삭제할 기존 일정 id" ],',
     '  "clients": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 업체 id", "name":"", "industry":"", "categories":[], "contactPerson":"", "phone":"", "email":"", "status":"active|inactive|pending", "reportAnchorDate":"YYYY-MM-DD (월간 보고 기준 시작일)" } ],',
-    '  "handovers": [ { "clientName":"", "overview":"" } ],',
-    '  "vendors": [ { "name":"", "services":"", "contactPerson":"", "phone":"", "email":"", "pricing":"", "notes":"" } ],',
+    '  "handovers": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 인수인계 id(없으면 clientName 으로 식별)", "clientName":"", "overview":"", "guidelines":"운영 가이드라인", "tone":"톤앤매너", "dontDo":"절대 하지 말 것", "specialNotes":"특이사항", "managerMemo":"인수인계 메모" } ],',
+    '  "vendors": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 외주사 id(없으면 name 으로 식별)", "name":"", "services":"", "contactPerson":"", "phone":"", "email":"", "pricing":"", "notes":"" } ],',
     '  "accounts": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "platform":"블로그|SNS|유튜브|기타", "grade":"블로그 등급(준최2~준최6/최적1~최적4)", "ownership":"client|inhouse", "username":"", "password":"", "category":"", "ip":"" } ],',
     '  "sites": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 id", "name":"", "url":"", "username":"", "password":"", "description":"" } ],',
-    '  "requests": [ { "toName":"요청 받을 담당자 이름", "title":"요청 내용 한 줄(예: 디자인 제작)", "body":"상세 설명(없으면 생략)" } ],',
-    '  "notices": [ { "audience":"공지 대상 — \'전체\'(전 직원) 또는 팀 이름(마케팅팀/디자인팀/영상팀/총괄팀)", "title":"공지 내용 한 줄", "body":"상세 설명(없으면 생략)" } ],',
-    '  "internalEvents": [ { "op":"add|update", "id":"수정 시 기존 내부일정 id", "title":"일정 제목", "category":"내부 일정 종류", "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "startTime":"HH:MM(없으면 생략)", "endTime":"HH:MM(없으면 생략)", "participantNames":["참여자 이름"], "location":"장소(없으면 생략)", "notes":"메모(없으면 생략)", "reminder":"off|1h|30m|10m|onTime" } ],',
-    '  "sales": [ { "op":"add|update|reply", "id":"수정/답글 시 대상(부모) 상담 id", "consultedAt":"YYYY-MM-DD HH:mm 또는 YYYY-MM-DD", "channel":"phone|inquiry|referral|etc", "phone":"전화번호", "email":"이메일", "customerName":"고객/업체명", "content":"상담 내용", "sentiment":"very_positive|positive|neutral|negative|very_negative", "status":"new|absent|prospect|in_progress|done|hold", "followUpDate":"YYYY-MM-DD(있으면)", "nasLink":"첨부/자료 링크(있으면)", "result":"결과/메모(있으면)" } ],',
+    '  "requests": [ { "op":"add|delete", "id":"회수(delete) 시 기존 요청 id", "toName":"요청 받을 담당자 이름", "title":"요청 내용 한 줄(예: 디자인 제작)", "body":"상세 설명(없으면 생략)" } ],',
+    '  "notices": [ { "op":"add|delete", "id":"삭제(delete) 시 기존 공지 id", "audience":"공지 대상 — \'전체\'(전 직원) 또는 팀 이름(마케팅팀/디자인팀/영상팀/총괄팀)", "title":"공지 내용 한 줄", "body":"상세 설명(없으면 생략)" } ],',
+    '  "internalEvents": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 내부일정 id", "title":"일정 제목", "category":"내부 일정 종류", "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "startTime":"HH:MM(없으면 생략)", "endTime":"HH:MM(없으면 생략)", "participantNames":["참여자 이름"], "location":"장소(없으면 생략)", "notes":"메모(없으면 생략)", "reminder":"off|1h|30m|10m|onTime" } ],',
+    '  "sales": [ { "op":"add|update|reply|delete", "id":"수정/답글/삭제 시 대상(부모) 상담 id", "consultedAt":"YYYY-MM-DD HH:mm 또는 YYYY-MM-DD", "channel":"phone|inquiry|referral|etc", "phone":"전화번호", "email":"이메일", "customerName":"고객/업체명", "content":"상담 내용", "sentiment":"very_positive|positive|neutral|negative|very_negative", "status":"new|absent|prospect|in_progress|done|hold", "followUpDate":"YYYY-MM-DD(있으면)", "nasLink":"첨부/자료 링크(있으면)", "result":"결과/메모(있으면)" } ],',
     '  "accountLookups": [ "조회 질문일 때 답으로 보여줄 아이디 목록 id" ],',
     '  "siteLookups": [ "조회 질문일 때 답으로 보여줄 홈페이지 id" ],',
+    '  "rankGuarantees": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 순위보장 id", "clientName":"대상 업체명", "title":"상품/캠페인명(예: 네이버 자동완성 보장)", "guaranteedCount":"보장 목표 건수(정수, 기본 20)", "alertOffset":"목표 몇 건 전 알림(정수, 기본 2)", "closed":"종료면 true" } ],',
     '  "keywords": [ "조회수를 조회할 키워드" ]',
     '}',
     '',
@@ -309,11 +324,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 사용자가 새 일정을 말하면("오늘 스케줄은 ~~~ 있어" 등) 해당 일정을 entries 배열에 담는다. 한 문장에 여러 건이면 모두.',
     `- ★ 반복 일정(recurrence): "매월 7일", "매주 화요일", "매주", "격주", "매일", "○일마다", "매달 말일" 처럼 주기적으로 되풀이되는 업무면, entries 를 여러 개 만들지 말고 한 개의 entry 에 recurrence 객체를 채운다(시스템이 그 규칙으로 실제 일정 여러 개를 자동 생성한다). 매핑: "매일"→{freq:"daily",interval:1}, "매주 X요일"→{freq:"weekly",interval:1,weekday:(일0~토6)}, "격주"→{freq:"weekly",interval:2}, "매월 N일"→{freq:"monthly",interval:1,day:N}, "격월"→{freq:"monthly",interval:2,day:N}. date 는 첫 시작일로 잡는다("매월 7일"이고 오늘이 ${today} 이후면 가장 가까운 7일을 date 로). 횟수/종료일 언급이 있으면 count 또는 until 에 넣고, 없으면 둘 다 생략한다(시스템 기본 12회). 예: "현대차 블로그관리 매월 7일로 잡아놔" → entries:[{date:"가장 가까운 7일", clientName:"현대차", category:"네이버", keyword:"블로그관리", recurrence:{freq:"monthly",interval:1,day:7}}]. 반복이 아니면 recurrence 를 절대 넣지 않는다.`,
     '- 단순 질문·조언("시간 분배 어떻게 효율적일까?" 등)이면 모든 액션 배열은 비우고 reply 에만 구체적이고 실용적으로 답한다. 현재 일정 목록을 근거로 답할 것.',
+    `- ★ 일정 조회("오늘/내일/이번주 일정 알려줘", "오늘 뭐 있어?", "오늘 스케줄"): 반드시 "현재 등록된 일정"(클라이언트 업무 entries)과 "현재 내부 일정"(internalEvents) "둘 다"를 훑어 해당 날짜에 걸치는 항목을 모두 모아 답한다(한쪽만 보지 말 것 — 작업일정을 빠뜨리고 "내부일정만" 답하거나, 작업일정이 있는데 "없다"고 하면 안 된다). 기간 일정(date~endDate)은 그 구간 전체가 그 날짜에 걸치면 포함한다. "내 일정만"이라고 하면 managerName/참여자가 본인(${currentUser || '본인'})인 것만 추리고, 그냥 "오늘 일정"이면 팀 전체를 보여준다. 작업일정과 내부일정을 구분해 정리하고, 정말 양쪽 다 없을 때만 "해당 날짜 일정이 없다"고 답한다. 이건 조회이므로 모든 액션 배열은 비운다.`,
     '- ★ 클라이언트 업무 일정(entries) vs 사내 내부 일정(internalEvents) 구분: 사용자가 일정을 말하면 성격을 판단해 정확한 배열에 담는다.',
     '  · ★★ 최우선 규칙(명시 신호): 사용자가 "내부 일정"·"사내 일정"이라고 명시하면, 영상·디자인·블로그 같은 제작 단어나 업체명이 같이 있어도 무조건 internalEvents 로 만든다. 이때 업체명/담당자를 되묻지 말고 그대로 등록한다(제목에 업체·내용을 넣고, 참여자 미지정이면 로그인 본인). 반대로 "타임테이블"·"업체 일정"·"클라이언트 일정"이라 명시하면 entries 로 한다. 이 명시가 있으면 아래의 내용 기반 추론보다 항상 우선한다. 예: "내일 영상 전달 내부 일정 잡아줘" → internalEvents:[{op:"add", title:"영상 전달", category:"기타 또는 가까운 종류", date:내일}] (entries·업체 되묻기 금지).',
     '  · 내부 일정(internalEvents): 회의·미팅·면접·촬영·휴가·워크숍·회식·상담·방문·회의실 예약 등 "일정 자체"를 잡는 것이면 internalEvents 에 담는다. category 는 아래 "내부 일정 종류" 중 가장 가까운 것, 없으면 새 종류 이름을 만든다(예: "워크숍"). 날짜/시간(startTime·endTime "오후 3시"→"15:00")·장소·참여자(담당자 명단 매칭)를 채운다.',
     '  · ★ 중요: 미팅/회의/면접/촬영/상담/방문/휴가 등은 업체명이 같이 나와도(예: "오르가나 업체 미팅", "○○사 면접") 클라이언트 콘텐츠 작업이 아니라 내부 일정이다. 이 경우 업체명을 internalEvents 의 title 에 포함하고(예: title:"오르가나 미팅"), entries 와 clients(업체 추가) 는 절대 만들지 않는다. 미팅 상대 업체는 아직 확정 고객이 아닐 수 있으므로 클라이언트로 등록하면 안 된다.',
     '  · 클라이언트 업무(entries): "특정 업체의 콘텐츠/마케팅 제작·관리 작업"(블로그·SNS·영상·디자인·여론 등 실제 산출물 작업)일 때만 entries 에 담는다(clientName 필수). 단순히 업체명이 나왔다고 entries 로 가지 말 것 — 위 미팅/회의류면 internalEvents.',
+    '  · ★★ entries(클라이언트 업무 일정)는 업체(clientName)가 반드시 있어야 시스템에 저장된다(업체별 스케줄에 자리를 잡으므로). 업체 없는 entry 는 적용 시 통째로 버려져 "알겠다 해놓고 아무것도 안 됨"이 된다. 따라서 사용자가 업체를 안 밝힌 채 작업만 말하면(예: "디자인 제작 저번주 월요일 작업건으로 넣어줘", "블로그 글 내일 작업") clientName 을 빈 채로 entries 에 담지 말고, reply 에서 "어느 업체 작업인가요?"라고 업체를 되물은 뒤 액션 배열은 비운다. 단 그 작업이 특정 업체와 무관한 사내 작업이 분명하면(예: "사내 소개자료 디자인 제작") internalEvents 로 담는다(업체 불필요). 업체가 명시됐거나 직전 대화에서 특정된 경우에만 clientName 을 채워 entries 로 만든다.',
     '  · 판단 기준: "무엇을 제작/관리"하는 작업이면 entries, "언제 만나/모이/쉰다"는 일정이면 internalEvents. 정 모르면 reply 에서 되묻고 액션 배열은 비운다.',
     `  · 참여자 미지정: 내부 일정에서 참여자를 안 밝히면 participantNames 를 빈 배열로 둔다 — 시스템이 로그인 본인(${currentUser || '본인'})을 기본 참여자로 넣는다. "나/내가/우리팀" 같은 1인칭도 빈 배열로 두면 본인이 들어간다(특정 팀원을 콕 집었을 때만 그 이름을 넣는다).`,
     '  · 사전 알림(reminder): "1시간 전 알림"→"1h", "30분 전"→"30m", "10분 전"→"10m", "정각/시작할 때 알림"→"onTime", 언급 없거나 "알림 없이"→"off". 예: "오늘 영상 촬영 오후 6시 등록하고 1시간 전 알림해줘" → internalEvents:[{op:"add", title:"영상 촬영", category:"촬영", date:오늘, startTime:"18:00", reminder:"1h"}]. reminder 는 startTime 이 있을 때만 의미가 있으니 시간을 같이 채운다.',
@@ -321,6 +338,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  · 수정 규칙: 바꾸는 필드만 포함한다(안 바꾸는 필드는 생략 → 기존값 유지). 어떤 필드를 비우려면(예: 장소·메모 삭제, 알림 끔) 빈 문자열 "" 또는 reminder 는 "off" 로 보낸다. title/category/date/endDate/startTime/endTime/location/notes/reminder 모두 수정 가능.',
     '  · 참여자 수정: participantNames 는 항상 "수정 후 최종 전체 명단"으로 보낸다(교체 방식). 추가면 기존 참여자 + 새 사람을 모두 포함, 제거면 뺀 사람만 빼고 나머지 전원 포함, 교체면 새 명단만. 현재 참여자는 위 "현재 내부 일정"의 참여자 항목을 참고한다. 참여자를 안 바꾸면 participantNames 를 생략한다.',
     '  · 새로운 별개의 일정일 때만 op:"add". 어느 일정인지 모호하면 되묻는다.',
+    '  · 삭제(op:"delete"): "그 회의/미팅/촬영 일정 삭제해줘/취소해줘", "○○ 내부일정 지워줘"면 "현재 내부 일정"에서 id(없으면 제목 일치)로 찾아 op:"delete" + id 로 담는다. 어느 것인지 모호하면 지우지 말고 reply 에서 되묻는다. reply 에 무엇을 지울지 적고 "적용"을 안내한다.',
     '  · category 는 일정의 "주된 활동/주제"를 따른다(사유가 아니라). 예: "개인사정으로 촬영 불가", "촬영 가능일", "촬영 불가" 처럼 촬영에 관한 것이면 category 는 "촬영"이고, 사유(개인사정 등)와 "불가/가능"은 title 또는 notes 에 적는다 → 절대 "휴가"로 분류하지 않는다(휴가는 사람이 실제로 휴가를 쓰는 일정일 때만). 회의/미팅/면접도 같은 원칙(사유가 아닌 주제로 분류).',
     '  · 기간 일정(date~endDate)은 그 전체 구간이 점유된 것이다. "촬영 가능한 날 언제야?", "○○ 비는 날", "회의실 빈 시간" 같은 가용일/충돌 질문에는 위 "현재 내부 일정"의 각 일정을 [시작일~종료일] 전 구간 점유로 보고 답한다(시작일 하루만 보지 말 것). 예: 촬영 6/10~15, 촬영불가 6/16~18 이 있으면 6/10~18 전체가 막힌 것으로 판단한다. 이런 조회 질문이면 액션 배열은 비우고 reply 로만 답한다.',
     '- "배분/재배치/나눠줘" 요청이면, 아래 현재 일정을 참고해 날짜·담당자를 합리적으로 분산한다. 기존 일정을 옮기는 것은 updates(그 일정의 id 사용), 새로 만드는 것은 entries 에 담는다. 변경하지 않는 필드는 null.',
@@ -335,12 +353,14 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  · update: 기존 업체의 업종/카테고리/담당자/연락처/상태/보고 기준 시작일 변경 요청이면 op:"update" + 그 업체 id 로 담고, 바꿀 필드만 채운다(나머지는 생략하면 기존값 유지).',
     '  · delete: 업체 삭제/해지 요청이면 op:"delete" + id. 삭제하면 연결된 인수인계도 함께 삭제되고 되돌리기 어려우니, reply 에 어떤 업체를 삭제할지 명확히 적고 "적용"을 눌러야 반영된다고 안내한다. 어느 업체인지 모호하면 삭제하지 말고 되묻는다.',
     '  · 월간 보고서 기준일: "○○ 보고 기준일/정산일/보고 시작일 5일로 해줘"처럼 말하면 reportAnchorDate 에 YYYY-MM-DD 로 채운다("매월 5일"류는 가장 적절한 해당 일자로). 이 날짜 기준 30일 주기로 월간 보고서가 자동 생성된다.',
-    '- 인수인계 문서 신규 등록: 사용자가 특정 업체의 인수인계 문서를 만들어 달라고 하면 handovers 에 담는다(overview 에 간단 요약 가능).',
+    '- 인수인계 문서 신규 등록: 사용자가 특정 업체의 인수인계 문서를 만들어 달라고 하면 handovers 에 op:"add" 로 담는다(overview 에 간단 요약 가능).',
+    '- 인수인계 수정/삭제: "○○ 인수인계 가이드라인/톤/금지사항/메모 ~~로 바꿔줘/추가해줘"면 handovers 에 op:"update" + 그 업체명(clientName, 위 "업체 가이드라인"에 있는 업체) 으로 담고 바꿀 필드만 채운다(overview/guidelines/tone/dontDo/specialNotes/managerMemo). "○○ 인수인계 문서 삭제해줘"면 op:"delete" + clientName. 삭제는 되돌리기 어려우니 reply 에 무엇을 지울지 적고 "적용"을 안내한다. 어느 업체인지 모호하면 바꾸지 말고 되묻는다.',
     '- 업체 가이드라인 질문("○○ 업체 가이드라인 알려줘", "스타벅스 톤앤매너는?", "△△ 운영 규칙/주의사항 뭐야?" 등): 아래 "업체 가이드라인(인수인계)"과 "AI 기획 결과 요약"을 근거로 해당 업체의 운영 가이드라인·톤앤매너·금지사항·특이사항·기획 방향을 정리해 reply 에 답한다. 이때 해당 인수인계 문서의 "담당자 연락처(keyContacts)"와 "인수인계 메모(managerMemo)"도 reply 끝에 함께 정리해 덧붙인다(등록돼 있을 때만). 이때는 모든 액션 배열(entries/updates/clients/handovers)을 비운다(등록이 아니라 조회·요약이므로).',
     '- 가이드라인을 답할 때는 인수인계 문서의 내용을 우선하고, AI 기획 결과의 캠페인 방향·톤을 보조적으로 덧붙인다. 해당 업체 정보가 아래에 없으면 지어내지 말고 "등록된 인수인계/기획 정보가 없다"고 안내한다.',
     '- 업체 연락처/예산/계약 질문("○○ 연락처/담당자/이메일/전화 알려줘", "△△ 월 예산/광고비 얼마야?", "□□ 계약 기간/시작일/종료일") : 위 "업체 상세"의 contactPerson·phone·email·monthlyBudget·budgetItems(product/amount, amount는 만원 단위)·startDate·contractEnd 를 근거로 reply 에 정리해 답한다. 인수인계 문서의 "담당자 연락처(keyContacts)"도 보조 근거로 함께 활용한다. 값이 비어 있으면(null/빈 배열) 지어내지 말고 "해당 항목이 등록돼 있지 않다"고 안내한다. 이때 모든 액션 배열은 비운다(조회이므로).',
     '- 외주사 질문("영수증리뷰 어디에 맡겨?", "앱설치 외주 어디 있어?", "○○ 작업 외주사 추천" 등): 아래 "외주사 목록"에서 해당 서비스를 제공하는 외주사를 찾아 업체명·담당자·연락처·단가/메모를 reply 에 정리해 답한다. 여러 곳이면 모두 제시. 이때 모든 액션 배열은 비운다(조회·추천이므로). 맞는 외주사가 없으면 지어내지 말고 "등록된 외주사가 없다"고 안내한다.',
-    '- 외주사 등록: 사용자가 새 외주사를 자연어로 등록하려 하면("○○ 외주사 추가해줘. 영수증리뷰·앱설치 가능, 담당 …") vendors 에 담는다. services 는 정해진 코드가 아니라 자유 서술로, 입력에 언급된 서비스를 빠짐없이 담는다. 아는 정보만 채우고 모르면 빈 문자열. reply 에는 무엇을 등록할지 요약하고 "적용"을 안내한다.',
+    '- 외주사 등록: 사용자가 새 외주사를 자연어로 등록하려 하면("○○ 외주사 추가해줘. 영수증리뷰·앱설치 가능, 담당 …") vendors 에 op:"add" 로 담는다. services 는 정해진 코드가 아니라 자유 서술로, 입력에 언급된 서비스를 빠짐없이 담는다. 아는 정보만 채우고 모르면 빈 문자열. reply 에는 무엇을 등록할지 요약하고 "적용"을 안내한다.',
+    '- 외주사 수정/삭제: "○○ 외주사 연락처/담당/단가/서비스 ~~로 바꿔줘"면 vendors 에 op:"update" + 그 외주사명(name, 위 "외주사 목록"에 있는 이름)으로 담고 바꿀 필드만 채운다. "○○ 외주사 삭제해줘"면 op:"delete" + name. 삭제는 되돌리기 어려우니 reply 에 무엇을 지울지 적고 "적용"을 안내한다. 어느 외주사인지 모호하면 바꾸지 말고 되묻는다.',
     '- 단가/가격/견적 질문("○○ 단가 얼마야?", "스토어 상위노출 가격", "10만원 이하 패키지 뭐 있어?", "리뷰 패키지 견적", "△△ 단일 상품 가격대" 등): 아래 "단가표(외부 수집)"를 근거로 답한다. 상품명·옵션명·가격(원)을 그대로 인용해 reply 에 정리하고, 패키지/단일을 구분해 보여준다. 예산 조건이 있으면 그 이하 옵션만 추린다. ★ 표에 없는 가격을 절대 지어내지 말 것 — 맞는 항목이 없으면 "단가표에 해당 항목이 없다(단가표 페이지에서 새로고침 필요할 수 있음)"고 안내한다. 단가표의 "최저가"는 그 상품 옵션 중 가장 싼 값이다. 이때 모든 액션 배열은 비운다(조회이므로).',
     '  · ★ 단가를 답할 때는 각 옵션의 "설명"(단가표의 └ 설명 항목)도 가격과 함께 반드시 같이 보여준다. 특히 "결제 전 (관리자) 문의", "상담 요망", "노출 보장 조건" 같은 주의·조건 문구가 있으면 절대 생략하지 말고 그대로 전달한다(가격만 알려주면 안 됨). 설명이 길면 핵심(구성 항목·보장 조건·문의 안내)을 간추리되 주의 문구는 빠뜨리지 않는다. 설명이 없는 옵션은 가격만 답한다. 패키지는 "패키지명 – 옵션명: 가격" 형태로 그대로 인용한다.',
     '  · 단가표에 옵션 없이 "상품명 (카테고리) — 최저가"만 있는 항목은, 질문이 광범위해 상세를 생략한 것이다. 이 경우 최저가 기준으로 추려 답하고(예: 예산 이하 상품), 정확한 옵션·설명이 필요하면 "어떤 상품인지 콕 집어 다시 물어봐 달라"고 안내한다(억지로 옵션을 지어내지 말 것).',
@@ -354,9 +374,12 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       '  · ★ 답글(스레드 이어 달기): 사용자가 "○○ 상담 내용 추가해줘"처럼 말할 때, 아래 "상담 목록(영업관리)"에 같은 고객사/전화의 기존 상담이 이미 있으면 새 상담(op:"add")을 만들지 말고 op:"reply" + 그 기존 상담의 id 를 넣어 답글로 단다. content 에 이번에 추가할 내용만 담는다(부모의 다른 필드는 보내지 않는다). 예: 어제 "웹투어" 상담이 있는데 "웹투어 오늘 다시 통화함, 견적 보냄" → sales:[{"op":"reply","id":"웹투어 상담의 id","content":"오늘 다시 통화함, 견적 보냄"}].',
       '  · ★ 업체명을 안 밝히고 전화 뒷자리만 말하는 경우(예: "2077 번호 상담 내용 추가해줘", "뒷번호 2077 …")도, 목록에서 전화가 그 뒷자리로 끝나는 기존 상담을 찾아 op:"reply" + 그 id 로 답글을 단다. 맞는 기존 상담이 없을 때만 op:"add" 로 새로 만든다.',
       '  · 상담 수정/조회: 기존 상담의 척도·상태·연락처 등 "필드 값"을 바꾸면 op:"update" + 맞는 id(답글이 아니라 기존 내용 자체를 고치는 경우). "오늘 상담 몇 건?", "부정 상담 보여줘", "가망/부재 상담 보여줘" 같은 조회는 sales 배열을 비우고 reply 로만 그 목록을 근거로 답한다(답글 내용도 근거에 포함).',
+      '  · 상담 삭제("○○ 상담 삭제해줘", "그 통화 기록 지워줘"): "상담 목록"에서 고객사/전화/내용으로 맞는 상담을 찾아 op:"delete" + 그 id 로 담는다. 삭제는 되돌리기 어려우니 reply 에 무엇을 지울지 적고 "적용"을 안내한다. 모호하면 지우지 말고 되묻는다.',
       `  · ★★★ 반드시 "sales" 배열에 객체로 담아라. reply 에 "등록하겠습니다/적용해주세요" 라고 말만 하고 sales 를 비우면 사용자 화면에 적용 버튼이 안 떠서 아무것도 저장되지 않는다(가장 흔한 실수). 신규 상담이면 sales 에 op:"add" 객체가 반드시 1개 이상 있어야 한다.`,
       `  · 예시) 입력: "오늘 23398893 번호 상담했어 매우긍정이고 내용은 네이버 블로그 관리 내용이었어 나스 링크 https://example.com 로 해줘" → 반드시 sales:[{"op":"add","consultedAt":"${today}","channel":"phone","phone":"23398893","content":"네이버 블로그 관리","sentiment":"very_positive","status":"new","nasLink":"https://example.com"}] 로 채우고, reply 는 "전화 상담(매우긍정) 기록을 준비했어요. 적용을 눌러주세요." 정도로 짧게.`,
     ] : []),
+    '- 순위 보장 캠페인(rankGuarantees): "○○ 자동완성 보장 20건으로 만들어줘/등록해줘"면 op:"add" + clientName·title·guaranteedCount(언급 없으면 20)·alertOffset(언급 없으면 2). "△△ 보장 목표 30건으로 바꿔줘", "알림 3건 전으로"면 op:"update" + 아래 "순위 보장" 목록의 그 캠페인 id + 바꿀 필드. "□□ 보장 종료해줘/마감"이면 op:"update" + id + closed:true(연장이면 closed:false). "○○ 보장 삭제해줘"면 op:"delete" + id. ★ 개별 항목·순위는 일정에 순위를 넣으면 자동 편입되므로 여기서 다루지 않는다(캠페인 자체의 생성/목표/종료/삭제만). 삭제·종료는 reply 에 무엇을 할지 적고 "적용"을 안내한다.',
+    '- ★ 순위 보장 조회("○○ 보장 몇 건 찼어?", "임박한 보장 있어?", "△△ 순위보장 현황", "도달한 보장 보여줘"): 아래 "순위 보장" 목록(달성/목표·상태)을 근거로 reply 로만 답하고 rankGuarantees 배열은 비운다 — 새로 만들거나 바꾸지 않는다.',
     '- 키워드 조회수 질문("○○ 키워드 조회수 알려줘", "△△ 검색량 얼마야?", "□□ 모바일/PC 조회수"): 실제 수치는 네이버 키워드도구로 따로 조회하므로, 너는 절대 숫자를 지어내지 말고 조회할 키워드만 keywords 배열에 담는다(여러 개면 모두). reply 에는 "조회수를 조회해 아래에 표시할게요" 정도로 짧게 답하고 다른 액션 배열은 비운다.',
     '- 아이디 목록 조회("○○ 아이디/비번 뭐야?", "△△ 계정 정보 알려줘"): 비밀번호는 컨텍스트에 없고 화면에서 직접 보여주므로, 매칭되는 항목의 id 를 accountLookups 에 담는다(여러 개면 모두). reply 에는 "아래에서 아이디·비번·아이피를 복사하세요" 정도로 짧게 답하고, 비번 값을 지어내지 말 것. 일치 항목이 없으면 빈 배열 + reply 에서 되묻기.',
     '- 홈페이지 목록 조회("문자발송 사이트 비번?", "○○ 홈페이지 계정"): 매칭 항목 id 를 siteLookups 에 담고 reply 는 짧게. 비번은 화면에서 보여준다.',
@@ -364,12 +387,15 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 아이디 목록 항목은 구분(platform: 블로그/SNS/유튜브/기타)과 소유(ownership: client=업체소유, inhouse=사내)를 가진다. 추가/수정 시 사용자 표현에 맞게 채우고, "유튜브 계정 목록", "사내 계정 알려줘" 같은 조회는 이 값으로 필터해 해당 id 들을 accountLookups 에 담는다.',
     '- 블로그(platform=블로그)는 등급(grade)을 가진다: 준최2/준최3/준최4/준최5/준최6, 최적1/최적2/최적3/최적4. "최적3 블로그 보여줘", "준최 블로그 목록" 같은 조회는 grade 로 필터해 accountLookups 에 담고, 추가/수정 시 grade 를 채운다. 블로그가 아니면 grade 는 비운다.',
     '- accounts/sites 의 추가/수정/삭제를 제안할 때는 reply 에 무엇을 할지 요약하고 "적용"을 안내한다. 조회·답변만 할 때는 모든 액션 배열을 비운다.',
-    '- 다른 담당자에게 업무 요청 보내기("방두환한테 디자인 제작 요청해줘", "○○한테 △△ 확인해달라고 해줘", "□□에게 이거 부탁해"): requests 배열에 담는다. toName 은 "담당자 목록" 중 가장 가까운 이름, title 은 요청 내용을 한 줄로(예: "디자인 제작"), 상세 내용이 있으면 body 에. 이것은 일정 등록이 아니라 "확인/처리 요청"이므로 entries 에는 담지 않는다(일정도 같이 만들라고 명시하면 그때만 entries 추가). reply 에는 누구에게 무엇을 요청할지 요약하고 "적용"하면 그 담당자 화면에 알림이 뜬다고 안내한다. 받는 담당자를 특정할 수 없으면 requests 를 비우고 reply 에서 누구에게 보낼지 되묻는다.',
+    '- 다른 담당자에게 업무 요청 보내기("방두환한테 디자인 제작 요청해줘", "○○한테 △△ 확인해달라고 해줘", "□□에게 이거 부탁해"): requests 배열에 담는다. toName 은 "담당자 목록" 중 가장 가까운 이름, title 은 요청 내용을 한 줄로(예: "디자인 제작"), 상세 내용이 있으면 body 에. 이것은 일정 등록이 아니라 "확인/처리 요청"이므로 entries 에는 담지 않는다(일정도 같이 만들라고 명시하면 그때만 entries 추가). reply 에는 누구에게 무엇을 요청할지 요약하고 "적용"하면 그 담당자 화면에 알림이 뜬다고 안내한다. 받는 담당자를 특정할 수 없으면 requests 를 비우고 reply 에서 누구에게 보낼지 되묻는다. (기본 op:"add")',
+    '- 보낸 요청 회수/취소("○○한테 보낸 △△ 요청 취소해줘/회수해줘"): 위 "요청함"에서 (나)→ 로 시작하는(내가 보낸) 요청 중 받는사람·내용이 맞는 항목을 찾아 requests 에 op:"delete" + 그 id 로 담는다. 받은 요청(→(나))이나 남이 보낸 요청은 회수 대상이 아니다. 모호하면 지우지 말고 되묻는다. reply 에 무엇을 회수할지 적고 "적용"을 안내한다.',
     '- 팀/전체 공지("마케팅팀에 ~~ 전달해줘", "디자인팀한테 ~~ 공지해줘", "회사 전부에게/전 직원에게/모두에게 ~~ 공지해줘"): notices 배열에 담는다. audience 는 회사 전체를 가리키면 "전체", 특정 팀이면 그 팀 이름(마케팅팀/디자인팀/영상팀/총괄팀 중 가장 가까운 것), title 은 공지 내용 한 줄, 상세 내용은 body 에. reply 에는 누구(어느 대상)에게 무엇을 공지할지 요약하고 "적용"하면 대상 인원 화면에 알림이 뜬다고 안내한다.',
     '- ★ 공지 vs 업무 요청 구분(중요): 대상이 "팀 전체" 또는 "회사 전체"면 notices(공지), 대상이 "사람 한 명"이면 requests(업무 요청)다. 핵심 경계 — "디자인팀한테"=팀 전체 공지(notices), "디자인팀장한테"=그 팀의 팀장이라는 한 사람(requests). "마케팅팀에 알려줘"=notices, "마케팅 매니저한테 알려줘"=requests. 팀 이름 뒤에 직책(팀장/PD/매니저 등)이 붙으면 사람(requests), 안 붙고 팀만 가리키면 공지(notices). 한 번에 둘 다(예: "전체 공지하고 김대리한테 따로 요청도")면 notices 와 requests 모두 채운다.',
-    '- ★ 공지 조회("올라온 공지 있어?", "우리팀 공지 뭐 있어?", "전체 공지 알려줘"): 위 "공지" 목록을 근거로 답하고 액션 배열(notices 포함)은 비운다 — 새 공지를 만들지 않는다.',
+    '- 공지 삭제("내가 올린 ○○ 공지 삭제해줘/내려줘"): 위 "공지" 목록에서 내가 올린((나) 표시) 공지 중 내용이 맞는 항목을 찾아 notices 에 op:"delete" + 그 id 로 담는다(내가 올린 것만 삭제 가능). 모호하면 지우지 말고 되묻고, reply 에 무엇을 지울지 적고 "적용"을 안내한다.',
+    '- ★ 공지 조회("올라온 공지 있어?", "우리팀 공지 뭐 있어?", "전체 공지 알려줘"): 위 "공지" 목록을 근거로 답하고 액션 배열(notices 포함)은 비운다 — 새 공지를 만들거나 지우지 않는다.',
     '- ★ 요청함 조회("오늘 들어온 요청 알려줘", "내가 받은 요청 뭐 있어?", "내가 보낸 요청 상태", "○○가 나한테 요청한 거", "처리 안 한 요청") : 위 "요청함" 목록을 근거로 답한다. "들어온/받은 요청"은 →(나)로 끝나는 항목(toMe), "보낸 요청"은 (나)→로 시작하는 항목(fromMe)이다. "오늘"이면 date 가 오늘과 같은 것만 추린다. 상태(대기/확인함/완료/반려)·요청자·내용을 정리해 reply 에 답하고, 맞는 게 없으면 "오늘 들어온 요청이 없다"처럼 구체적으로 안내한다(절대 "등록된 내용이 없어요"로 뭉뚱그리지 말 것). ★ 이건 조회이므로 모든 액션 배열(requests 포함)은 비운다 — 새 요청을 만들지 않는다.',
     '- 직책/직함/팀으로 사람 지목: 사용자가 이름 대신 "디자인팀장", "영상팀 PD/피디", "총괄팀 부장님", "마케팅 매니저", "대표님" 처럼 팀(department)·직책(position)·직함(title)으로 사람을 가리키면, 위 "담당자 명단"에서 팀·직책·직함이 맞는 사람을 찾아 그 사람의 "이름"을 managerName / 요청의 toName 에 넣는다(직책/직함 문자열이 아니라 반드시 이름). "PD" 와 "피디" 는 같은 직책이다. "팀장/대표/감독" 등은 팀과 함께 쓰면 그 팀의 해당 보직자를 가리킨다(예: "디자인팀장"=디자인팀 position 팀장). 조건에 맞는 사람이 명단에 없거나 두 명 이상이라 모호하면, 추측하지 말고 reply 에서 누구를 말하는지 되묻고 액션 배열은 비운다.',
+    '- ★★ 팀명 ≠ 업무 종류(매우 중요 · 담당자 오배정 방지): "디자인 기획", "영상 기획", "영상 편집", "디자인 제작", "블로그", "콘텐츠 기획" 같은 말은 "업무 종류(category/keyword)"이지 팀 지목이 아니다. 여기 들어간 "디자인/영상"이라는 글자 때문에 디자인팀·영상팀 소속 사람을 담당자(managerName)로 넣으면 절대 안 된다. 예: "디자인 기획 오늘 스케줄 넣어줘"는 담당자 언급이 없는 것이므로 managerName 을 빈 문자열("")로 둬서 로그인 본인이 담당자가 되게 한다(디자인팀 사람을 고르지 말 것). 팀명을 "사람"으로 해석하는 건 오직 ① 직책(팀장/PD/매니저/부장/대표/감독 등)이 함께 붙거나, ② "~팀에게/~팀한테/~팀 담당으로"처럼 그 팀을 담당자로 콕 집는 표현이 있을 때뿐이다. 그 신호가 없으면 업무 종류로만 보고 managerName 은 비운다.',
     `- managerName(담당자): 사용자가 담당자를 명시적으로 지정했을 때만(예: "철수한테", "영희 담당으로", "디자인팀장한테") "담당자 목록" 중 가장 가까운 값을 넣는다. 담당자 언급이 전혀 없으면 절대 임의로 고르지 말고 managerName 을 빈 문자열("")로 둔다 — 그러면 시스템이 로그인한 본인을 자동 담당자로 넣는다. "나/내가/나한테/제가/저한테" 같은 1인칭 표현은 로그인 본인(${currentUser || '본인'})을 가리키므로 이때도 managerName 은 빈 문자열로 둔다.`,
     '- clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
     '- 기간 작업이 아니면 endDate 는 null. status 미지정이면 "pending".',
@@ -394,7 +420,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     `카테고리 목록(클라이언트 업무 entries 용): ${categories.join(', ')}`,
     `내부 일정 종류(internalEvents 용 — 없으면 새로 만들어도 됨): ${internalCategories.join(', ') || '회의실, 미팅, 면접, 촬영, 휴가'}`,
     '',
-    '현재 등록된 일정(JSON, id 포함 — updates 에 이 id 사용):',
+    '현재 등록된 일정(팀 전체 클라이언트 업무 일정 · JSON, id 포함 — updates 에 이 id 사용. "내 일정"은 managerName 이 본인인 것):',
     JSON.stringify(entries),
     '',
     '현재 내부 일정(수정 시 op:"update" 에 이 id 사용):',
@@ -422,6 +448,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     requestContext || '(등록된 업무 요청 없음)',
     '공지(팀/전체 — 내 대상이거나 내가 올린 것. "(나)"는 내가 올린 공지):',
     noticeContext || '(올라온 공지 없음)',
+    '순위 보장(캠페인별 달성/목표·상태 — 조회/수정/삭제 시 위 id 사용):',
+    rankGContext || '(등록된 순위 보장 없음)',
     ...(salesEnabled ? [
       '',
       '상담 목록(영업관리 — 상담 수정/조회 시 위 id 사용):',
@@ -475,7 +503,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const data = await aiRes.json();
   const content = extractText(data);
-  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; notices?: unknown; internalEvents?: unknown; sales?: unknown; accountLookups?: unknown; siteLookups?: unknown };
+  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; notices?: unknown; internalEvents?: unknown; sales?: unknown; rankGuarantees?: unknown; accountLookups?: unknown; siteLookups?: unknown };
   try {
     parsed = JSON.parse(content);
   } catch {
@@ -494,6 +522,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     requests: Array.isArray(parsed?.requests) ? parsed.requests : [],
     notices: Array.isArray(parsed?.notices) ? parsed.notices : [],
     internalEvents: Array.isArray(parsed?.internalEvents) ? parsed.internalEvents : [],
+    rankGuarantees: Array.isArray(parsed?.rankGuarantees) ? parsed.rankGuarantees : [],
     sales: salesEnabled && Array.isArray(parsed?.sales) ? parsed.sales : [],
     accountLookups: Array.isArray(parsed?.accountLookups) ? parsed.accountLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
     siteLookups: Array.isArray(parsed?.siteLookups) ? parsed.siteLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],

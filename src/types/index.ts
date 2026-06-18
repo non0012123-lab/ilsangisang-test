@@ -71,16 +71,23 @@ export interface AssistantProposalEntry { date?: string; endDate?: string | null
 export interface AssistantProposalUpdate { id?: string; clientName?: string; keyword?: string; matchDate?: string | null; date?: string | null; endDate?: string | null; managerName?: string | null; status?: string | null; link?: string | null; rank?: number | string | null }
 // 클라이언트는 추가/수정/삭제를 op 로 구분 (수정·삭제는 id 사용). reportAnchorDate = 월간 보고 기준 시작일.
 export interface AssistantProposalClient { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; industry?: string; categories?: string[]; contactPerson?: string; phone?: string; email?: string; status?: 'active' | 'inactive' | 'pending'; reportAnchorDate?: string }
-export interface AssistantProposalHandover { clientName?: string; overview?: string }
+// op:'update'/'delete' + clientName(또는 id) 면 기존 인수인계 수정/삭제. 생략/add 면 신규.
+export interface AssistantProposalHandover { op?: 'add' | 'update' | 'delete'; id?: string; clientName?: string; overview?: string; guidelines?: string; tone?: string; dontDo?: string; specialNotes?: string; managerMemo?: string }
 // 다른 담당자에게 보낼 업무 요청 (예: "방두환한테 디자인 제작 요청해줘")
-export interface AssistantProposalRequest { toName?: string; title?: string; body?: string }
+// op:'delete' + id(또는 toName+title) 면 내가 보낸 요청 회수(삭제).
+export interface AssistantProposalRequest { op?: 'add' | 'delete'; id?: string; toName?: string; title?: string; body?: string }
 // 팀/전체 공지 (예: "마케팅팀에 ~~ 전달해줘", "회사 전부에게 ~~ 공지해줘")
 // audience: 'all'(전체) 또는 팀 이름(마케팅팀/디자인팀/영상팀/총괄팀)
-export interface AssistantProposalNotice { audience?: string; title?: string; body?: string }
+// op:'delete' + id(또는 title) 면 내가 올린 공지 삭제.
+export interface AssistantProposalNotice { op?: 'add' | 'delete'; id?: string; audience?: string; title?: string; body?: string }
+// 순위 보장 캠페인 (예: "현대차 자동완성 보장 20건으로 만들어줘", "○○ 보장 종료해줘")
+// op:'add' 신규 / 'update' 목표·제목·종료 변경 / 'delete' 삭제. 항목·순위는 일정 연동으로 채워진다.
+export interface AssistantProposalRankGuarantee { op?: 'add' | 'update' | 'delete'; id?: string; clientName?: string; title?: string; guaranteedCount?: number; alertOffset?: number; closed?: boolean }
 // 사내 내부 일정 (예: "내일 3시 디자인팀 회의 잡아줘", "금요일 면접 일정")
 // op:'update' + id 면 기존 내부 일정 수정(참여자는 합쳐 추가). 생략/add 면 신규.
-export interface AssistantProposalInternal { op?: 'add' | 'update'; id?: string; title?: string; category?: string; date?: string; endDate?: string | null; startTime?: string; endTime?: string; participantNames?: string[]; location?: string; notes?: string; reminder?: string }
-export interface AssistantProposalVendor { name?: string; services?: string; contactPerson?: string; phone?: string; email?: string; pricing?: string; notes?: string }
+export interface AssistantProposalInternal { op?: 'add' | 'update' | 'delete'; id?: string; title?: string; category?: string; date?: string; endDate?: string | null; startTime?: string; endTime?: string; participantNames?: string[]; location?: string; notes?: string; reminder?: string }
+// op:'update'/'delete' + id(또는 name) 면 기존 외주사 수정/삭제. 생략/add 면 신규.
+export interface AssistantProposalVendor { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; services?: string; contactPerson?: string; phone?: string; email?: string; pricing?: string; notes?: string }
 // 아이디 목록/홈페이지 목록은 추가·수정·삭제를 op 로 구분
 export interface AssistantAccountOp { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; platform?: string; grade?: string; ownership?: 'client' | 'inhouse'; username?: string; password?: string; category?: string; ip?: string }
 export interface AssistantSiteOp { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; url?: string; username?: string; password?: string; description?: string }
@@ -98,6 +105,17 @@ export interface AssistantUndo {
   deletedClients?: Client[];
   updatedClientsPrev?: Client[];
   deletedHandovers?: HandoverDoc[];
+  updatedHandoversPrev?: HandoverDoc[]; // 어시스턴트로 수정한 인수인계의 이전 상태(되돌릴 때 복원)
+  // 외주사 수정/삭제
+  deletedVendors?: Vendor[];
+  updatedVendorsPrev?: Vendor[];
+  // 상담/요청/공지 삭제, 순위보장 추가/수정/삭제
+  deletedSales?: SalesEntry[];
+  deletedRequests?: WorkRequest[];
+  deletedNotices?: Notice[];
+  rankGuaranteeIds?: string[];                 // 어시스턴트로 생성한 순위보장(되돌릴 때 삭제)
+  updatedRankGuaranteesPrev?: RankGuarantee[]; // 수정한 순위보장의 이전 상태(되돌릴 때 복원)
+  deletedRankGuarantees?: RankGuarantee[];     // 삭제한 순위보장(되돌릴 때 복원)
   // 아이디 목록/홈페이지 목록
   accountIds: string[];
   siteIds: string[];
@@ -105,6 +123,7 @@ export interface AssistantUndo {
   noticeIds?: string[];            // 어시스턴트로 생성한 공지(되돌릴 때 삭제)
   internalEventIds?: string[];     // 어시스턴트로 생성한 내부 일정(되돌릴 때 삭제)
   updatedInternalPrev?: InternalEvent[]; // 어시스턴트로 수정한 내부 일정의 이전 상태(되돌릴 때 복원)
+  deletedInternalEvents?: InternalEvent[]; // 어시스턴트로 삭제한 내부 일정(되돌릴 때 복원)
   salesIds?: string[];             // 어시스턴트로 생성한 상담 기록(되돌릴 때 삭제)
   updatedSalesPrev?: SalesEntry[]; // 어시스턴트로 수정한 상담의 이전 상태(되돌릴 때 복원)
   deletedAccounts: AccountEntry[];
@@ -126,12 +145,14 @@ export interface AssistantMessage {
   notices?: AssistantProposalNotice[]; // 팀/전체 공지
   internalEvents?: AssistantProposalInternal[]; // 사내 내부 일정
   sales?: AssistantProposalSales[]; // 영업관리 상담 기록 추가/수정
+  rankGuarantees?: AssistantProposalRankGuarantee[]; // 순위 보장 캠페인 추가/수정/삭제
   accountLookups?: string[];        // 조회 답변에 복사 카드로 표시할 아이디 목록 id
   siteLookups?: string[];           // 조회 답변에 복사 카드로 표시할 홈페이지 id
   deletes?: string[];         // 삭제할 기존 일정 id
   keywords?: string[];        // 조회 요청된 키워드(조회수 질문 시)
   keywordStats?: KeywordStat[]; // 조회 결과(모바일/PC/총)
   applied?: number; // 적용한 건수(적용 후 표시)
+  skipped?: string[]; // 적용하지 못한 항목과 이유(예: "디자인 제작 — 업체 미지정") — "조용한 실패" 방지용
   undo?: AssistantUndo; // 적용 후 되돌리기용 스냅샷
   undone?: boolean;   // 되돌리기 완료 표시
 }
@@ -484,7 +505,7 @@ export interface SalesEntry {
 
 // AI 어시스턴트가 제안하는 상담 기록(추가/수정/답글)
 export interface AssistantProposalSales {
-  op?: 'add' | 'update' | 'reply'; // reply = 기존 상담 스레드에 답글로 이어 달기
+  op?: 'add' | 'update' | 'reply' | 'delete'; // reply = 기존 상담 스레드에 답글로 이어 달기, delete = 상담 삭제
   id?: string;            // 수정/답글 시 대상(부모) 상담 id
   consultedAt?: string;   // "YYYY-MM-DD HH:mm" 또는 "YYYY-MM-DD"
   channel?: SalesChannel;

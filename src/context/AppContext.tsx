@@ -6,6 +6,7 @@ import { USERS } from '../data/mockData';
 import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
 import type { ReminderOption } from '../types';
 import { supabase } from '../lib/supabase';
+import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { todayStr } from '../utils/today';
 import { recurrenceOccurrences } from '../utils/recurrence';
 import { fireDesktop, requestNotifyPermission, isNotifySupported } from '../utils/notifications';
@@ -995,9 +996,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let convId = activeConversationIdRef.current;
     if (!convId || !conversationsRef.current.some(c => c.id === convId)) convId = createConversation();
     const u = userRef.current;
-    const isAdmin = u?.role === 'admin';
+    // 일정 컨텍스트는 관리자/일반 구분 없이 "전체"를 전달한다.
+    //  • 과거엔 비관리자에게 본인 담당분(managerId===나)만 보냈는데, 내부 일정(internalEvents)은
+    //    전체를 보내고 있어 비대칭이었다 → "오늘 작업 스케줄 알려줘"에 남의 담당 일정이 빠져
+    //    "작업 스케줄 없음"이라 답하던 문제(특히 담당자가 잘못 배정된 일정까지 누락).
+    //  • 각 일정에 managerName 이 있어 "내 일정만"도 AI 가 구분해 답할 수 있으므로 전체로 맞춘다.
     const allEntries = entriesRef.current;
-    const scoped = isAdmin ? allEntries : allEntries.filter(e => e.managerId === u?.id);
+    const scoped = allEntries;
     const activeClients = clientsRef.current.filter(c => c.status !== 'inactive');
     // 가이드라인 질문에 답하기 위해 인수인계 문서·AI 기획 결과를 함께 전달
     const clientNameOf = (id: string, fallback: string) => clientsRef.current.find(c => c.id === id)?.name ?? fallback;
@@ -1147,11 +1152,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
             .map(n => {
               const d = new Date(n.createdAt); const p = (k: number) => String(k).padStart(2, '0');
               return {
-                audienceLabel: n.audienceLabel, fromName: n.fromName, fromMe: n.fromUid === (u?.id ?? ''),
+                id: n.id, audienceLabel: n.audienceLabel, fromName: n.fromName, fromMe: n.fromUid === (u?.id ?? ''),
                 title: n.title, body: (n.body ?? '').slice(0, 120),
                 date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
               };
             }),
+          // 순위 보장 — "○○ 보장 몇 건 찼어?", "△△ 보장 종료/삭제" 조회·수정·삭제용.
+          rankGuarantees: rankGuaranteesRef.current.slice(0, 80).map(g => ({
+            id: g.id, clientName: g.clientName, title: g.title,
+            guaranteedCount: g.guaranteedCount, achievedCount: countAchieved(g),
+            alertOffset: g.alertOffset, cycle: g.cycle, closed: g.closed, status: g.status,
+          })),
           entries: scoped.map(e => ({
             id: e.id, date: e.date, endDate: e.endDate ?? null,
             managerName: e.managerName, clientName: e.clientName,
@@ -1180,6 +1191,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         requests: Array.isArray(data.requests) ? data.requests : [],
         notices: Array.isArray(data.notices) ? data.notices : [],
         internalEvents: Array.isArray(data.internalEvents) ? data.internalEvents : [],
+        rankGuarantees: Array.isArray(data.rankGuarantees) ? data.rankGuarantees : [],
         sales: salesEnabled && Array.isArray(data.sales) ? data.sales : [], // 권한 없으면 무시
         accountLookups: Array.isArray(data.accountLookups) ? data.accountLookups.filter((x: unknown) => typeof x === 'string') : [],
         siteLookups: Array.isArray(data.siteLookups) ? data.siteLookups.filter((x: unknown) => typeof x === 'string') : [],
@@ -1226,9 +1238,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 되돌리기용 스냅샷(생성 id + 삭제/수정 전 원본)
     const undo: AssistantUndo = {
       entryIds: [], clientIds: [], vendorIds: [], handoverIds: [], deletedEntries: [], updatedPrev: [],
-      accountIds: [], siteIds: [], requestIds: [], noticeIds: [], internalEventIds: [], updatedInternalPrev: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
-      deletedClients: [], updatedClientsPrev: [], deletedHandovers: [],
-      salesIds: [], updatedSalesPrev: [],
+      accountIds: [], siteIds: [], requestIds: [], noticeIds: [], internalEventIds: [], updatedInternalPrev: [], deletedInternalEvents: [], deletedAccounts: [], deletedSites: [], updatedAccountsPrev: [], updatedSitesPrev: [],
+      deletedClients: [], updatedClientsPrev: [], deletedHandovers: [], updatedHandoversPrev: [],
+      deletedVendors: [], updatedVendorsPrev: [],
+      salesIds: [], updatedSalesPrev: [], deletedSales: [], deletedRequests: [], deletedNotices: [],
+      rankGuaranteeIds: [], updatedRankGuaranteesPrev: [], deletedRankGuarantees: [],
     };
     const appliedUpdates: string[] = []; // 알림용: 실제 적용된 "일정 변경"의 핵심 내용(순위·링크·날짜 등)
     const deletedDescs: string[] = [];   // 알림용: 삭제된 일정 핵심 내용
@@ -1311,8 +1325,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return id;
     };
 
-    // 1.5) 신규 외주사 등록
+    // 1.5) 외주사 추가/수정/삭제
+    const findVendor = (v: { id?: string; name?: string }) =>
+      vendorsRef.current.find(x => x.id === v.id) ?? (v.name ? vendorsRef.current.find(x => x.name === v.name || includesEither(x.name, v.name!)) : undefined);
     (msg.vendors ?? []).forEach((v, i) => {
+      const op = v.op ?? (v.id ? 'update' : 'add');
+      if (op === 'delete') {
+        const cur = findVendor(v);
+        if (!cur) return;
+        undo.deletedVendors!.push({ ...cur });
+        removeVendor(cur.id);
+        count += 1;
+        return;
+      }
+      if (op === 'update') {
+        const cur = findVendor(v);
+        if (cur) {
+          undo.updatedVendorsPrev!.push({ ...cur });
+          saveVendor({ ...cur,
+            name: v.name ?? cur.name, services: v.services ?? cur.services,
+            contactPerson: v.contactPerson ?? cur.contactPerson, phone: v.phone ?? cur.phone, email: v.email ?? cur.email,
+            pricing: v.pricing ?? cur.pricing, notes: v.notes ?? cur.notes });
+          count += 1;
+          return;
+        }
+        // 매칭 실패 → 신규로 폴백
+      }
       if (!v.name) return;
       if (vendorsRef.current.some(x => x.name === v.name)) return;
       const vid = `vd-${Date.now()}-${i}`;
@@ -1325,8 +1363,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
       count += 1;
     });
 
-    // 2) 인수인계 문서 신규 등록
+    // 2) 인수인계 문서 추가/수정/삭제
+    const findHandover = (h: { id?: string; clientName?: string }) =>
+      handoverDocsRef.current.find(d => d.id === h.id)
+      ?? (h.clientName ? handoverDocsRef.current.find(d => d.clientName === h.clientName || includesEither(d.clientName, h.clientName!)) : undefined);
     (msg.handovers ?? []).forEach((h, i) => {
+      const op = h.op ?? (h.id ? 'update' : 'add');
+      if (op === 'delete') {
+        const cur = findHandover(h);
+        if (!cur) return;
+        undo.deletedHandovers!.push({ ...cur });
+        removeHandover(cur.id);
+        count += 1;
+        return;
+      }
+      if (op === 'update') {
+        const cur = findHandover(h);
+        if (cur) {
+          undo.updatedHandoversPrev!.push({ ...cur });
+          saveHandover({ ...cur,
+            overview: h.overview ?? cur.overview, guidelines: h.guidelines ?? cur.guidelines,
+            tone: h.tone ?? cur.tone, dontDo: h.dontDo ?? cur.dontDo,
+            specialNotes: h.specialNotes ?? cur.specialNotes, managerMemo: h.managerMemo ?? cur.managerMemo,
+            updatedAt: todayStr() });
+          count += 1;
+          return;
+        }
+        // 매칭 실패 → 신규로 폴백
+      }
       if (!h.clientName) return;
       const cid = resolveClient(h.clientName);
       if (!cid || handoverDocsRef.current.find(d => d.clientId === cid)) return;
@@ -1335,7 +1399,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         id: hid, clientId: cid, clientName: clientNameOf(cid) || h.clientName,
         authorId: u?.id ?? '', authorName: u?.name ?? '', updatedAt: todayStr(),
         overview: h.overview || '', keyContacts: [], importantLinks: [],
-        guidelines: '', tone: '', dontDo: '', specialNotes: '', managerMemo: '',
+        guidelines: h.guidelines || '', tone: h.tone || '', dontDo: h.dontDo || '', specialNotes: h.specialNotes || '', managerMemo: h.managerMemo || '',
       });
       undo.handoverIds.push(hid);
       count += 1;
@@ -1343,14 +1407,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // 3) 신규 일정 생성
     const newEntries: ScheduleEntry[] = [];
+    const skipped: string[] = []; // 적용 못 한 항목 + 이유 — 화면에 알려 "알겠다 해놓고 0건 적용"의 조용한 실패를 막는다.
     (msg.entries ?? []).forEach((e, i) => {
-      const managerId = matchManager(e.managerName) || selfId;
+      // 담당자: 명시 담당자 → 로그인 본인(멤버) → 본인 uid(멤버 목록 미로딩 등) 순으로 폴백.
+      const managerId = matchManager(e.managerName) || selfId || (u?.id ?? '');
+      const managerName = mem.find(m => m.id === managerId)?.name ?? (managerId && managerId === u?.id ? (u?.name ?? '') : '');
       const clientId = ensureClient(e.clientName); // 업체명이 있으면 없을 때 자동 생성해 일정이 버려지지 않게
-      if (!e.date || !managerId || !clientId) return; // 날짜/담당자/업체명이 모두 없을 때만 건너뜀
+      if (!e.date || !managerId || !clientId) {
+        // 클라이언트 업무 일정은 업체가 반드시 있어야 화면(업체별 스케줄)에 자리를 잡는다.
+        const why = !clientId ? '업체 미지정' : !e.date ? '날짜 미지정' : '담당자 미지정';
+        skipped.push(`${e.keyword || e.category || '일정'}${e.date && e.date !== 'null' ? ` ${e.date}` : ''} — ${why}`);
+        return;
+      }
       const category = ((ASSISTANT_CATEGORIES as string[]).includes(e.category ?? '') ? e.category : (ASSISTANT_CATEGORIES.find(c => e.category?.includes(c)) ?? '기타')) as Category;
       const endDate = e.endDate && e.endDate !== 'null' && e.endDate > e.date ? e.endDate : undefined;
       const base = {
-        managerId, managerName: mem.find(m => m.id === managerId)?.name ?? '',
+        managerId, managerName,
         category, keyword: e.keyword || undefined, clientId, clientName: clientNameOf(clientId),
         link: e.link || undefined,
         rank: parseRank(e.rank), // "키워드 N위로 등록" → 순위 N ("3위"/"3등" 등 비정형 표기도 허용)
@@ -1495,6 +1567,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 8) 다른 담당자에게 업무 요청 보내기 ("방두환한테 디자인 제작 요청해줘")
     const newRequests: WorkRequest[] = [];
     (msg.requests ?? []).forEach(r => {
+      // 회수(delete): 내가 보낸 요청만. id 우선, 없으면 받는사람+제목으로 식별.
+      if (r.op === 'delete') {
+        const mine = requestsRef.current.filter(x => x.fromUid === (u?.id ?? ''));
+        const toId = r.toName ? matchManager(r.toName) : '';
+        const cur = (r.id ? mine.find(x => x.id === r.id) : undefined)
+          ?? mine.find(x => (!r.title || includesEither(x.title, r.title!.trim())) && (!toId || x.toUid === toId));
+        if (!cur) return;
+        undo.deletedRequests!.push({ ...cur });
+        removeRequest(cur.id);
+        count += 1;
+        return;
+      }
       const toId = matchManager(r.toName);
       const title = (r.title ?? '').trim();
       if (!toId || !title) return;
@@ -1528,6 +1612,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return team ? { audience: team, label: team } : null;
     };
     (msg.notices ?? []).forEach(nt => {
+      // 삭제(delete): 내가 올린 공지만. id 우선, 없으면 제목으로 식별.
+      if (nt.op === 'delete') {
+        const mine = noticesRef.current.filter(x => x.fromUid === (u?.id ?? ''));
+        const cur = (nt.id ? mine.find(x => x.id === nt.id) : undefined)
+          ?? (nt.title ? mine.find(x => includesEither(x.title, nt.title!.trim())) : undefined);
+        if (!cur) return;
+        undo.deletedNotices!.push({ ...cur });
+        removeNotice(cur.id);
+        count += 1;
+        return;
+      }
       const resolved = resolveAudience(nt.audience);
       const title = (nt.title ?? '').trim();
       if (!resolved || !title) return;
@@ -1562,6 +1657,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const normReminder = (r?: string) => { const v = (r ?? '').trim(); return (['off', '1h', '30m', '10m', 'onTime'].includes(v) ? v : undefined) as InternalEvent['reminder']; };
     (msg.internalEvents ?? []).forEach((iv, i) => {
       const op = iv.op ?? (iv.id ? 'update' : 'add');
+      // ── 기존 내부 일정 삭제 (id 우선, 없으면 제목 일치) ──
+      if (op === 'delete') {
+        const cur = (iv.id ? internalEventsRef.current.find(e => e.id === iv.id) : undefined)
+          ?? (iv.title ? internalEventsRef.current.find(e => e.title === iv.title!.trim()) : undefined);
+        if (!cur) return;
+        undo.deletedInternalEvents!.push({ ...cur });
+        removeInternalEvent(cur.id);
+        count += 1;
+        return;
+      }
       // ── 기존 일정 수정 (참여자는 합쳐서 추가, 제공된 필드만 덮어씀) ──
       if (op === 'update') {
         const cur = (iv.id ? internalEventsRef.current.find(e => e.id === iv.id) : undefined)
@@ -1631,6 +1736,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     (salesAllowed ? (msg.sales ?? []) : []).forEach((s, i) => {
       const op = s.op ?? (s.id ? 'update' : 'add');
+      if (op === 'delete') {
+        const cur = s.id ? salesEntriesRef.current.find(e => e.id === s.id) : findSalesParent(s);
+        if (!cur) return;
+        undo.deletedSales!.push({ ...cur });
+        removeSalesEntry(cur.id);
+        count += 1;
+        return;
+      }
       if (op === 'reply') {
         const parent = findSalesParent(s);
         if (parent && (s.content ?? '').trim()) {
@@ -1700,7 +1813,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
       count += 1;
     });
 
-    mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, applied: count, undo } : m));
+    // 10) 순위 보장 캠페인 추가/수정/삭제 (항목·순위는 일정 연동으로 채워지므로 여기선 캠페인 자체만)
+    const findRankG = (g: { id?: string; clientName?: string; title?: string }) => {
+      if (g.id) { const byId = rankGuaranteesRef.current.find(x => x.id === g.id); if (byId) return byId; }
+      const cn = (g.clientName ?? '').trim(), ti = (g.title ?? '').trim();
+      if (!cn && !ti) return undefined;
+      return rankGuaranteesRef.current.find(x =>
+        (!cn || x.clientName === cn || includesEither(x.clientName, cn)) && (!ti || includesEither(x.title, ti)));
+    };
+    (msg.rankGuarantees ?? []).forEach((g, i) => {
+      const op = g.op ?? (g.id ? 'update' : 'add');
+      if (op === 'delete') {
+        const cur = findRankG(g);
+        if (!cur) return;
+        undo.deletedRankGuarantees!.push({ ...cur });
+        removeRankGuarantee(cur.id);
+        count += 1;
+        return;
+      }
+      if (op === 'update') {
+        const cur = findRankG(g);
+        if (cur) {
+          undo.updatedRankGuaranteesPrev!.push({ ...cur });
+          saveRankGuarantee({ ...cur,
+            title: g.title?.trim() || cur.title,
+            guaranteedCount: typeof g.guaranteedCount === 'number' && g.guaranteedCount > 0 ? g.guaranteedCount : cur.guaranteedCount,
+            alertOffset: typeof g.alertOffset === 'number' && g.alertOffset >= 0 ? g.alertOffset : cur.alertOffset,
+            closed: typeof g.closed === 'boolean' ? g.closed : cur.closed });
+          count += 1;
+          return;
+        }
+        // 매칭 실패 → 신규로 폴백
+      }
+      // add — 업체가 있어야 한다(업체별 캠페인). 없으면 자동 생성.
+      const clientId = ensureClient(g.clientName);
+      const title = (g.title ?? '').trim();
+      if (!clientId || !title) {
+        skipped.push(`순위보장 ${title || g.clientName || ''} — ${!clientId ? '업체 미지정' : '제목 미지정'}`);
+        return;
+      }
+      const rgId = `rg-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`;
+      saveRankGuarantee({
+        id: rgId, clientId, clientName: clientNameOf(clientId) || g.clientName || '',
+        title, guaranteedCount: typeof g.guaranteedCount === 'number' && g.guaranteedCount > 0 ? g.guaranteedCount : 20,
+        alertOffset: typeof g.alertOffset === 'number' && g.alertOffset >= 0 ? g.alertOffset : 2,
+        cycle: 1, closed: g.closed ?? false, status: 'active', items: [],
+        createdAt: nowMs(), updatedAt: nowMs(),
+      });
+      undo.rankGuaranteeIds!.push(rgId);
+      count += 1;
+    });
+
+    mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, applied: count, skipped: skipped.length ? skipped : undefined, undo } : m));
+    // 아무것도 적용 못 했는데 누락 항목이 있으면(예: 업체 미지정으로 드롭) 조용히 끝내지 말고 알린다.
+    if (count === 0 && skipped.length) {
+      pushNotification({ type: 'assistant', title: '적용하지 못한 항목이 있어요', body: skipped[0] + (skipped.length > 1 ? ` 외 ${skipped.length - 1}건` : ''), link: '/schedule/daily' });
+    }
     // 알림은 "적용했다"가 아니라 "무엇이 바뀌었는지" 핵심 내용을 제목·본문에 담는다.
     // 우선순위: 일정 변경(순위·링크 등) → 새 일정 → 삭제 → 내부 일정 → 업무 요청 → 그 외.
     if (count > 0) {
@@ -1738,7 +1906,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       pushNotification({ type: 'assistant', title, body, link });
     }
-  }, [saveClient, removeClient, saveHandover, saveEntries, patchEntry, saveVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, saveInternalEvent, saveInternalCategory, saveSalesEntry, pushNotification, pushStickyNotice, mutateMessages]);
+  }, [saveClient, removeClient, saveHandover, removeHandover, saveEntries, patchEntry, saveVendor, removeVendor, removeEntry, saveAccount, removeAccount, saveSite, removeSite, saveInternalEvent, removeInternalEvent, saveInternalCategory, saveSalesEntry, removeSalesEntry, removeRequest, removeNotice, saveRankGuarantee, removeRankGuarantee, pushNotification, pushStickyNotice, mutateMessages]);
 
   // 직전 적용을 되돌린다(생성한 레코드 제거 + 삭제/수정한 일정 복원)
   const undoAssistantProposal = useCallback((index: number) => {
@@ -1768,10 +1936,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (u.noticeIds ?? []).forEach(id => removeNotice(id)); // 올린 공지 취소
     (u.internalEventIds ?? []).forEach(id => removeInternalEvent(id)); // 생성한 내부 일정 취소
     (u.updatedInternalPrev ?? []).forEach(ev => saveInternalEvent(ev)); // 수정한 내부 일정 복원
+    (u.deletedInternalEvents ?? []).forEach(ev => saveInternalEvent(ev)); // 삭제한 내부 일정 복원
     (u.salesIds ?? []).forEach(id => removeSalesEntry(id)); // 생성한 상담 기록 취소
     (u.updatedSalesPrev ?? []).forEach(e => saveSalesEntry(e)); // 수정한 상담 복원
+    (u.deletedSales ?? []).forEach(e => saveSalesEntry(e)); // 삭제한 상담 복원
+    // 외주사 수정/삭제 되돌리기
+    (u.updatedVendorsPrev ?? []).forEach(v => saveVendor(v));
+    (u.deletedVendors ?? []).forEach(v => saveVendor(v));
+    (u.updatedHandoversPrev ?? []).forEach(h => saveHandover(h)); // 수정한 인수인계 복원
+    // 요청 회수 / 공지 삭제 되돌리기(복원)
+    (u.deletedRequests ?? []).forEach(r => { setRequests(prev => prev.some(x => x.id === r.id) ? prev : [r, ...prev]); persistOne('requests', r); });
+    (u.deletedNotices ?? []).forEach(n => { setNotices(prev => prev.some(x => x.id === n.id) ? prev : [n, ...prev]); persistOne('notices', n); });
+    // 순위 보장 추가/수정/삭제 되돌리기
+    (u.rankGuaranteeIds ?? []).forEach(id => removeRankGuarantee(id)); // 생성한 순위보장 취소
+    (u.updatedRankGuaranteesPrev ?? []).forEach(g => saveRankGuarantee(g)); // 수정한 순위보장 복원
+    (u.deletedRankGuarantees ?? []).forEach(g => saveRankGuarantee(g)); // 삭제한 순위보장 복원
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, undone: true } : m));
-  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, removeAccount, removeSite, saveAccount, saveSite, removeRequest, removeNotice, removeInternalEvent, saveInternalEvent, removeSalesEntry, saveSalesEntry, mutateMessages]);
+  }, [removeEntry, removeVendor, removeHandover, removeClient, saveEntry, saveClient, saveHandover, saveVendor, removeAccount, removeSite, saveAccount, saveSite, removeRequest, removeNotice, removeInternalEvent, saveInternalEvent, removeSalesEntry, saveSalesEntry, removeRankGuarantee, saveRankGuarantee, mutateMessages]);
 
   // 승인된 담당자(manager)·관리자(admin)를 profiles 에서 읽어 드롭다운 목록을 구성
   const reloadMembers = useCallback(async () => {
@@ -2048,6 +2229,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!s || !s.id) return;
         setSalesEntries(prev => prev.some(e => e.id === s.id) ? prev.map(e => e.id === s.id ? s : e) : [s, ...prev]);
       })
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [uid]);
+
+  // 조회용 공유 테이블 실시간 구독(알림 없음): 업체·계정·홈페이지·외주사·인수인계.
+  //  • 트레이 AI 위젯은 메인창과 별개 webview(별개 in-memory state)라, 이 구독이 없으면
+  //    메인창에서 바꾼 홈페이지·업체·계정 정보를 위젯 어시스턴트가 옛 값 그대로 답한다
+  //    (mount 시 1회만 로드되고 새로고침/포커스 재조회가 없으므로).
+  //  • UPDATE/DELETE 전파엔 각 테이블 REPLICA IDENTITY FULL + publication 필요(0021 마이그레이션).
+  useEffect(() => {
+    if (!supabase || !uid) return;
+    const sb = supabase;
+    // id 로 upsert/삭제만 하는 단순 동기화(알림 없음) — 위 schedule/internal 핸들러와 동일한 형태.
+    const sync = <T extends { id: string }>(setter: (fn: (prev: T[]) => T[]) => void) =>
+      (payload: RealtimePostgresChangesPayload<{ id: string; data: T }>) => {
+        if (payload.eventType === 'DELETE') {
+          const oldId = (payload.old as { id?: string })?.id;
+          if (oldId) setter(prev => prev.filter(x => x.id !== oldId));
+          return;
+        }
+        const row = (payload.new as { data?: T })?.data;
+        if (!row || !row.id) return;
+        setter(prev => prev.some(x => x.id === row.id) ? prev.map(x => x.id === row.id ? row : x) : [row, ...prev]);
+      };
+    const channel = sb
+      .channel(`rt-shared-${uid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, sync<Client>(setClients))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounts' }, sync<AccountEntry>(setAccounts))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'site_entries' }, sync<SiteEntry>(setSiteEntries))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vendors' }, sync<Vendor>(setVendors))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'handover_docs' }, sync<HandoverDoc>(setHandoverDocs))
       .subscribe();
     return () => { sb.removeChannel(channel); };
   }, [uid]);
