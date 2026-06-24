@@ -2073,7 +2073,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     // 분리 저장된 이미지(media)를 백그라운드에서 청크로 가져와 목록 객체에 병합한다(최신순 → 자주 보는 것부터).
     //  • 각 청크가 작아 statement timeout 안 남. 목록은 이미 그려져 있고 썸네일만 점진적으로 채워진다.
-    const mergeMedia = async <T extends { id: string }>(table: string, setState: (updater: (prev: T[]) => T[]) => void, orderCol = 'updated_at', CHUNK = 12) => {
+    const mergeMedia = async <T extends { id: string }>(table: string, setState: (updater: (prev: T[]) => T[]) => void, orderCol = 'updated_at', CHUNK = 4) => {
       for (let from = 0; active; from += CHUNK) {
         const { data, error } = await sb.from(table).select('id, media').not('media', 'is', null)
           .order(orderCol, { ascending: false }).range(from, from + CHUNK - 1);
@@ -2104,7 +2104,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     load<InternalCategory>('internal_categories').then(guard(cats => syncLocalFirst('internal_categories', cats, internalCategoriesRef.current, setInternalCategories)));
     // ai_plans: 원격에 있으면 우선(공유본), 비었고 로컬에만 있으면 backfill.
     load<AiPlanResult>('ai_plans').then(guard(plans => {
-      if (plans && plans.length) { setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt)); void mergeMedia('ai_plans', setAiHistory, 'created_at', 4); }
+      if (plans && plans.length) { setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt)); void mergeMedia('ai_plans', setAiHistory, 'created_at', 1); }
       else if (plans && plans.length === 0 && aiHistoryRef.current.length) persistMany('ai_plans', aiHistoryRef.current);
     }));
     // 어시스턴트 대화: 최신순 정렬 후 가장 최근 대화 활성화(RLS 로 본인 것만 조회됨).
