@@ -337,15 +337,20 @@ export default function ClientPortalPage() {
   // ── 일일 AI 인사이트(어제 기준, 하루 1회 생성·캐시) ──
   const [insight, setInsight] = useState<ClientInsight | null>(null);
   const insightKeyRef = useRef<string | null>(null); // 같은 날 키로는 한 번만 처리(중복 호출 방지)
+  // entries 는 렌더마다 새 배열이라 effect 의존성에 넣으면 비동기 도중 재실행→취소가 반복돼 인사이트가
+  // 영원히 안 떴다. ref 로 최신값만 읽고, effect 는 안정적인 키(클라이언트·날짜)로만 재실행한다.
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
   useEffect(() => {
     if (!client || tab !== 'dashboard' || dataLoading) return;
     const clientId = client.id;
+    const clientName = client.name;
     const showDate = TODAY;
     const cacheKey = `${clientId}-${showDate}`;
     if (insightKeyRef.current === cacheKey) return; // 이미 이 날짜로 처리함
     insightKeyRef.current = cacheKey;
 
-    const ie = entries.filter(e => overlapsRange(e, YESTERDAY, YESTERDAY)); // 어제 진행건
+    const ie = entriesRef.current.filter(e => overlapsRange(e, YESTERDAY, YESTERDAY)); // 어제 진행건
     const dl = `어제(${+YESTERDAY.slice(5, 7)}/${+YESTERDAY.slice(8, 10)})`;
     const makeFallback = (): ClientInsight => {
       const c = ruleBasedInsight(ie, dl);
@@ -371,7 +376,7 @@ export default function ClientPortalPage() {
       try {
         const res = await fetch('/api/ai-insight', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ clientName: client.name, dateLabel: dl, entries: ie.map(e => ({ category: e.category, keyword: e.keyword, status: e.status, rank: e.rank, pv: pvOf(e) })) }),
+          body: JSON.stringify({ clientName, dateLabel: dl, entries: ie.map(e => ({ category: e.category, keyword: e.keyword, status: e.status, rank: e.rank, pv: pvOf(e) })) }),
         });
         const ct = res.headers.get('content-type') ?? '';
         if (!res.ok || !ct.includes('application/json')) throw new Error('ai-insight 실패');
@@ -387,7 +392,9 @@ export default function ClientPortalPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [client, isDemo, tab, dataLoading, TODAY, YESTERDAY, entries]);
+    // 안정적인 키만 의존성에 둔다(entries 는 ref 로 읽음 → 비동기 도중 재실행/취소 방지)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client?.id, client?.name, isDemo, tab, dataLoading, TODAY, YESTERDAY]);
 
   if (!client) {
     return (
