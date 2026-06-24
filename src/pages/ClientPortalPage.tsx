@@ -349,7 +349,12 @@ export default function ClientPortalPage() {
     [entries, insightScope.from, insightScope.to],
   );
 
-  const [insight, setInsight] = useState<ClientInsight | null>(null);
+  // 초기값을 localStorage 에서 동기 하이드레이션 → 새로고침 시 캐시된 코멘트가 첫 렌더부터 보임(로딩 플래시 방지).
+  const [insight, setInsight] = useState<ClientInsight | null>(() => {
+    if (isDemo || !clientId) return null;
+    try { const raw = localStorage.getItem(`ci-${clientId}-${preset}-${TODAY}`); return raw ? JSON.parse(raw) as ClientInsight : null; } catch { return null; }
+  });
+  const [generating, setGenerating] = useState(false); // 실제 AI 호출 중일 때만 "생성 중" 표기(오해 방지)
   const insightCacheRef = useRef<Map<string, ClientInsight>>(new Map()); // 범위별 메모리 캐시(전환 시 즉시·중복호출 방지)
   // entries 는 렌더마다 새 배열이라 의존성에 넣으면 비동기 도중 재실행→취소가 반복된다. ref 로 최신값만 읽는다.
   const entriesRef = useRef(entries);
@@ -386,7 +391,8 @@ export default function ClientPortalPage() {
         } catch { /* noop */ }
       }
       if (cancelled) return;
-      // 3) 그 범위·그날 최초 → AI 1회 생성(실패 시 규칙기반 폴백, 저장 안 함 → 재시도 허용)
+      // 3) 그 범위·그날 최초 → AI 1회 생성(이때만 "생성 중" 표기). 실패 시 규칙기반 폴백을 메모리 캐시(세션 내 재호출 방지)
+      if (!cancelled) setGenerating(true);
       try {
         const bd = insightBreakdown(ie);
         const res = await fetch('/api/ai-insight', {
@@ -397,16 +403,21 @@ export default function ClientPortalPage() {
           }),
         });
         const ct = res.headers.get('content-type') ?? '';
-        if (!res.ok || !ct.includes('application/json')) throw new Error('ai-insight 실패');
+        if (!res.ok || !ct.includes('application/json')) { const t = await res.text().catch(() => ''); throw new Error(`HTTP ${res.status} ${t.slice(0, 200)}`); }
         const d = await res.json();
-        if (d.error || typeof d.narrative !== 'string' || !d.narrative.trim()) throw new Error(d.error || '빈 응답');
+        if (d.error || typeof d.narrative !== 'string' || !d.narrative.trim()) throw new Error(d.error ? `${d.error} ${d.detail ?? ''}` : '빈 narrative 응답');
         const row: ClientInsight = { id: key, clientId, preset: aiPreset, showDate: TODAY, rangeFrom: from, rangeTo: to, narrative: d.narrative, aiGenerated: true, createdAt: Date.now() };
         if (cancelled) return;
         remember(row);
         try { localStorage.setItem(lsKey, JSON.stringify(row)); } catch { /* noop */ }
         if (supabase) supabase.from('client_insights').upsert({ id: key, data: row }).then(() => { /* fire&forget */ });
-      } catch {
-        if (!cancelled) setInsight(makeFallback(key, aiPreset)); // 폴백만 표시(캐시 저장 안 함 → 다음에 재시도)
+      } catch (err) {
+        console.warn(`[insight] AI 생성 실패(${aiPreset}) → 규칙기반 대체:`, err); // 실패 사유 확인용
+        const fb = makeFallback(key, aiPreset);
+        insightCacheRef.current.set(key, fb); // 세션 내 재호출 방지(영속 저장은 안 함 → 다음 방문 때 재시도)
+        if (!cancelled) setInsight(fb);
+      } finally {
+        if (!cancelled) setGenerating(false);
       }
     })();
     return () => { cancelled = true; };
@@ -509,7 +520,7 @@ export default function ClientPortalPage() {
             </div>
 
             {/* AI 마케팅 인사이트 — 구조표(정확) + AI 코멘트. 범위(당일=어제/7일/30일)별로 생성 */}
-            <InsightCard breakdown={breakdown} dateLabel={insightScope.label} narrative={insight?.narrative} aiGenerated={insight?.aiGenerated ?? true} />
+            <InsightCard breakdown={breakdown} dateLabel={insightScope.label} narrative={insight?.narrative} aiGenerated={insight?.aiGenerated ?? true} generating={generating} />
 
             {/* Stats */}
             <div className="grid grid-cols-3 gap-4">

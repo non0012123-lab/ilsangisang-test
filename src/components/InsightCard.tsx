@@ -1,7 +1,7 @@
 // 광고주 포털 "AI 마케팅 인사이트" 카드.
 //  • 구조표(카테고리별 건수·순위·링크)는 부모가 실제 데이터에서 계산(insightBreakdown)해 넘긴다 → 항상 정확.
 //  • narrative 는 그 수치를 해석한 AI 코멘트(없으면 생성 중/규칙기반). 링크는 읽기전용 외부 링크.
-import { Sparkles, ExternalLink, Trophy } from 'lucide-react';
+import { Sparkles, ExternalLink, Trophy, Loader2 } from 'lucide-react';
 import type { Category } from '../types';
 import type { InsightBreakdown } from '../utils/clientInsight';
 import { CATEGORY_ICON, catLabel } from '../data/categories';
@@ -11,9 +11,10 @@ interface Props {
   dateLabel: string;       // 예: "어제(6/23)" / "지난 7일"
   narrative?: string;      // AI 코멘트(아직 생성 전이면 undefined)
   aiGenerated?: boolean;
+  generating?: boolean;    // 실제 AI 호출 중일 때만 true → "생성 중" 표기(캐시/로딩 플래시와 구분)
 }
 
-export default function InsightCard({ breakdown, dateLabel, narrative, aiGenerated = true }: Props) {
+export default function InsightCard({ breakdown, dateLabel, narrative, aiGenerated = true, generating = false }: Props) {
   const { total, completed, byCategory, ranked } = breakdown;
   const empty = total === 0;
 
@@ -68,10 +69,12 @@ export default function InsightCard({ breakdown, dateLabel, narrative, aiGenerat
             </div>
           )}
 
-          {/* AI 코멘트(해석·제안) */}
+          {/* AI 코멘트(해석·제안) — 캐시가 있으면 즉시 표시. 진짜 생성 중일 때만 로딩 문구 */}
           {narrative
             ? <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{narrative}</p>
-            : <p className="text-xs text-gray-400">AI 코멘트를 생성하는 중입니다…</p>}
+            : generating
+              ? <p className="text-xs text-gray-400 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> AI 코멘트를 생성하는 중입니다…</p>
+              : null}
         </>
       )}
 
