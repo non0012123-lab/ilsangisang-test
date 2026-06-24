@@ -71,37 +71,49 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     `순위:\n${fmtRanks(ranked)}`,
   ].join('\n\n');
 
-  let aiRes: Response;
+  // ★ 요청이 늘어지면 Cloudflare 가 함수를 죽여 HTML 502 를 내므로, 우리가 먼저 끊고(JSON) 우아하게 폴백되게 한다.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000); // 20s 안에 못 받으면 중단
   try {
-    aiRes = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
-      body: JSON.stringify({
-        model: env.OPENAI_MODEL || 'gpt-5.4-mini',
-        input: [
-          { role: 'developer', content: [{ type: 'input_text', text: developer }] },
-          { role: 'user', content: [{ type: 'input_text', text: userInput }] },
-        ],
-        text: { format: { type: 'json_object' } },
-        reasoning: { effort: 'low' },
-        store: false,
-      }),
-    });
+    let aiRes: Response;
+    try {
+      aiRes = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
+        body: JSON.stringify({
+          model: env.OPENAI_MODEL || 'gpt-5.4-mini',
+          input: [
+            { role: 'developer', content: [{ type: 'input_text', text: developer }] },
+            { role: 'user', content: [{ type: 'input_text', text: userInput }] },
+          ],
+          text: { format: { type: 'json_object' } },
+          reasoning: { effort: 'low' },
+          store: false,
+        }),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      const aborted = (e as Error)?.name === 'AbortError';
+      return json({ error: aborted ? 'OpenAI 응답 지연(20s 초과)으로 중단' : `OpenAI 요청 실패: ${e instanceof Error ? e.message : '네트워크 오류'}` }, 502);
+    }
+
+    if (!aiRes.ok) {
+      const detail = await aiRes.text().catch(() => '');
+      return json({ error: `OpenAI 오류 (${aiRes.status})`, detail: detail.slice(0, 300) }, 502);
+    }
+
+    const data = await aiRes.json();
+    try {
+      const parsed = JSON.parse(extractText(data)) as { narrative?: string };
+      const narrative = typeof parsed.narrative === 'string' ? parsed.narrative : '';
+      return json({ narrative });
+    } catch {
+      return json({ narrative: extractText(data) });
+    }
   } catch (e) {
-    return json({ error: `OpenAI 요청 실패: ${e instanceof Error ? e.message : '네트워크 오류'}` }, 502);
-  }
-
-  if (!aiRes.ok) {
-    const detail = await aiRes.text();
-    return json({ error: `OpenAI 오류 (${aiRes.status})`, detail: detail.slice(0, 300) }, 502);
-  }
-
-  const data = await aiRes.json();
-  try {
-    const parsed = JSON.parse(extractText(data)) as { narrative?: string };
-    const narrative = typeof parsed.narrative === 'string' ? parsed.narrative : '';
-    return json({ narrative });
-  } catch {
-    return json({ narrative: extractText(data) });
+    // 어떤 예기치 못한 오류라도 HTML 502 대신 JSON 으로 반환(클라이언트가 폴백 + 사유 로깅)
+    return json({ error: `인사이트 생성 오류: ${e instanceof Error ? e.message : String(e)}` }, 500);
+  } finally {
+    clearTimeout(timer);
   }
 };
