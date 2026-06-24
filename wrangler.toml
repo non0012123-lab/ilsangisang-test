@@ -5,3 +5,11 @@
 name = "ilsangisang-test"
 pages_build_output_dir = "dist"
 compatibility_date = "2025-05-01"
+
+# Smart Placement — 함수가 호출하는 백엔드(OpenAI, 미국)에 가까운 위치에서 실행되게 한다.
+#  • 문제: Cloudflare 가 함수를 홍콩(HKG) colo 에서 실행하면 OpenAI 가 403(unsupported_country)로 거부 →
+#    /api/ai-* 가 간헐적으로 실패(403→과거 502)했다. 한국 사용자라도 colo 배정에 따라 HKG 로 갈 수 있음.
+#  • Smart Placement 는 OpenAI 호출이 주 작업인 이 함수들을 OpenAI 근처(미국)에서 실행 → 미국에서 egress
+#    → OpenAI 지원 지역으로 인식되어 403 회피. 모든 /api/ai-* (어시스턴트 포함)에 적용.
+[placement]
+mode = "smart"
