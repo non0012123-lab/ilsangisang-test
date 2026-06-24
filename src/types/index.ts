@@ -179,12 +179,13 @@ export interface AssistantConversation {
 // 광고주 포털 대시보드 상단의 "AI 마케팅 인사이트". 당일 화면엔 "어제" 데이터 기준으로 보여준다
 // (오늘 작업은 진행 시각을 알 수 없으므로). showDate(=오늘) 키로 그날 1회만 생성하고 자정까지 캐시한다.
 export interface ClientInsight {
-  id: string;          // `${clientId}-${showDate}`
+  id: string;          // `${clientId}-${preset}-${showDate}` (하루·범위별 1건)
   clientId: string;
-  showDate: string;    // 표시되는 날(YYYY-MM-DD) — 이 키로 하루 1회 생성/캐시
-  insightDate: string; // 데이터 기준일(= 어제)
-  narrative: string;
-  highlights: string[];
+  preset: 'day' | '7d' | '30d'; // 어떤 범위의 인사이트인지
+  showDate: string;    // 생성된 날(YYYY-MM-DD) — 이 키로 하루 1회 생성/캐시
+  rangeFrom: string;   // 데이터 집계 시작일
+  rangeTo: string;     // 데이터 집계 종료일
+  narrative: string;   // AI 코멘트(해석·제안). 구조표(breakdown)는 저장 안 하고 화면에서 live 계산
   aiGenerated: boolean; // AI 성공 여부(false = 규칙기반 폴백)
   createdAt: number;
 }

@@ -19,6 +19,7 @@ interface AppContextType {
   handoverDocs: HandoverDoc[];
   // 첫 로딩(캐시 없음)에서 Supabase 일정 응답이 오기 전까지 true → 빈 화면 대신 스켈레톤 표시용
   dataLoading: boolean;
+  entriesLoaded: boolean;   // 서버에서 일정 데이터 로드 완료(신선) 여부 — 인사이트 생성 게이트
   vendors: Vendor[];
   accounts: AccountEntry[];
   siteEntries: SiteEntry[];
@@ -229,6 +230,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [handoverDocs, setHandoverDocs] = useState<HandoverDoc[]>(() => lsLoad<HandoverDoc>(HANDOVER_LS_KEY));
   // 캐시에 일정이 있으면 즉시 그려지므로 로딩 아님. 캐시가 비었을 때만 첫 Supabase 응답 전까지 로딩.
   const [dataLoading, setDataLoading] = useState<boolean>(() => lsLoad<ScheduleEntry>(SCHEDULE_LS_KEY).length === 0);
+  // 서버에서 schedule_entries 가 실제로 로드 완료됐는지(=신선한 데이터). dataLoading 은 localStorage 캐시 유무로
+  // 시작값이 false 일 수 있어, "서버 갱신 전 인사이트 생성"을 막으려면 별도 플래그가 필요하다.
+  const [entriesLoaded, setEntriesLoaded] = useState<boolean>(false);
   const [vendors, setVendors] = useState<Vendor[]>(loadLocalVendors);
   const [accounts, setAccounts] = useState<AccountEntry[]>(() => lsLoad<AccountEntry>(ACCOUNTS_LS_KEY));
   const [siteEntries, setSiteEntries] = useState<SiteEntry[]>(() => lsLoad<SiteEntry>(SITES_LS_KEY));
@@ -2031,7 +2035,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // 로그인 시 업무 데이터를 Supabase 에서 로드한다(빈 테이블이어도 목업 시드는 하지 않음).
   useEffect(() => {
-    if (!supabase) { setDataLoading(false); return; }  // Supabase 미설정이면 기다릴 게 없음
+    if (!supabase) { setDataLoading(false); setEntriesLoaded(true); return; }  // Supabase 미설정이면 기다릴 게 없음
     if (!uid) return;
     const sb = supabase;
     let active = true;
@@ -2054,7 +2058,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 9개 테이블을 병렬로 조회하되, await Promise.all 로 한꺼번에 기다리지 않는다.
     // 각자 도착하는 즉시 state 를 채워, 대시보드 임계 경로(schedule_entries)가 무거운
     // reports/ai_plans 등을 기다리지 않고 곧바로 그려지게 한다(첫 실데이터 표시 지연 최소화).
-    load<ScheduleEntry>('schedule_entries').then(guard(e0 => { if (e0) setEntries(e0); setDataLoading(false); }));
+    load<ScheduleEntry>('schedule_entries').then(guard(e0 => { if (e0) setEntries(e0); setDataLoading(false); setEntriesLoaded(true); }));
     load<Client>('clients').then(guard(c0 => { if (c0) setClients(c0); }));
     load<HandoverDoc>('handover_docs').then(guard(h0 => { if (h0) setHandoverDocs(h0); }));
     load<Vendor>('vendors').then(guard(v => syncLocalFirst('vendors', v, vendorsRef.current, setVendors)));
@@ -2351,7 +2355,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      entries, clients, handoverDocs, dataLoading, vendors, accounts, siteEntries, reports, members: orderedMembers, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
+      entries, clients, handoverDocs, dataLoading, entriesLoaded, vendors, accounts, siteEntries, reports, members: orderedMembers, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
       aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
       aiImageRunning, aiImageError, startAiImageJob,
       assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, setProposalCategory, undoAssistantProposal,

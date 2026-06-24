@@ -39,6 +39,36 @@ export function insightStats(entries: ScheduleEntry[]): InsightStats {
   return { total, completed, totalPv, topChannel, best, top5, topContent };
 }
 
+// 결정적(정확) 집계 — 카테고리별 건수 + 순위 잡힌 항목(키워드·순위·링크). 화면에서 live 로 계산해 항상 최신.
+export interface InsightBreakdown {
+  total: number;
+  completed: number;
+  byCategory: { category: string; total: number; completed: number }[]; // 건수 많은 순
+  ranked: { category: string; keyword: string; rank: number; link?: string }[]; // 순위 오름차순
+}
+export function insightBreakdown(entries: ScheduleEntry[]): InsightBreakdown {
+  const total = entries.length;
+  const completed = entries.filter(e => e.status === 'completed').length;
+
+  const map = new Map<string, { total: number; completed: number }>();
+  for (const e of entries) {
+    const g = map.get(e.category) ?? { total: 0, completed: 0 };
+    g.total += 1;
+    if (e.status === 'completed') g.completed += 1;
+    map.set(e.category, g);
+  }
+  const byCategory = [...map.entries()]
+    .map(([category, v]) => ({ category, ...v }))
+    .sort((a, b) => b.total - a.total);
+
+  const ranked = entries
+    .filter(e => e.rank != null && e.keyword)
+    .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
+    .map(e => ({ category: e.category, keyword: e.keyword!, rank: e.rank!, link: e.link }));
+
+  return { total, completed, byCategory, ranked };
+}
+
 export interface InsightContent { narrative: string; highlights: string[] }
 
 // 규칙기반 인사이트(브리핑 문단 + 핵심 포인트). dateLabel 예: "어제(6/24)".

@@ -12,8 +12,16 @@ interface Env {
   OPENAI_MODEL?: string;
 }
 
-interface InsightRow { category?: string; keyword?: string; status?: string; rank?: number; pv?: number }
-interface InsightRequest { clientName?: string; dateLabel?: string; entries?: InsightRow[] }
+interface CatRow { category?: string; total?: number; completed?: number }
+interface RankRow { category?: string; keyword?: string; rank?: number }
+interface InsightRequest {
+  clientName?: string;
+  dateLabel?: string;
+  total?: number;
+  completed?: number;
+  byCategory?: CatRow[];
+  ranked?: RankRow[];
+}
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
@@ -33,10 +41,12 @@ function extractText(data: unknown): string {
   return parts.join('\n').trim();
 }
 
-const statusKo = (s?: string) => s === 'completed' ? '완료' : s === 'in-progress' ? '진행중' : '대기';
-const fmtRows = (rows: InsightRow[]) => rows.length
-  ? rows.map(r => `- ${[r.category, r.keyword].filter(Boolean).join(' / ')} (${statusKo(r.status)}${r.rank != null ? `, ${r.rank}위` : ''}${r.pv ? `, 조회 ${r.pv.toLocaleString()}` : ''})`).join('\n')
+const fmtCats = (rows: CatRow[]) => rows.length
+  ? rows.map(r => `- ${r.category ?? '-'}: ${r.total ?? 0}건(완료 ${r.completed ?? 0})`).join('\n')
   : '(없음)';
+const fmtRanks = (rows: RankRow[]) => rows.length
+  ? rows.map(r => `- ${[r.category, r.keyword].filter(Boolean).join(' / ')}: ${r.rank}위`).join('\n')
+  : '(순위 잡힌 항목 없음)';
 
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
@@ -44,17 +54,20 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   let req: InsightRequest;
   try { req = await request.json(); } catch { return json({ error: '잘못된 요청 본문입니다.' }, 400); }
-  const entries = Array.isArray(req.entries) ? req.entries : [];
+  const byCategory = Array.isArray(req.byCategory) ? req.byCategory : [];
+  const ranked = Array.isArray(req.ranked) ? req.ranked : [];
 
   const developer = [
-    '너는 마케팅 대행사가 광고주에게 보여주는 "일일 성과 인사이트"를 쓰는 도우미다. 광고주가 읽기 좋게, 신뢰가 가는 담백한 톤으로 한국어로 작성한다.',
-    '아래 JSON 으로만 응답해(코드펜스 금지): { "narrative": "3~4문장 브리핑", "highlights": ["핵심 포인트", "..."] }',
-    '규칙: 주어진 데이터(집행 건수·완료·채널별 노출·순위)만 근거로 하고 수치를 지어내지 않는다. narrative 는 어제 무엇이 진행됐고 순위/노출이 어떤지 요약하고 마지막에 짧은 다음 제안을 포함한다. highlights 는 2~4개, 각 한 줄(최고 성과 콘텐츠·최고 순위·다음 단계 제안 등). 데이터가 없으면 "어제 집행된 활동이 없다"고 차분히 안내한다.',
+    '너는 마케팅 대행사가 광고주에게 보여주는 성과 인사이트의 "해석 코멘트"를 쓰는 도우미다. 카테고리별 건수·순위 표는 화면에 따로 보여주므로, 너는 그 수치를 단순 나열하지 말고 의미를 해석하고 다음 액션을 제안한다.',
+    '아래 JSON 으로만 응답해(코드펜스 금지): { "narrative": "2~3문장" }',
+    '규칙: 주어진 데이터만 근거로(수치 지어내기 금지). ① 어떤 채널/카테고리가 성과를 견인했는지, ② 순위 성과(상위권 진입 등)의 의미, ③ 구체적인 다음 단계 제안 1가지를 담는다. 표에 이미 있는 숫자를 그대로 반복하기보다 "왜 중요한지/다음에 무엇을"에 집중한다. 데이터가 없으면 "해당 기간 집행된 활동이 없다"고 차분히 안내한다.',
   ].join('\n');
 
   const userInput = [
-    `광고주: ${req.clientName || '-'} / 기준일: ${req.dateLabel || '어제'}`,
-    `집행 내역(${entries.length}건):\n${fmtRows(entries)}`,
+    `광고주: ${req.clientName || '-'} / 기준: ${req.dateLabel || '-'}`,
+    `총 ${req.total ?? 0}건 중 완료 ${req.completed ?? 0}건`,
+    `카테고리별:\n${fmtCats(byCategory)}`,
+    `순위:\n${fmtRanks(ranked)}`,
   ].join('\n\n');
 
   let aiRes: Response;
@@ -84,11 +97,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const data = await aiRes.json();
   try {
-    const parsed = JSON.parse(extractText(data)) as { narrative?: string; highlights?: unknown };
+    const parsed = JSON.parse(extractText(data)) as { narrative?: string };
     const narrative = typeof parsed.narrative === 'string' ? parsed.narrative : '';
-    const highlights = Array.isArray(parsed.highlights) ? parsed.highlights.filter((h): h is string => typeof h === 'string') : [];
-    return json({ narrative, highlights });
+    return json({ narrative });
   } catch {
-    return json({ narrative: extractText(data), highlights: [] });
+    return json({ narrative: extractText(data) });
   }
 };
