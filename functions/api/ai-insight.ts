@@ -73,7 +73,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   // ★ 요청이 늘어지면 Cloudflare 가 함수를 죽여 HTML 502 를 내므로, 우리가 먼저 끊고(JSON) 우아하게 폴백되게 한다.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000); // 20s 안에 못 받으면 중단
+  const timer = setTimeout(() => controller.abort(), 10000); // 10s 안에 못 받으면 중단(Cloudflare 엣지 제한보다 먼저 끊어 HTML 502 방지)
   try {
     let aiRes: Response;
     try {
