@@ -50,10 +50,12 @@ const fmtRanks = (rows: RankRow[]) => rows.length
 
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
-  if (!env.OPENAI_API_KEY) return json({ error: 'OPENAI_API_KEY 가 설정되지 않았습니다.' }, 500);
+  // ★ 에러도 200(JSON)으로 반환한다 — Cloudflare 가 워커의 5xx 응답을 자기 HTML 에러페이지로 바꿔치기해서,
+  //   우리가 만든 JSON 에러가 클라이언트에 안 닿고 항상 HTML 502 만 보이던 문제 때문(클라이언트는 body.error 로 폴백).
+  if (!env.OPENAI_API_KEY) return json({ error: 'OPENAI_API_KEY 가 설정되지 않았습니다.' });
 
   let req: InsightRequest;
-  try { req = await request.json(); } catch { return json({ error: '잘못된 요청 본문입니다.' }, 400); }
+  try { req = await request.json(); } catch { return json({ error: '잘못된 요청 본문입니다.' }); }
   // 입력은 작게 제한(프롬프트·지연 최소화 → 엣지 타임아웃 방지). 인사이트엔 상위 일부면 충분.
   const byCategory = (Array.isArray(req.byCategory) ? req.byCategory : []).slice(0, 12);
   const ranked = (Array.isArray(req.ranked) ? req.ranked : []).slice(0, 15);
@@ -94,12 +96,12 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       });
     } catch (e) {
       const aborted = (e as Error)?.name === 'AbortError';
-      return json({ error: aborted ? 'OpenAI 응답 지연(20s 초과)으로 중단' : `OpenAI 요청 실패: ${e instanceof Error ? e.message : '네트워크 오류'}` }, 502);
+      return json({ error: aborted ? 'OpenAI 응답 지연(10s 초과)으로 중단' : `OpenAI 요청 실패: ${e instanceof Error ? e.message : '네트워크 오류'}` });
     }
 
     if (!aiRes.ok) {
       const detail = await aiRes.text().catch(() => '');
-      return json({ error: `OpenAI 오류 (${aiRes.status})`, detail: detail.slice(0, 300) }, 502);
+      return json({ error: `OpenAI 오류 (${aiRes.status})`, detail: detail.slice(0, 300) });
     }
 
     const data = await aiRes.json();
@@ -111,8 +113,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       return json({ narrative: extractText(data) });
     }
   } catch (e) {
-    // 어떤 예기치 못한 오류라도 HTML 502 대신 JSON 으로 반환(클라이언트가 폴백 + 사유 로깅)
-    return json({ error: `인사이트 생성 오류: ${e instanceof Error ? e.message : String(e)}` }, 500);
+    // 어떤 예기치 못한 오류라도 200(JSON)으로 반환(클라이언트가 폴백 + 사유 로깅)
+    return json({ error: `인사이트 생성 오류: ${e instanceof Error ? e.message : String(e)}` });
   } finally {
     clearTimeout(timer);
   }
