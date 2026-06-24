@@ -54,8 +54,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   let req: InsightRequest;
   try { req = await request.json(); } catch { return json({ error: '잘못된 요청 본문입니다.' }, 400); }
-  const byCategory = Array.isArray(req.byCategory) ? req.byCategory : [];
-  const ranked = Array.isArray(req.ranked) ? req.ranked : [];
+  // 입력은 작게 제한(프롬프트·지연 최소화 → 엣지 타임아웃 방지). 인사이트엔 상위 일부면 충분.
+  const byCategory = (Array.isArray(req.byCategory) ? req.byCategory : []).slice(0, 12);
+  const ranked = (Array.isArray(req.ranked) ? req.ranked : []).slice(0, 15);
 
   const developer = [
     '너는 마케팅 대행사가 광고주에게 보여주는 성과 인사이트의 "해석 코멘트"를 쓰는 도우미다. 카테고리별 건수·순위 표는 화면에 따로 보여주므로, 너는 그 수치를 단순 나열하지 말고 의미를 해석하고 다음 액션을 제안한다.',

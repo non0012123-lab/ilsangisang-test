@@ -399,7 +399,9 @@ export default function ClientPortalPage() {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             clientName, dateLabel: label, total: bd.total, completed: bd.completed,
-            byCategory: bd.byCategory, ranked: bd.ranked.map(r => ({ category: r.category, keyword: r.keyword, rank: r.rank })),
+            // 인사이트는 집계값만 필요 → 입력을 작게(상위 일부만) 보내 OpenAI 응답을 빠르게(큰 범위 7·30일에서 엣지 타임아웃 502 방지)
+            byCategory: bd.byCategory.slice(0, 10),
+            ranked: bd.ranked.slice(0, 12).map(r => ({ category: r.category, keyword: r.keyword, rank: r.rank })),
           }),
         });
         const ct = res.headers.get('content-type') ?? '';
