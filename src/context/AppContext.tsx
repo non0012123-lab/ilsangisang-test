@@ -13,6 +13,12 @@ import { fireDesktop, requestNotifyPermission, isNotifySupported } from '../util
 import { useAuth } from './AuthContext';
 import { CATEGORIES as ASSISTANT_CATEGORIES, normalizeNaverCategory, applyCategoryChoice } from '../data/categories';
 
+// base64 이미지를 jsonb data 에서 분리 저장할 테이블·키 (일괄조회 statement timeout 방지)
+const MEDIA_KEYS: Record<string, string[]> = {
+  schedule_entries: ['images', 'screenshot'],
+  ai_plans: ['images'],
+};
+
 interface AppContextType {
   entries: ScheduleEntry[];
   clients: Client[];
@@ -409,15 +415,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [uid]);
 
   // ── Supabase 영속화 헬퍼 (있으면 비동기로 반영, 실패는 콘솔에만) ──
+  // 무거운 base64 이미지는 data 가 아니라 별도 media 컬럼으로 분리 저장한다(일괄조회 timeout 방지).
+  //  • 목록은 `select id, data`(가벼움)로 즉시 불러오고, 이미지는 백그라운드에서 `select id, media` 로 채운다.
+  const upsertRow = (table: string, row: { id: string }) => {
+    const keys = MEDIA_KEYS[table];
+    if (!keys) return { id: row.id, data: row };
+    const data: Record<string, unknown> = { ...(row as Record<string, unknown>) };
+    const media: Record<string, unknown> = {};
+    for (const k of keys) { if (data[k] !== undefined) media[k] = data[k]; delete data[k]; }
+    return { id: row.id, data, media: Object.keys(media).length ? media : null };
+  };
   const persistOne = (table: string, row: { id: string }) => {
     if (!supabase) return;
-    supabase.from(table).upsert({ id: row.id, data: row }).then(({ error }) => {
+    supabase.from(table).upsert(upsertRow(table, row) as { id: string; data: unknown }).then(({ error }) => {
       if (error) console.error(`[${table}] 저장 실패:`, error.message);
     });
   };
   const persistMany = (table: string, rows: { id: string }[]) => {
     if (!supabase || rows.length === 0) return;
-    supabase.from(table).upsert(rows.map(r => ({ id: r.id, data: r }))).then(({ error }) => {
+    supabase.from(table).upsert(rows.map(r => upsertRow(table, r)) as { id: string; data: unknown }[]).then(({ error }) => {
       if (error) console.error(`[${table}] 저장 실패:`, error.message);
     });
   };
@@ -2055,10 +2071,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (remote && remote.length) { setLocal(remote); return; }
       if (remote && remote.length === 0 && local.length) persistMany(table, local);
     };
+    // 분리 저장된 이미지(media)를 백그라운드에서 청크로 가져와 목록 객체에 병합한다(최신순 → 자주 보는 것부터).
+    //  • 각 청크가 작아 statement timeout 안 남. 목록은 이미 그려져 있고 썸네일만 점진적으로 채워진다.
+    const mergeMedia = async <T extends { id: string }>(table: string, setState: (updater: (prev: T[]) => T[]) => void) => {
+      const CHUNK = 60;
+      for (let from = 0; active; from += CHUNK) {
+        const { data, error } = await sb.from(table).select('id, media').not('media', 'is', null)
+          .order('updated_at', { ascending: false }).range(from, from + CHUNK - 1);
+        if (!active || error || !data || data.length === 0) break;
+        const byId = new Map(data.map(r => [(r as { id: string }).id, (r as { media: Partial<T> }).media]));
+        setState(prev => prev.map(x => byId.has(x.id) ? ({ ...x, ...byId.get(x.id)! }) as T : x));
+        if (data.length < CHUNK) break;
+      }
+    };
     // 9개 테이블을 병렬로 조회하되, await Promise.all 로 한꺼번에 기다리지 않는다.
     // 각자 도착하는 즉시 state 를 채워, 대시보드 임계 경로(schedule_entries)가 무거운
     // reports/ai_plans 등을 기다리지 않고 곧바로 그려지게 한다(첫 실데이터 표시 지연 최소화).
-    load<ScheduleEntry>('schedule_entries').then(guard(e0 => { if (e0) setEntries(e0); setDataLoading(false); setEntriesLoaded(true); }));
+    load<ScheduleEntry>('schedule_entries').then(guard(e0 => { if (e0) setEntries(e0); setDataLoading(false); setEntriesLoaded(true); if (e0) void mergeMedia('schedule_entries', setEntries); }));
     load<Client>('clients').then(guard(c0 => { if (c0) setClients(c0); }));
     load<HandoverDoc>('handover_docs').then(guard(h0 => { if (h0) setHandoverDocs(h0); }));
     load<Vendor>('vendors').then(guard(v => syncLocalFirst('vendors', v, vendorsRef.current, setVendors)));
@@ -2076,7 +2105,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     load<InternalCategory>('internal_categories').then(guard(cats => syncLocalFirst('internal_categories', cats, internalCategoriesRef.current, setInternalCategories)));
     // ai_plans: 원격에 있으면 우선(공유본), 비었고 로컬에만 있으면 backfill.
     load<AiPlanResult>('ai_plans').then(guard(plans => {
-      if (plans && plans.length) setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt));
+      if (plans && plans.length) { setAiHistory([...plans].sort((a, b) => b.createdAt - a.createdAt)); void mergeMedia('ai_plans', setAiHistory); }
       else if (plans && plans.length === 0 && aiHistoryRef.current.length) persistMany('ai_plans', aiHistoryRef.current);
     }));
     // 어시스턴트 대화: 최신순 정렬 후 가장 최근 대화 활성화(RLS 로 본인 것만 조회됨).
@@ -2106,7 +2135,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (oldId) setEntries(prev => prev.filter(e => e.id !== oldId));
           return;
         }
-        const e = (payload.new as { data?: ScheduleEntry })?.data;
+        // 이미지는 media 컬럼에 분리 저장되므로 data+media 를 합쳐 완전한 일정으로 복원(안 그러면 이미지가 사라짐).
+        const rrow = payload.new as { data?: ScheduleEntry; media?: Partial<ScheduleEntry> };
+        const e = rrow?.data ? { ...rrow.data, ...(rrow.media ?? {}) } : undefined;
         if (!e || !e.id) return;
         // 변경(순위·링크·상태·날짜·담당 등): 가지고 있던 건 교체, 없던 내 담당분은 추가. 알림 없음(조용히 반영).
         if (payload.eventType === 'UPDATE') {
