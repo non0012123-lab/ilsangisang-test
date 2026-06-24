@@ -13,8 +13,7 @@ import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
 import { todayStr } from '../utils/today';
 import { ruleBasedInsight, insightBreakdown } from '../utils/clientInsight';
-import { supabase } from '../lib/supabase';
-import type { ScheduleEntry, ClientInsight } from '../types';
+import type { ScheduleEntry } from '../types';
 import { CATEGORIES, catHex } from '../data/categories';
 
 type Tab = 'dashboard' | 'timetable' | 'reports' | 'keywords';
@@ -247,7 +246,7 @@ function ClientCalendar({ entries, hiddenCategories = [] }: { entries: ScheduleE
 
 export default function ClientPortalPage() {
   const { user, logout } = useAuth();
-  const { entries: allEntries, clients, reports: allReports, saveReport, entriesLoaded } = useApp();
+  const { entries: allEntries, clients, reports: allReports, saveReport } = useApp();
   const [tab, setTab] = useState<Tab>('dashboard');
 
   const clientId = user?.clientId ?? '';
@@ -334,98 +333,23 @@ export default function ClientPortalPage() {
     .filter(e => e.category === '네이버 여론작업')
     .sort((a, b) => b.date.localeCompare(a.date));
 
-  // ── AI 인사이트(범위별: 당일=어제 / 7일 / 30일, 각 그날 1회 생성·캐시) ──
+  // ── 마케팅 인사이트(규칙기반) ──
   // 인사이트 데이터 범위. 당일은 '어제' 기준(오늘 작업은 진행 시각 불명), 7일/30일은 그 기간 전체.
-  const aiPreset: 'day' | '7d' | '30d' | null = preset === 'day' || preset === '7d' || preset === '30d' ? preset : null;
+  //  ※ OpenAI 호출은 쓰지 않는다 — Cloudflare 가 한국 요청을 홍콩 colo 에서 실행하면 OpenAI 가 지역 차단(403)
+  //    해 자동·고객노출 기능이 들쭉날쭉해지기 때문. 구조표(카테고리·순위·링크)+규칙기반 코멘트로 항상 안정 표시.
   const insightScope = (() => {
     if (preset === 'day') return { from: YESTERDAY, to: YESTERDAY, label: `어제(${+YESTERDAY.slice(5, 7)}/${+YESTERDAY.slice(8, 10)})` };
     if (preset === '7d') return { from: range.from, to: range.to, label: '지난 7일' };
     if (preset === '30d') return { from: range.from, to: range.to, label: '지난 30일' };
     return { from: range.from, to: range.to, label: rangeLabel }; // custom
   })();
-  // 구조표(카테고리별 건수·순위·링크)는 화면 entries 에서 live 계산 → 데이터가 늦게 로드돼도 항상 정확.
-  const breakdown = useMemo(
-    () => insightBreakdown(entries.filter(e => overlapsRange(e, insightScope.from, insightScope.to))),
+  // 구조표(카테고리별 건수·순위·링크) + 코멘트 모두 화면 entries 에서 live 계산 → 항상 정확, 호출/캐시 불필요.
+  const insightEntries = useMemo(
+    () => entries.filter(e => overlapsRange(e, insightScope.from, insightScope.to)),
     [entries, insightScope.from, insightScope.to],
   );
-
-  // 초기값을 localStorage 에서 동기 하이드레이션 → 새로고침 시 캐시된 코멘트가 첫 렌더부터 보임(로딩 플래시 방지).
-  const [insight, setInsight] = useState<ClientInsight | null>(() => {
-    if (isDemo || !clientId) return null;
-    try { const raw = localStorage.getItem(`ci-${clientId}-${preset}-${TODAY}`); return raw ? JSON.parse(raw) as ClientInsight : null; } catch { return null; }
-  });
-  const [generating, setGenerating] = useState(false); // 실제 AI 호출 중일 때만 "생성 중" 표기(오해 방지)
-  const insightCacheRef = useRef<Map<string, ClientInsight>>(new Map()); // 범위별 메모리 캐시(전환 시 즉시·중복호출 방지)
-  // entries 는 렌더마다 새 배열이라 의존성에 넣으면 비동기 도중 재실행→취소가 반복된다. ref 로 최신값만 읽는다.
-  const entriesRef = useRef(entries);
-  entriesRef.current = entries;
-  useEffect(() => {
-    if (!client || tab !== 'dashboard' || !entriesLoaded) return; // 서버 데이터 로드 후에만 생성(완료건 오표시 방지)
-    const clientId = client.id;
-    const clientName = client.name;
-    const { from, to, label } = insightScope;
-    const ie = entriesRef.current.filter(e => overlapsRange(e, from, to));
-    const makeFallback = (id: string, p: ClientInsight['preset']): ClientInsight => {
-      const c = ruleBasedInsight(ie, label);
-      return { id, clientId, preset: p, showDate: TODAY, rangeFrom: from, rangeTo: to, narrative: c.narrative, aiGenerated: false, createdAt: Date.now() };
-    };
-
-    // 데모·기간지정(custom): AI/캐시 없이 규칙기반 코멘트 즉시
-    if (isDemo || !aiPreset) { setInsight(makeFallback(`${clientId}-${preset}-${TODAY}`, aiPreset ?? 'day')); return; }
-
-    const key = `${clientId}-${aiPreset}-${TODAY}`;
-    const mem = insightCacheRef.current.get(key);
-    if (mem) { setInsight(mem); return; } // 이미 만든 범위 → 즉시(호출 X)
-
-    let cancelled = false;
-    const lsKey = `ci-${key}`;
-    const remember = (row: ClientInsight) => { insightCacheRef.current.set(key, row); if (!cancelled) setInsight(row); };
-    (async () => {
-      // 1) 로컬 캐시
-      try { const raw = localStorage.getItem(lsKey); if (raw) { remember(JSON.parse(raw) as ClientInsight); return; } } catch { /* noop */ }
-      // 2) Supabase 캐시(다른 기기/재로그인에서 이미 생성됐을 수 있음)
-      if (supabase) {
-        try {
-          const { data } = await supabase.from('client_insights').select('data').eq('id', key).maybeSingle();
-          if (!cancelled && data?.data) { const row = data.data as ClientInsight; remember(row); try { localStorage.setItem(lsKey, JSON.stringify(row)); } catch { /* noop */ } return; }
-        } catch { /* noop */ }
-      }
-      if (cancelled) return;
-      // 3) 그 범위·그날 최초 → AI 1회 생성(이때만 "생성 중" 표기). 실패 시 규칙기반 폴백을 메모리 캐시(세션 내 재호출 방지)
-      if (!cancelled) setGenerating(true);
-      try {
-        const bd = insightBreakdown(ie);
-        const res = await fetch('/api/ai-insight', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            clientName, dateLabel: label, total: bd.total, completed: bd.completed,
-            // 인사이트는 집계값만 필요 → 입력을 작게(상위 일부만) 보내 OpenAI 응답을 빠르게(큰 범위 7·30일에서 엣지 타임아웃 502 방지)
-            byCategory: bd.byCategory.slice(0, 10),
-            ranked: bd.ranked.slice(0, 12).map(r => ({ category: r.category, keyword: r.keyword, rank: r.rank })),
-          }),
-        });
-        const ct = res.headers.get('content-type') ?? '';
-        if (!res.ok || !ct.includes('application/json')) { const t = await res.text().catch(() => ''); throw new Error(`HTTP ${res.status} ${t.slice(0, 200)}`); }
-        const d = await res.json();
-        if (d.error || typeof d.narrative !== 'string' || !d.narrative.trim()) throw new Error(d.error ? `${d.error} ${d.detail ?? ''}` : '빈 narrative 응답');
-        const row: ClientInsight = { id: key, clientId, preset: aiPreset, showDate: TODAY, rangeFrom: from, rangeTo: to, narrative: d.narrative, aiGenerated: true, createdAt: Date.now() };
-        if (cancelled) return;
-        remember(row);
-        try { localStorage.setItem(lsKey, JSON.stringify(row)); } catch { /* noop */ }
-        if (supabase) supabase.from('client_insights').upsert({ id: key, data: row }).then(() => { /* fire&forget */ });
-      } catch (err) {
-        console.warn(`[insight] AI 생성 실패(${aiPreset}) → 규칙기반 대체:`, err); // 실패 사유 확인용
-        const fb = makeFallback(key, aiPreset);
-        insightCacheRef.current.set(key, fb); // 세션 내 재호출 방지(영속 저장은 안 함 → 다음 방문 때 재시도)
-        if (!cancelled) setInsight(fb);
-      } finally {
-        if (!cancelled) setGenerating(false);
-      }
-    })();
-    return () => { cancelled = true; };
-    // entries 는 ref 로 읽음. 범위(preset·from·to)·로그인·로드완료 변화에만 재실행.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client?.id, client?.name, isDemo, tab, preset, entriesLoaded, TODAY, insightScope.from, insightScope.to]);
+  const breakdown = useMemo(() => insightBreakdown(insightEntries), [insightEntries]);
+  const insightNarrative = useMemo(() => ruleBasedInsight(insightEntries, insightScope.label).narrative, [insightEntries, insightScope.label]);
 
   if (!client) {
     return (
@@ -522,7 +446,7 @@ export default function ClientPortalPage() {
             </div>
 
             {/* AI 마케팅 인사이트 — 구조표(정확) + AI 코멘트. 범위(당일=어제/7일/30일)별로 생성 */}
-            <InsightCard breakdown={breakdown} dateLabel={insightScope.label} narrative={insight?.narrative} aiGenerated={insight?.aiGenerated ?? true} generating={generating} />
+            <InsightCard breakdown={breakdown} dateLabel={insightScope.label} narrative={insightNarrative} aiGenerated={false} />
 
             {/* Stats */}
             <div className="grid grid-cols-3 gap-4">
