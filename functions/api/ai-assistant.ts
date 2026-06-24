@@ -369,7 +369,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       '  · content: 상담 내용을 그대로(예: "네이버 블로그 관리 문의"). channel: 전화번호/통화면 "phone", 문의폼/이메일이면 "inquiry", 소개/지인 소개로 들어온 건이면 "referral", 그 외 "etc".',
       '  · phone: 사용자가 010 을 빼고 숫자만 말해도 그대로 숫자를 넣는다(시스템이 010 을 붙이고 하이픈을 포맷함). 이메일이 있으면 email 에.',
       '  · sentiment 매핑: "매우긍정"→very_positive, "긍정"→positive, "보통/중립"→neutral, "부정"→negative, "매우부정"→very_negative. 언급 없으면 neutral.',
-      '  · nasLink: "나스 링크/자료 링크/첨부 …" 로 준 URL 은 sales.nasLink 에 넣는다(★ 절대 일정(entries.link)으로 보내지 말 것). consultedAt: "오늘"이면 오늘 날짜, 시간 언급 있으면 함께.',
+      '  · nasLink: "나스 링크/자료 링크/첨부 …" 로 준 URL 은 sales.nasLink 에 넣는다(★ 절대 일정(entries.link)으로 보내지 말 것). consultedAt: 사용자가 시간을 말하면 "YYYY-MM-DD HH:mm"(예: 오후 2시→14:00)로 넣고, 시간 언급이 없으면 날짜만 넣거나 생략한다 — 시스템이 적용(등록) 시각으로 시·분을 자동 기록한다.',
       '  · status: 보통 신규 상담이면 "new". "처리완료/해결"이라 하면 "done", "진행중"이면 "in_progress", "보류"면 "hold", "부재중/안 받음/연결 안 됨"이면 "absent", "계약 가망/가능성 있음/유망"이면 "prospect".',
       '  · ★ 답글(스레드 이어 달기): 사용자가 "○○ 상담 내용 추가해줘"처럼 말할 때, 아래 "상담 목록(영업관리)"에 같은 고객사/전화의 기존 상담이 이미 있으면 새 상담(op:"add")을 만들지 말고 op:"reply" + 그 기존 상담의 id 를 넣어 답글로 단다. content 에 이번에 추가할 내용만 담는다(부모의 다른 필드는 보내지 않는다). 예: 어제 "웹투어" 상담이 있는데 "웹투어 오늘 다시 통화함, 견적 보냄" → sales:[{"op":"reply","id":"웹투어 상담의 id","content":"오늘 다시 통화함, 견적 보냄"}].',
       '  · ★ 업체명을 안 밝히고 전화 뒷자리만 말하는 경우(예: "2077 번호 상담 내용 추가해줘", "뒷번호 2077 …")도, 목록에서 전화가 그 뒷자리로 끝나는 기존 상담을 찾아 op:"reply" + 그 id 로 답글을 단다. 맞는 기존 상담이 없을 때만 op:"add" 로 새로 만든다.',

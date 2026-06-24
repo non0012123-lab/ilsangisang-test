@@ -6,6 +6,24 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { SalesEntry, SalesChannel, SalesSentiment, SalesStatus } from '../types';
 import { toNasForOS } from '../utils/nasPath';
+import { dateTimeMs } from '../utils/today';
+
+// 기간 필터(오늘 기준 과거) — 미래 상담은 없으므로 오늘까지만. 기본값 7일.
+type RangeKey = 'today' | '7' | '30' | 'all';
+const RANGES: { v: RangeKey; label: string; days: number }[] = [
+  { v: 'today', label: '당일', days: 1 },
+  { v: '7', label: '7일', days: 7 },
+  { v: '30', label: '30일', days: 30 },
+  { v: 'all', label: '전체', days: 0 },
+];
+// consultedAt 날짜(YYYY-MM-DD)가 "오늘로부터 며칠 전"인지 (오늘=0, 어제=1 …, 미래=음수)
+const daysAgo = (consultedAt: string | undefined, today: string): number => {
+  const ds = (consultedAt ?? '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ds)) return Infinity;
+  const [y, m, d] = ds.split('-').map(Number);
+  const [ty, tm, td] = today.split('-').map(Number);
+  return Math.round((new Date(ty, tm - 1, td).getTime() - new Date(y, m - 1, d).getTime()) / 86400000);
+};
 
 // 라벨·색상 정의 ─────────────────────────────────────────
 const CHANNELS: { v: SalesChannel; label: string }[] = [
@@ -55,6 +73,7 @@ export default function SalesPage() {
   const [search, setSearch] = useState('');
   const [fStatus, setFStatus] = useState<SalesStatus | '전체'>('전체');
   const [fSent, setFSent] = useState<SalesSentiment | '전체'>('전체');
+  const [fRange, setFRange] = useState<RangeKey>('7'); // 기본 7일
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<Form>(emptyForm);
@@ -95,11 +114,18 @@ export default function SalesPage() {
   }, [salesEntries]);
 
   const q = search.trim().toLowerCase();
-  const filtered = useMemo(() => salesEntries
-    .filter(e => fStatus === '전체' || e.status === fStatus)
-    .filter(e => fSent === '전체' || e.sentiment === fSent)
-    .filter(e => !q || [e.content, e.customerName, e.phone, e.email, e.handlerName, ...(e.replies ?? []).map(r => r.content)].some(v => (v ?? '').toLowerCase().includes(q)))
-    .sort((a, b) => (b.consultedAt ?? '').localeCompare(a.consultedAt ?? '')), [salesEntries, fStatus, fSent, q]);
+  const filtered = useMemo(() => {
+    const t = todayStr();
+    const days = RANGES.find(r => r.v === fRange)?.days ?? 0;
+    return salesEntries
+      .filter(e => fStatus === '전체' || e.status === fStatus)
+      .filter(e => fSent === '전체' || e.sentiment === fSent)
+      // 기간: '전체'면 전부, 아니면 오늘 기준 과거 days일 이내(미래 제외)
+      .filter(e => { if (fRange === 'all') return true; const d = daysAgo(e.consultedAt, t); return d >= 0 && d < days; })
+      .filter(e => !q || [e.content, e.customerName, e.phone, e.email, e.handlerName, ...(e.replies ?? []).map(r => r.content)].some(v => (v ?? '').toLowerCase().includes(q)))
+      // 최신순: 상담 일시(시·분 포함)로 정렬. 'T'/공백/날짜만 섞여도 안정 정렬, 동률이면 등록순.
+      .sort((a, b) => dateTimeMs(b.consultedAt) - dateTimeMs(a.consultedAt) || (b.createdAt - a.createdAt));
+  }, [salesEntries, fStatus, fSent, fRange, q]);
 
   const openAdd = () => { setForm(emptyForm()); setEditId(null); setShowForm(true); };
   const openEdit = (e: SalesEntry) => {
@@ -148,6 +174,15 @@ export default function SalesPage() {
         {/* 필터 + 추가 */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
+            {/* 기간 필터(오늘 기준 과거) — 세그먼트 버튼, 기본 7일 */}
+            <div className="inline-flex items-center bg-gray-100 rounded-xl p-0.5">
+              {RANGES.map(r => (
+                <button key={r.v} onClick={() => setFRange(r.v)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${fRange === r.v ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
             <div className="relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="내용·고객·연락처 검색"

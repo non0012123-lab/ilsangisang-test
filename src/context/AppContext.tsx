@@ -7,7 +7,7 @@ import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMI
 import type { ReminderOption } from '../types';
 import { supabase } from '../lib/supabase';
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
-import { todayStr } from '../utils/today';
+import { todayStr, normDateTime } from '../utils/today';
 import { recurrenceOccurrences } from '../utils/recurrence';
 import { fireDesktop, requestNotifyPermission, isNotifySupported } from '../utils/notifications';
 import { useAuth } from './AuthContext';
@@ -1807,7 +1807,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               id: `slr-${now}-${i}-${Math.random().toString(36).slice(2, 5)}`,
               content: s.content!.trim(),
               handlerId: selfId, handlerName: u?.name ?? '',
-              consultedAt: s.consultedAt || undefined,
+              consultedAt: normDateTime(s.consultedAt), // 시간 누락 시 적용 시각으로 채움
               createdAt: now,
             }],
             updatedAt: now,
@@ -1824,7 +1824,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           undo.updatedSalesPrev!.push({ ...cur });
           saveSalesEntry({
             ...cur,
-            consultedAt: has('consultedAt') && s.consultedAt ? s.consultedAt : cur.consultedAt,
+            consultedAt: has('consultedAt') && s.consultedAt ? normDateTime(s.consultedAt) : cur.consultedAt,
             channel: has('channel') && s.channel ? s.channel : cur.channel,
             phone: has('phone') ? (normSalesPhone(s.phone) ?? cur.phone) : cur.phone,
             email: has('email') ? (s.email?.trim() || undefined) : cur.email,
@@ -1846,7 +1846,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const now = nowMs();
       const ev: SalesEntry = {
         id: `sl-${now}-${i}-${Math.random().toString(36).slice(2, 5)}`,
-        consultedAt: s.consultedAt || `${todayStr()}`,
+        consultedAt: normDateTime(s.consultedAt), // AI 작성도 적용 시각(시·분)까지 기록 — 날짜만/누락이면 현재 시각
+
         handlerId: selfId, handlerName: u?.name ?? '',
         channel: s.channel ?? (s.email ? 'inquiry' : 'phone'),
         phone: normSalesPhone(s.phone),
