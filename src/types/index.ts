@@ -175,6 +175,20 @@ export interface AssistantConversation {
   updatedAt: number;
 }
 
+// ── 클라이언트 포털 일일 인사이트 ───────────────────────
+// 광고주 포털 대시보드 상단의 "AI 마케팅 인사이트". 당일 화면엔 "어제" 데이터 기준으로 보여준다
+// (오늘 작업은 진행 시각을 알 수 없으므로). showDate(=오늘) 키로 그날 1회만 생성하고 자정까지 캐시한다.
+export interface ClientInsight {
+  id: string;          // `${clientId}-${showDate}`
+  clientId: string;
+  showDate: string;    // 표시되는 날(YYYY-MM-DD) — 이 키로 하루 1회 생성/캐시
+  insightDate: string; // 데이터 기준일(= 어제)
+  narrative: string;
+  highlights: string[];
+  aiGenerated: boolean; // AI 성공 여부(false = 규칙기반 폴백)
+  createdAt: number;
+}
+
 export type AccountStatus = 'active' | 'suspended';
 
 // Supabase 인증 + profiles 테이블에서 만들어지는 로그인 사용자

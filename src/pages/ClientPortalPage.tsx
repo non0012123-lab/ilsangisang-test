@@ -7,12 +7,14 @@ import CategoryBadge from '../components/CategoryBadge';
 import ImageGallery from '../components/ImageGallery';
 import KeywordTool from '../components/KeywordTool';
 import MarketingCharts from '../components/MarketingCharts';
-import DemoInsight from '../components/DemoInsight';
+import InsightCard from '../components/InsightCard';
 import { DEMO_CLIENT_ID, DEMO_CLIENT, DEMO_ENTRIES, DEMO_REPORTS } from '../data/demoData';
 import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
 import { todayStr } from '../utils/today';
-import type { ScheduleEntry } from '../types';
+import { ruleBasedInsight, pvOf } from '../utils/clientInsight';
+import { supabase } from '../lib/supabase';
+import type { ScheduleEntry, ClientInsight } from '../types';
 import { CATEGORIES, catHex } from '../data/categories';
 
 type Tab = 'dashboard' | 'timetable' | 'reports' | 'keywords';
@@ -245,7 +247,7 @@ function ClientCalendar({ entries, hiddenCategories = [] }: { entries: ScheduleE
 
 export default function ClientPortalPage() {
   const { user, logout } = useAuth();
-  const { entries: allEntries, clients, reports: allReports, saveReport } = useApp();
+  const { entries: allEntries, clients, reports: allReports, saveReport, dataLoading } = useApp();
   const [tab, setTab] = useState<Tab>('dashboard');
 
   const clientId = user?.clientId ?? '';
@@ -308,14 +310,15 @@ export default function ClientPortalPage() {
   const [customFrom, setCustomFrom] = useState(TODAY);
   const [customTo, setCustomTo] = useState(TODAY);
 
+  const back = (n: number) => { const d = new Date(TODAY + 'T00:00:00'); d.setDate(d.getDate() - n); return fmtLocal(d); };
+  const YESTERDAY = back(1);
   const range = (() => {
-    const back = (n: number) => { const d = new Date(TODAY + 'T00:00:00'); d.setDate(d.getDate() - n); return fmtLocal(d); };
     if (preset === '7d') return { from: back(6), to: TODAY };   // 오늘 포함 지난 7일
     if (preset === '30d') return { from: back(29), to: TODAY }; // 오늘 포함 지난 30일
     if (preset === 'custom') return { from: customFrom, to: customTo };
-    return { from: TODAY, to: TODAY };
+    return { from: YESTERDAY, to: TODAY }; // '당일' = 어제+오늘 (오늘 작업 미진행 시 빈 화면 방지)
   })();
-  const rangeLabel = preset === 'day' ? '오늘' : preset === '7d' ? '지난 7일' : preset === '30d' ? '지난 30일' : `${range.from} ~ ${range.to}`;
+  const rangeLabel = preset === 'day' ? '오늘·어제' : preset === '7d' ? '지난 7일' : preset === '30d' ? '지난 30일' : `${range.from} ~ ${range.to}`;
 
   // 선택 기간에 걸치는(기간 작업 포함) 작업
   const rangeEntries = entries.filter(e => overlapsRange(e, range.from, range.to));
@@ -330,6 +333,61 @@ export default function ClientPortalPage() {
   const opinionEntries = rangeEntries
     .filter(e => e.category === '네이버 여론작업')
     .sort((a, b) => b.date.localeCompare(a.date));
+
+  // ── 일일 AI 인사이트(어제 기준, 하루 1회 생성·캐시) ──
+  const [insight, setInsight] = useState<ClientInsight | null>(null);
+  const insightKeyRef = useRef<string | null>(null); // 같은 날 키로는 한 번만 처리(중복 호출 방지)
+  useEffect(() => {
+    if (!client || tab !== 'dashboard' || dataLoading) return;
+    const clientId = client.id;
+    const showDate = TODAY;
+    const cacheKey = `${clientId}-${showDate}`;
+    if (insightKeyRef.current === cacheKey) return; // 이미 이 날짜로 처리함
+    insightKeyRef.current = cacheKey;
+
+    const ie = entries.filter(e => overlapsRange(e, YESTERDAY, YESTERDAY)); // 어제 진행건
+    const dl = `어제(${+YESTERDAY.slice(5, 7)}/${+YESTERDAY.slice(8, 10)})`;
+    const makeFallback = (): ClientInsight => {
+      const c = ruleBasedInsight(ie, dl);
+      return { id: cacheKey, clientId, showDate, insightDate: YESTERDAY, narrative: c.narrative, highlights: c.highlights, aiGenerated: false, createdAt: Date.now() };
+    };
+    // 데모: AI/캐시 없이 규칙기반으로 즉시
+    if (isDemo) { setInsight(makeFallback()); return; }
+
+    let cancelled = false;
+    const lsKey = `ci-${cacheKey}`;
+    (async () => {
+      // 1) 로컬 캐시
+      try { const raw = localStorage.getItem(lsKey); if (raw) { if (!cancelled) setInsight(JSON.parse(raw) as ClientInsight); return; } } catch { /* noop */ }
+      // 2) Supabase 캐시(다른 기기/재로그인에서 이미 생성됐을 수 있음)
+      if (supabase) {
+        try {
+          const { data } = await supabase.from('client_insights').select('data').eq('id', cacheKey).maybeSingle();
+          if (!cancelled && data?.data) { const row = data.data as ClientInsight; setInsight(row); try { localStorage.setItem(lsKey, JSON.stringify(row)); } catch { /* noop */ } return; }
+        } catch { /* noop */ }
+      }
+      if (cancelled) return;
+      // 3) 그날 최초 → AI 1회 생성(실패 시 규칙기반 폴백, 저장 안 함 → 다음 열람 재시도)
+      try {
+        const res = await fetch('/api/ai-insight', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientName: client.name, dateLabel: dl, entries: ie.map(e => ({ category: e.category, keyword: e.keyword, status: e.status, rank: e.rank, pv: pvOf(e) })) }),
+        });
+        const ct = res.headers.get('content-type') ?? '';
+        if (!res.ok || !ct.includes('application/json')) throw new Error('ai-insight 실패');
+        const d = await res.json();
+        if (d.error || typeof d.narrative !== 'string' || !d.narrative.trim()) throw new Error(d.error || '빈 응답');
+        const row: ClientInsight = { id: cacheKey, clientId, showDate, insightDate: YESTERDAY, narrative: d.narrative, highlights: Array.isArray(d.highlights) ? d.highlights : [], aiGenerated: true, createdAt: Date.now() };
+        if (cancelled) return;
+        setInsight(row);
+        try { localStorage.setItem(lsKey, JSON.stringify(row)); } catch { /* noop */ }
+        if (supabase) supabase.from('client_insights').upsert({ id: cacheKey, data: row }).then(() => { /* fire&forget */ });
+      } catch {
+        if (!cancelled) { setInsight(makeFallback()); insightKeyRef.current = null; } // 폴백 표시 + 가드 해제(재시도 허용)
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [client, isDemo, tab, dataLoading, TODAY, YESTERDAY, entries]);
 
   if (!client) {
     return (
@@ -426,7 +484,7 @@ export default function ClientPortalPage() {
             </div>
 
             {/* AI 인사이트 — 데모 한정. 전문 마케터 브리핑 톤 요약 */}
-            {isDemo && <DemoInsight entries={rangeEntries} rangeLabel={rangeLabel} />}
+            {insight && <InsightCard narrative={insight.narrative} highlights={insight.highlights} dateLabel={`어제(${+insight.insightDate.slice(5, 7)}/${+insight.insightDate.slice(8, 10)})`} aiGenerated={insight.aiGenerated} />}
 
             {/* Stats */}
             <div className="grid grid-cols-3 gap-4">
