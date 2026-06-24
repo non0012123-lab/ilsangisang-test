@@ -12,8 +12,10 @@ import { useAuth } from '../context/AuthContext';
 import { openAiPlanPrint } from '../utils/aiPlanPdf';
 import { todayStr } from '../utils/today';
 import type { Client, Category, HandoverDoc, KeyContact, ImportantLink, BudgetItem, ReportPeriod } from '../types';
+import { CATEGORIES, catLabel } from '../data/categories';
 
-const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업'];
+// 업체 서비스 태그 선택지 — '기타'만 빼고 전체 카테고리(네이버 세부 포함)
+const ALL_CATEGORIES: Category[] = CATEGORIES.filter(c => c !== '기타');
 const STATUS_ORDER: Record<string, number> = { active: 0, pending: 1, inactive: 2 };
 
 const EMPTY_CLIENT: Omit<Client, 'id'> = {
@@ -1045,7 +1047,7 @@ export default function ClientManagementPage() {
                     <button key={cat} onClick={() => toggleCategory(cat)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                         form.categories.includes(cat) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
-                      }`}>{cat}</button>
+                      }`}>{catLabel(cat)}</button>
                   ))}
                 </div>
               </div>

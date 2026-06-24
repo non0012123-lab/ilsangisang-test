@@ -6,6 +6,7 @@ import ImageDropzone from './ImageDropzone';
 import ImageThumb from './ImageThumb';
 import { MAX_IMAGES, entryImages } from '../utils/entryImages';
 import { recurrenceOccurrences } from '../utils/recurrence';
+import { CATEGORY_GROUPS, CATEGORY_METRICS, catLabel } from '../data/categories';
 
 // 반복 옵션(UI) → Recurrence 규칙 매핑. 'none' 이면 반복 없음(단건).
 type RecurOpt = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
@@ -31,23 +32,11 @@ const buildRecurrence = (opt: RecurOpt, startStr: string, count: number, until?:
   return { freq: 'monthly', interval: 1, day: d, ...base }; // monthly
 };
 
-const CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 const STATUSES: { value: ScheduleStatus; label: string }[] = [
   { value: 'pending', label: '대기중' },
   { value: 'in-progress', label: '진행중' },
   { value: 'completed', label: '완료' },
 ];
-
-// Category → relevant AI metrics
-const METRIC_FIELDS: Record<string, { key: keyof AIMetrics; label: string }[]> = {
-  SNS:            [{ key: 'impressions', label: '노출수' }, { key: 'reach', label: '도달수' }, { key: 'likes', label: '좋아요' }, { key: 'comments', label: '댓글수' }, { key: 'saves', label: '저장수' }, { key: 'shares', label: '공유수' }, { key: 'followers', label: '팔로워 증가' }],
-  유튜브:         [{ key: 'views', label: '조회수' }, { key: 'likes', label: '좋아요' }, { key: 'comments', label: '댓글수' }, { key: 'subscribers', label: '구독자 증가' }, { key: 'watchTime', label: '평균 시청시간' }],
-  네이버:         [{ key: 'blogViews', label: '블로그 조회수' }, { key: 'cafeViews', label: '카페 조회수' }, { key: 'clicks', label: '클릭수' }, { key: 'comments', label: '댓글수' }],
-  영상제작:       [{ key: 'views', label: '조회수' }, { key: 'likes', label: '좋아요' }, { key: 'comments', label: '댓글수' }],
-  디자인제작:     [{ key: 'impressions', label: '노출수' }, { key: 'saves', label: '저장수' }, { key: 'clicks', label: '클릭수' }],
-  '네이버 여론작업': [{ key: 'views', label: '조회수' }, { key: 'comments', label: '댓글수' }],
-  기타:           [{ key: 'views', label: '조회수' }, { key: 'clicks', label: '클릭수' }],
-};
 
 const IS_OPINION = (cat: Category) => cat === '네이버 여론작업';
 
@@ -169,7 +158,7 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
 
   const managers = members;
   const isOpinion = IS_OPINION(form.category as Category);
-  const metricFields = METRIC_FIELDS[form.category ?? 'SNS'] ?? [];
+  const metricFields = CATEGORY_METRICS[form.category ?? 'SNS'] ?? [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -271,7 +260,11 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
               <label className="block text-xs font-semibold text-gray-600 mb-1">카테고리 *</label>
               <select value={form.category} onChange={e => set('category', e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {CATEGORY_GROUPS.map(g => (
+                  <optgroup key={g.label} label={g.label}>
+                    {g.items.map(c => <option key={c} value={c}>{catLabel(c)}</option>)}
+                  </optgroup>
+                ))}
               </select>
             </div>
             {!isOpinion && (

@@ -1,4 +1,8 @@
-export type Category = 'SNS' | '유튜브' | '네이버' | '영상제작' | '디자인제작' | '네이버 여론작업' | '기타';
+export type Category =
+  | 'SNS' | '유튜브' | '네이버'
+  | '블로그 상위노출' | '블로그관리' | '블로그 배포'
+  | '카페 상위노출' | '카페 배포' | '클립'
+  | '영상제작' | '디자인제작' | '네이버 여론작업' | '기타';
 export type ScheduleStatus = 'pending' | 'in-progress' | 'completed';
 export type UserRole = 'admin' | 'manager' | 'client' | 'pending';
 
@@ -65,7 +69,11 @@ export interface AiPlanResult {
 
 // ── 대시보드 AI 어시스턴트 ──
 // 어시스턴트가 제안하는 액션들 (사용자가 "적용" 해야 반영됨)
-export interface AssistantProposalEntry { date?: string; endDate?: string | null; managerName?: string; clientName?: string; category?: string; keyword?: string; status?: string; link?: string; rank?: number | string; recurrence?: Recurrence }
+// categoryOptions: 블로그/카페처럼 어느 세부 카테고리인지 모호할 때 후보들(예: ["블로그 상위노출","카페 상위노출"]).
+// 있으면 제안 카드에서 클릭해 고르게 하고, 고른 값이 category 로 확정된다.
+// categorySignal: 키워드에서 떼어낸 업무 신호어(예: "관리"). 후보 중 '기타'를 고르면(=카테고리가 업무를
+//   못 담으므로) 이 신호어를 키워드에 되돌려 붙인다(예: "홈페이지" → "홈페이지 관리").
+export interface AssistantProposalEntry { date?: string; endDate?: string | null; managerName?: string; clientName?: string; category?: string; categoryOptions?: string[]; categorySignal?: string; keyword?: string; status?: string; link?: string; rank?: number | string; recurrence?: Recurrence }
 // 변경 대상 식별: id 가 1순위지만, AI 가 긴 내부 id 를 틀리게 옮기는 경우가 많아
 // clientName·keyword·matchDate(=대상 일정의 날짜) 로도 기존 일정을 찾을 수 있게 한다.
 export interface AssistantProposalUpdate { id?: string; clientName?: string; keyword?: string; matchDate?: string | null; date?: string | null; endDate?: string | null; managerName?: string | null; status?: string | null; link?: string | null; rank?: number | string | null }

@@ -13,13 +13,11 @@ import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
 import { todayStr } from '../utils/today';
 import type { ScheduleEntry } from '../types';
+import { CATEGORIES, catHex } from '../data/categories';
 
 type Tab = 'dashboard' | 'timetable' | 'reports' | 'keywords';
 
-const CAT_COLOR: Record<string, string> = {
-  'SNS': '#ec4899', '유튜브': '#ef4444', '네이버': '#22c55e',
-  '영상제작': '#a855f7', '디자인제작': '#f97316', '네이버 여론작업': '#0ea5e9', '기타': '#6b7280',
-};
+const CAT_COLOR: Record<string, string> = Object.fromEntries(CATEGORIES.map(c => [c, catHex(c)]));
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 function getCalDays(year: number, month: number) {

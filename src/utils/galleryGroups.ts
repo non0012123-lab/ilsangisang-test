@@ -1,5 +1,6 @@
 import type { ScheduleEntry, Category, ImageKind } from '../types';
 import { entryImages } from './entryImages';
+import { CATEGORIES as ORDER } from '../data/categories';
 
 // 갤러리에 표시할 이미지 1장 + 출처(어떤 일정인지) 정보
 export interface GalleryImage {
@@ -16,8 +17,6 @@ export interface GalleryGroup {
   design: GalleryImage[];
   insight: GalleryImage[];
 }
-
-const ORDER: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 
 // 일정들의 첨부 이미지를 매체(카테고리)별로 모으고, 각 매체 안에서 시안/인사이트로 분리한다.
 export function buildGalleryGroups(entries: ScheduleEntry[]): GalleryGroup[] {

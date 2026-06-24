@@ -3,8 +3,24 @@ import type { ReactNode } from 'react';
 import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall, CornerDownRight, Megaphone, Target } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import type { AssistantMessage } from '../types';
+import type { AssistantMessage, AssistantProposalEntry, Category } from '../types';
 import { toNasForOS } from '../utils/nasPath';
+import { CATEGORIES, catLabel } from '../data/categories';
+
+// 블로그/카페처럼 어느 세부 카테고리인지 모호할 때 보여줄 후보들.
+//  ① AI 가 categoryOptions 를 주면 그대로 사용  ② 안 주면 category 가 모호('네이버'/'기타'/빈값)인데
+//     키워드/카테고리에 "상위노출"·"배포"가 보이면 클라이언트에서 후보를 제시(폴백).
+const VALID_CATS = new Set<string>(CATEGORIES);
+function ambiguousChoices(e: AssistantProposalEntry): string[] {
+  const fromAI = (e.categoryOptions ?? []).filter(c => VALID_CATS.has(c));
+  if (fromAI.length >= 2) return fromAI;
+  const generic = !e.category || e.category === '네이버' || e.category === '기타';
+  if (!generic) return [];
+  const text = `${e.category ?? ''} ${e.keyword ?? ''}`;
+  if (/상위\s*노출|상노|상위/.test(text)) return ['블로그 상위노출', '카페 상위노출'];
+  if (/배포/.test(text)) return ['블로그 배포', '카페 배포'];
+  return [];
+}
 
 const relTime = (ts: number): string => {
   const min = Math.floor((Date.now() - ts) / 60000);
@@ -54,7 +70,7 @@ const EXAMPLES = [
 export default function DashboardAssistant({ variant = 'full' }: { variant?: 'full' | 'widget' } = {}) {
   const isWidget = variant === 'widget';
   const {
-    entries, accounts, siteEntries, assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
+    entries, accounts, siteEntries, assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, setProposalCategory, undoAssistantProposal,
     conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
   } = useApp();
   const { user } = useAuth();
@@ -322,16 +338,32 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                         </div>
                       );
                     })}
-                    {(m.entries ?? []).map((e, i) => (
+                    {(m.entries ?? []).map((e, i) => {
+                      const choices = m.applied == null ? ambiguousChoices(e) : [];
+                      const chosen = choices.includes(e.category ?? '') ? e.category : undefined;
+                      return (
                       <div key={`e${i}`} className="flex items-start gap-2 text-xs text-gray-700">
                         <CalendarPlus size={13} className="text-purple-500 shrink-0 mt-0.5" />
                         <span>
-                          <strong>{e.recurrence ? '반복 일정' : '신규 일정'}</strong> {e.date}{e.endDate && e.endDate !== 'null' ? `~${e.endDate}` : ''} · {e.managerName || selfName} · {e.clientName || '업체?'} · {e.category || '기타'}
+                          <strong>{e.recurrence ? '반복 일정' : '신규 일정'}</strong> {e.date}{e.endDate && e.endDate !== 'null' ? `~${e.endDate}` : ''} · {e.managerName || selfName} · {e.clientName || '업체?'}
+                          {choices.length === 0 && ` · ${catLabel((e.category ?? '기타') as Category)}`}
                           {e.keyword ? ` · ${e.keyword}` : ''}{e.status && e.status !== 'pending' ? ` (${STATUS_LABEL[e.status] ?? e.status})` : ''}{e.link ? ' · 🔗 링크' : ''}
                           {e.recurrence && <span className="ml-1 inline-flex items-center gap-0.5 text-blue-600 font-medium">🔁 {recurLabel(e.recurrence)}</span>}
+                          {choices.length > 0 && (
+                            <span className="mt-1 flex flex-wrap items-center gap-1">
+                              <span className="text-[11px] text-amber-600 font-medium">어디에 등록할까요?</span>
+                              {choices.map(c => (
+                                <button key={c} onClick={() => setProposalCategory(idx, i, c)}
+                                  className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border transition-colors ${
+                                    chosen === c ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-600 border-gray-300 hover:border-purple-400'
+                                  }`}>{catLabel(c as Category)}</button>
+                              ))}
+                            </span>
+                          )}
                         </span>
                       </div>
-                    ))}
+                      );
+                    })}
                     {(m.updates ?? []).map((u, i) => {
                       // id 가 틀려도 보조필드(업체·키워드·날짜)로 대상을 찾아 미리보기에 표시한다(적용 로직과 동일 기준).
                       const incl = (a?: string, b?: string) => !!a && !!b && (a.includes(b) || b.includes(a));

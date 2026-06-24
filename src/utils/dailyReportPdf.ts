@@ -16,14 +16,11 @@ export interface DailyReportData {
   groups: { pending: DailyReportRow[]; inProgress: DailyReportRow[]; completed: DailyReportRow[] };
 }
 
+import { catHex } from '../data/categories';
+
 function esc(s: string): string {
   return (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
-
-const CAT_COLOR: Record<string, string> = {
-  'SNS': '#ec4899', '유튜브': '#ef4444', '네이버': '#22c55e',
-  '영상제작': '#a855f7', '디자인제작': '#f97316', '네이버 여론작업': '#0ea5e9', '기타': '#6b7280',
-};
 
 function section(title: string, accent: string, rows: DailyReportRow[]): string {
   const body = rows.length === 0
@@ -32,7 +29,7 @@ function section(title: string, accent: string, rows: DailyReportRow[]): string 
       <tr style="border-top:1px solid #f1f5f9;">
         <td style="padding:8px 12px;font-size:12px;color:#6b7280;white-space:nowrap;">${esc(r.date)}</td>
         <td style="padding:8px 12px;font-size:12px;color:#111827;">
-          <span style="display:inline-block;font-size:11px;font-weight:600;color:#fff;background:${CAT_COLOR[r.category] ?? '#6b7280'};padding:1px 7px;border-radius:9px;margin-right:6px;">${esc(r.category)}</span>
+          <span style="display:inline-block;font-size:11px;font-weight:600;color:#fff;background:${catHex(r.category)};padding:1px 7px;border-radius:9px;margin-right:6px;">${esc(r.category)}</span>
           <strong>${esc(r.clientName)}</strong>
         </td>
         <td style="padding:8px 12px;font-size:12px;color:#374151;">${esc(r.title) || '-'}</td>

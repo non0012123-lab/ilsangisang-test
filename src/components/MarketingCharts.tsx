@@ -3,13 +3,7 @@
 //       같은 데이터가 다시 계산되어 그래프가 자동으로 움직인다.
 import { useMemo } from 'react';
 import type { ScheduleEntry } from '../types';
-
-// 채널(카테고리) 색상 — ClientPortalPage 의 범례(CAT_COLOR)와 동일 팔레트
-const CHANNEL_COLORS: Record<string, string> = {
-  'SNS': '#ec4899', '유튜브': '#ef4444', '네이버': '#22c55e',
-  '영상제작': '#a855f7', '디자인제작': '#f97316', '네이버 여론작업': '#0ea5e9', '기타': '#6b7280',
-};
-const colorOf = (c: string) => CHANNEL_COLORS[c] ?? '#6b7280';
+import { catHex as colorOf } from '../data/categories';
 
 // 업무에서 PV(조회수) 추출 — views 우선, 없으면 블로그/카페 조회 합산
 function pvOf(e: ScheduleEntry): number {

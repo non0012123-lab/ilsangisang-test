@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, Notice, NoticeAudience, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply, AssistantProposalUpdate, RankGuarantee, RankGuaranteeItem } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, Notice, NoticeAudience, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply, AssistantProposalUpdate, AssistantProposalEntry, RankGuarantee, RankGuaranteeItem } from '../types';
 import { deriveStatus, countAchieved } from '../utils/rankGuarantee';
 import { USERS } from '../data/mockData';
 import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
@@ -11,8 +11,7 @@ import { todayStr } from '../utils/today';
 import { recurrenceOccurrences } from '../utils/recurrence';
 import { fireDesktop, requestNotifyPermission, isNotifySupported } from '../utils/notifications';
 import { useAuth } from './AuthContext';
-
-const ASSISTANT_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
+import { CATEGORIES as ASSISTANT_CATEGORIES, normalizeNaverCategory, applyCategoryChoice } from '../data/categories';
 
 interface AppContextType {
   entries: ScheduleEntry[];
@@ -45,6 +44,8 @@ interface AppContextType {
   assistantLoading: boolean;
   runAssistant: (text: string) => Promise<void>;
   applyAssistantProposal: (index: number) => void;
+  // 모호한 카테고리(블로그/카페 등)를 사용자가 칩으로 골랐을 때 제안 entry 의 category 를 확정
+  setProposalCategory: (messageIndex: number, entryIndex: number, category: string) => void;
   undoAssistantProposal: (index: number) => void;
   // 대화 기록 관리 (대화목록 + 새 채팅 + 삭제)
   conversations: AssistantConversation[];
@@ -987,6 +988,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     persistDelete('assistant_conversations', id);
   }, []);
 
+  // 제안 카드에서 모호한 카테고리(블로그/카페)를 클릭으로 확정 — 해당 entry 의 category 만 교체(아직 미적용일 때)
+  const setProposalCategory = useCallback((messageIndex: number, entryIndex: number, category: string) => {
+    const convId = activeConversationIdRef.current;
+    if (!convId) return;
+    mutateMessages(convId, prev => prev.map((m, i) => {
+      if (i !== messageIndex || m.applied != null || !m.entries) return m;
+      return { ...m, entries: m.entries.map((e, j) => {
+        if (j !== entryIndex) return e;
+        // '기타' 선택 시 신호어("관리")를 키워드에 되살리고, 구체 카테고리면 떼어 둔다
+        const { keyword } = applyCategoryChoice(e.keyword, e.categorySignal, category);
+        return { ...e, category, keyword };
+      }) };
+    }));
+  }, [mutateMessages]);
+
   // 개별 메시지 삭제 (어시스턴트의 장황한 답변 등 정리용)
   const deleteAssistantMessage = useCallback((index: number) => {
     const convId = activeConversationIdRef.current;
@@ -1196,10 +1212,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
       const keywords: string[] = Array.isArray(data.keywords) ? data.keywords.filter((k: unknown) => typeof k === 'string' && k.trim()) : [];
+      // 네이버 줄임말 보정: "관리"→블로그관리, "상노"→상위노출(블로그/카페 후보), 키워드에 섞인 신호어 제거
+      const normEntries: AssistantProposalEntry[] = (Array.isArray(data.entries) ? data.entries : []).map((e: AssistantProposalEntry) => {
+        const n = normalizeNaverCategory(e.category, e.keyword, e.categoryOptions);
+        if (Object.keys(n).length === 0) return e; // 네이버 신호 없음/비네이버 → 그대로
+        return { ...e, category: n.category ?? e.category, categoryOptions: n.categoryOptions, categorySignal: n.categorySignal, keyword: n.keyword };
+      });
       mutateMessages(convId, prev => [...prev, {
         role: 'assistant',
         text: data.reply || '(응답이 비어 있습니다)',
-        entries: Array.isArray(data.entries) ? data.entries : [],
+        entries: normEntries,
         updates: Array.isArray(data.updates) ? data.updates : [],
         clients: Array.isArray(data.clients) ? data.clients : [],
         handovers: Array.isArray(data.handovers) ? data.handovers : [],
@@ -1437,7 +1459,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         skipped.push(`${e.keyword || e.category || '일정'}${e.date && e.date !== 'null' ? ` ${e.date}` : ''} — ${why}`);
         return;
       }
-      const category = ((ASSISTANT_CATEGORIES as string[]).includes(e.category ?? '') ? e.category : (ASSISTANT_CATEGORIES.find(c => e.category?.includes(c)) ?? '기타')) as Category;
+      // 정확일치 우선. 폴백은 긴(구체적) 카테고리부터 매칭해 '네이버'가 '블로그관리' 등을 삼키지 않게 한다.
+      const category = ((ASSISTANT_CATEGORIES as string[]).includes(e.category ?? '')
+        ? e.category
+        : ([...ASSISTANT_CATEGORIES].sort((a, b) => b.length - a.length).find(c => e.category?.includes(c)) ?? '기타')) as Category;
       const endDate = e.endDate && e.endDate !== 'null' && e.endDate > e.date ? e.endDate : undefined;
       const base = {
         managerId, managerName,
@@ -2319,7 +2344,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       entries, clients, handoverDocs, dataLoading, vendors, accounts, siteEntries, reports, members: orderedMembers, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
       aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
       aiImageRunning, aiImageError, startAiImageJob,
-      assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, undoAssistantProposal,
+      assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, setProposalCategory, undoAssistantProposal,
       conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
       saveEntry, saveEntries, patchEntry, removeEntry, removeSeries, saveClient, removeClient, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,

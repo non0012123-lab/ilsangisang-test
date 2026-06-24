@@ -1,19 +1,12 @@
-import type { Report, Client, ScheduleEntry } from '../types';
+import type { Report, Client, ScheduleEntry, Category } from '../types';
 import { overlapsRange, isMultiDay, entryEnd } from './dateRange';
 import { entryImages } from './entryImages';
 import { buildGalleryGroups } from './galleryGroups';
+import { catHex as categoryColor, catLabel, CATEGORY_ICON, NAVER_FAMILY } from '../data/categories';
 
 function num(n: number | undefined) {
   if (!n) return '-';
   return n.toLocaleString('ko-KR');
-}
-
-function categoryColor(cat: string): string {
-  const map: Record<string, string> = {
-    'SNS': '#ec4899', '유튜브': '#ef4444', '네이버': '#22c55e',
-    '영상제작': '#a855f7', '디자인제작': '#f97316', '네이버 여론작업': '#0ea5e9', '기타': '#6b7280',
-  };
-  return map[cat] ?? '#6b7280';
 }
 
 function statusLabel(s: string) {
@@ -39,6 +32,11 @@ export function buildReportHtml(report: Report, client: Client, allEntries: Sche
 
   const completedCount = clientEntries.filter(e => e.status === 'completed').length;
   const totalCount = clientEntries.length;
+
+  // 네이버 마케팅 세부 — 계열(블로그/카페/클립 등)별 건수 집계(작업이 있는 항목만)
+  const naverBreakdown = NAVER_FAMILY
+    .map(cat => ({ cat, count: clientEntries.filter(e => e.category === cat).length }))
+    .filter(x => x.count > 0);
 
   const totalViews = clientEntries.reduce((s, e) => s + (e.metrics?.views ?? 0) + (e.metrics?.blogViews ?? 0), 0);
   const totalLikes = clientEntries.reduce((s, e) => s + (e.metrics?.likes ?? 0), 0);
@@ -204,6 +202,20 @@ export function buildReportHtml(report: Report, client: Client, allEntries: Sche
         </div>
       `).join('')}
     </div>
+
+    <!-- 네이버 마케팅 세부 -->
+    ${naverBreakdown.length ? `
+    <p style="font-size:11px;font-weight:700;color:#6b7280;letter-spacing:2px;margin-bottom:12px;">네이버 마케팅 세부</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px;">
+      ${naverBreakdown.map(({ cat, count }) => {
+        const color = categoryColor(cat);
+        const icon = CATEGORY_ICON[cat as Category] ?? '';
+        return `<div style="display:flex;align-items:center;gap:6px;background:${color}14;border:1px solid ${color}33;border-radius:10px;padding:8px 12px;">
+          <span style="font-size:13px;font-weight:700;color:${color};">${icon} ${catLabel(cat)}</span>
+          <span style="font-size:13px;font-weight:700;color:#111827;">${count}건</span>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
 
     <!-- Highlights -->
     ${highlightRows ? `

@@ -16,8 +16,7 @@ import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
 import { coversDate, isMultiDay, fmtLocal } from '../utils/dateRange';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
-
-const ALL_CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
+import { CATEGORY_GROUPS, catLabel } from '../data/categories';
 
 function toDateStr(d: Date) { return fmtLocal(d); }
 
@@ -149,7 +148,11 @@ export default function DailySchedulePage() {
                 <select value={filterCategory} onChange={e => setFilterCategory(e.target.value as Category | 'all')}
                   className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="all">전체</option>
-                  {ALL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  {CATEGORY_GROUPS.map(g => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.items.map(c => <option key={c} value={c}>{catLabel(c)}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
               </div>
               <div>

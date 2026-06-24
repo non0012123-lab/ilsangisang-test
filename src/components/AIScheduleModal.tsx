@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { X, Sparkles, AlertTriangle, Trash2, CalendarPlus } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
+import type { ScheduleEntry, ScheduleStatus, Category } from '../types';
+import { CATEGORIES, CATEGORY_GROUPS, catLabel, normalizeNaverCategory } from '../data/categories';
 
-const CATEGORIES: Category[] = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
 const STATUSES: { value: ScheduleStatus; label: string }[] = [
   { value: 'pending', label: '대기중' },
   { value: 'in-progress', label: '진행중' },
@@ -53,8 +53,12 @@ export default function AIScheduleModal({ onClose, onAdd }: Props) {
     const part = activeClients.find(c => name.includes(c.name) || c.name.includes(name));
     return part?.id ?? '';
   };
-  const matchCategory = (name: string): string =>
-    (CATEGORIES as string[]).includes(name) ? name : (CATEGORIES.find(c => name?.includes(c)) ?? '기타');
+  // 정확일치 우선. 폴백은 가장 긴(=가장 구체적인) 카테고리부터 매칭해 '네이버'가 '블로그관리'를 삼키지 않게 한다.
+  const matchCategory = (name: string): string => {
+    if ((CATEGORIES as string[]).includes(name)) return name;
+    const byLen = [...CATEGORIES].sort((a, b) => b.length - a.length);
+    return byLen.find(c => name?.includes(c)) ?? '기타';
+  };
 
   const analyze = async () => {
     if (!text.trim()) return;
@@ -77,16 +81,23 @@ export default function AIScheduleModal({ onClose, onAdd }: Props) {
       }
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
-      const parsed: Draft[] = (Array.isArray(data.entries) ? data.entries : []).map((e: Record<string, unknown>, i: number) => ({
-        tempId: `${Date.now()}-${i}`,
-        date: (e.date as string) ?? '',
-        endDate: (e.endDate as string) && (e.endDate as string) !== 'null' ? (e.endDate as string) : '',
-        managerId: matchManager((e.managerName as string) ?? '') || selfId,
-        clientId: matchClient((e.clientName as string) ?? ''),
-        category: matchCategory((e.category as string) ?? ''),
-        keyword: (e.keyword as string) ?? '',
-        status: (['pending', 'in-progress', 'completed'].includes(e.status as string) ? e.status : 'pending') as ScheduleStatus,
-      }));
+      const parsed: Draft[] = (Array.isArray(data.entries) ? data.entries : []).map((e: Record<string, unknown>, i: number) => {
+        // 네이버 줄임말 보정(관리→블로그관리, 상노→상위노출 등) + 키워드에 섞인 신호어 제거
+        const rawCat = (e.category as string) ?? '';
+        const rawKw = (e.keyword as string) ?? '';
+        const n = normalizeNaverCategory(rawCat, rawKw);
+        const touched = Object.keys(n).length > 0;
+        return {
+          tempId: `${Date.now()}-${i}`,
+          date: (e.date as string) ?? '',
+          endDate: (e.endDate as string) && (e.endDate as string) !== 'null' ? (e.endDate as string) : '',
+          managerId: matchManager((e.managerName as string) ?? '') || selfId,
+          clientId: matchClient((e.clientName as string) ?? ''),
+          category: touched && n.category ? n.category : matchCategory(rawCat),
+          keyword: touched ? (n.keyword ?? '') : rawKw,
+          status: (['pending', 'in-progress', 'completed'].includes(e.status as string) ? e.status : 'pending') as ScheduleStatus,
+        };
+      });
       if (parsed.length === 0) throw new Error('일정을 추출하지 못했습니다. 담당자·날짜·업체·종류를 좀 더 명확히 적어주세요.');
       setDrafts(parsed);
     } catch (e) {
@@ -209,7 +220,11 @@ export default function AIScheduleModal({ onClose, onAdd }: Props) {
                       <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">카테고리</label>
                       <select value={d.category} onChange={e => update(d.tempId, { category: e.target.value })}
                         className={`w-full border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 ${need(d.category)}`}>
-                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                        {CATEGORY_GROUPS.map(g => (
+                          <optgroup key={g.label} label={g.label}>
+                            {g.items.map(c => <option key={c} value={c}>{catLabel(c)}</option>)}
+                          </optgroup>
+                        ))}
                       </select>
                     </div>
                     <div>

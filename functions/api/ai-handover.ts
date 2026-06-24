@@ -30,7 +30,8 @@ interface HandoverRequest {
   knownClients?: string[]; // 기존 업체명 목록(중복 판단 참고)
 }
 
-const CATEGORIES = ['SNS', '유튜브', '네이버', '영상제작', '디자인제작', '네이버 여론작업', '기타'];
+// (src/data/categories.ts 의 CATEGORIES 와 동기화 — functions 는 src 를 import 할 수 없어 수동 반영)
+const CATEGORIES = ['네이버', '블로그 상위노출', '블로그관리', '블로그 배포', '카페 상위노출', '카페 배포', '클립', '네이버 여론작업', 'SNS', '유튜브', '영상제작', '디자인제작', '기타'];
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
