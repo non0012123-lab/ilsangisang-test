@@ -52,7 +52,8 @@ export function fireDesktop(title: string, body?: string, tag?: string, link?: s
       try {
         const n = await tauriNotif();
         if (!(await n.isPermissionGranted())) { if ((await n.requestPermission()) !== 'granted') return; }
-        n.sendNotification({ title, body });
+        // extra.link 를 실어 보내면, 알림 클릭(onAction) 시 그 화면(요청함/공지 등 특정 게시글)으로 이동한다.
+        n.sendNotification({ title, body, extra: link ? { link } : undefined });
       } catch (e) { console.warn('[notify] Tauri 알림 실패:', e); }
     })();
     return true;
@@ -67,19 +68,26 @@ export function fireDesktop(title: string, body?: string, tag?: string, link?: s
         reg.showNotification(title, {
           body, tag, icon: '/icon.svg', badge: '/icon.svg',
           data: { link: link || '/' }, requireInteraction: true,
-        }).catch(() => fallbackNotification(title, body, tag));
-      }).catch(() => fallbackNotification(title, body, tag));
+        }).catch(() => fallbackNotification(title, body, tag, link));
+      }).catch(() => fallbackNotification(title, body, tag, link));
       return true;
     } catch { /* 아래 생성자 폴백 */ }
   }
-  return fallbackNotification(title, body, tag);
+  return fallbackNotification(title, body, tag, link);
 }
 
 // 서비스워커가 없는 데스크톱 브라우저용 폴백(구형/SW 미등록).
-function fallbackNotification(title: string, body?: string, tag?: string): boolean {
+function fallbackNotification(title: string, body?: string, tag?: string, link?: string): boolean {
   try {
     const n = new Notification(title, { body, tag, icon: '/icon.svg', requireInteraction: true });
-    n.onclick = () => { try { window.focus(); } catch { /* noop */ } n.close(); };
+    n.onclick = () => {
+      try {
+        window.focus();
+        // 알림 클릭 → 해당 화면(요청함/공지 등 특정 게시글)으로 이동. 이미 같은 주소면 그대로.
+        if (link && link !== '/' && window.location.pathname + window.location.search !== link) window.location.assign(link);
+      } catch { /* noop */ }
+      n.close();
+    };
     return true;
   } catch (e) {
     console.warn('[notify] 알림 생성 실패:', e);

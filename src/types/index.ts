@@ -363,6 +363,7 @@ export interface WorkRequest {
   doneAt?: number;
   doneNote?: string;   // 완료 시 담당자가 남기는 선택 메모(결과물 NAS 경로 등) → 요청자에게 전달
   returnedAt?: number;
+  scheduledEntryId?: string;  // 이 요청으로 만든 일정 id (있으면 '일정 등록됨' 표시·중복 방지)
 }
 
 // ── 공지 ───────────────────────────────────────────────

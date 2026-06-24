@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Megaphone, Users, Plus, X, Trash2, Check, CheckCheck } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
@@ -51,6 +52,28 @@ export default function NoticesPage() {
   const recipientsOf = (n: typeof notices[number]) =>
     members.filter(m => (n.audience === 'all' || m.department === n.audience) && m.id !== n.fromUid);
 
+  // PC/인앱 알림에서 ?focus=<공지id> 로 들어오면 해당 공지로 스크롤·강조하고, 내가 대상이면 확인 처리한다.
+  const [params, setParams] = useSearchParams();
+  const focusId = params.get('focus');
+  const [highlight, setHighlight] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusId) return;
+    const target = notices.find(n => n.id === focusId);
+    if (!target) return; // 아직 로드 전이면 notices 갱신 시 재실행
+    setHighlight(focusId);
+    const el = document.getElementById(`notice-${focusId}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // 내가 대상인 공지면 확인(읽음) 처리 — 알림을 눌러 열람한 것이므로
+    if (uid && target.fromUid !== uid && (target.audience === 'all' || target.audience === myDept) && !(target.readBy ?? []).includes(uid)) {
+      confirmNotice(focusId);
+    }
+    const t = setTimeout(() => setHighlight(null), 2600);
+    // 강조 후 URL 의 focus 파라미터는 정리(새로고침 시 재강조·중복 동작 방지)
+    const clean = setTimeout(() => setParams(p => { const next = new URLSearchParams(p); next.delete('focus'); return next; }, { replace: true }), 800);
+    return () => { clearTimeout(t); clearTimeout(clean); };
+    // notices 를 의존성에 넣어 데이터가 늦게 로드돼도 한 번 더 시도
+  }, [focusId, notices, uid, myDept, confirmNotice, setParams]);
+
   return (
     <Layout>
       <Header title="공지사항" subtitle="팀·전체 공지를 확인하고, ‘확인’을 눌러 열람을 알립니다" />
@@ -78,7 +101,7 @@ export default function NoticesPage() {
               const iAmRecipient = !mine && (isAll || n.audience === myDept);
               const iConfirmed = !!uid && readSet.has(uid);
               return (
-                <div key={n.id} className={`bg-white rounded-2xl shadow-sm border p-4 ${isAll ? 'border-indigo-200' : 'border-gray-100'}`}>
+                <div key={n.id} id={`notice-${n.id}`} className={`bg-white rounded-2xl shadow-sm border p-4 transition-shadow ${highlight === n.id ? 'ring-2 ring-amber-400 border-amber-300' : isAll ? 'border-indigo-200' : 'border-gray-100'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">

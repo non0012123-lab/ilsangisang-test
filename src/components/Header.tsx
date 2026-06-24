@@ -39,10 +39,17 @@ export default function Header({ title, subtitle }: Props) {
   const { user } = useAuth();
   const {
     notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,
-    desktopNotifyEnabled, enableDesktopNotify,
+    desktopNotifyEnabled, enableDesktopNotify, requests, notices,
   } = useApp();
   const navigate = useNavigate();
   const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+
+  // 헤더 빠른 진입 배지 — 사이드바와 동일 기준.
+  //  • 요청함: 내가 받은 요청 중 '대기중'(아직 확인 안 한) 건수
+  //  • 공지: 내 대상(전체/내 팀) 중 내가 안 읽은 건수(내가 올린 공지 제외)
+  const pendingReqCount = requests.filter(r => r.toUid === user?.id && r.status === 'pending').length;
+  const unreadNoticeCount = notices.filter(n =>
+    (n.audience === 'all' || n.audience === user?.department) && n.fromUid !== user?.id && !(n.readBy ?? []).includes(user?.id ?? '')).length;
 
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -74,8 +81,36 @@ export default function Header({ title, subtitle }: Props) {
         <h1 className="text-xl font-bold text-gray-900">{title}</h1>
         {subtitle && <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>}
       </div>
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <span className="text-sm text-gray-500 hidden md:block">{today}</span>
+
+        {/* 요청함·공지 빠른 진입 (자주 보는 메뉴 — 날짜 옆에 배지와 함께) */}
+        <div className="flex items-center gap-1 md:border-l md:border-gray-200 md:pl-3">
+          <button
+            onClick={() => navigate('/requests')}
+            title="요청함"
+            className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 text-gray-600 text-sm font-medium transition-colors">
+            <Inbox size={17} />
+            <span className="hidden sm:inline">요청함</span>
+            {pendingReqCount > 0 && (
+              <span className="min-w-[16px] h-4 px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full">
+                {pendingReqCount > 9 ? '9+' : pendingReqCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => navigate('/notices')}
+            title="공지사항"
+            className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 text-gray-600 text-sm font-medium transition-colors">
+            <Megaphone size={17} />
+            <span className="hidden sm:inline">공지</span>
+            {unreadNoticeCount > 0 && (
+              <span className="min-w-[16px] h-4 px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full">
+                {unreadNoticeCount > 9 ? '9+' : unreadNoticeCount}
+              </span>
+            )}
+          </button>
+        </div>
 
         <div className="relative" ref={panelRef}>
           <button

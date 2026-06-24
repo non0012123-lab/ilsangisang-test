@@ -44,11 +44,13 @@ interface Props {
   entry?: ScheduleEntry | null;
   defaultDate?: string;
   defaultClientId?: string;
+  prefill?: Partial<ScheduleEntry>;   // 신규 등록 시 초기값 주입(요청함→일정 등록 등). entry(수정)와 동시 사용 안 함.
   onSave: (entry: ScheduleEntry) => void;
+  onCreated?: (entries: ScheduleEntry[]) => void;  // 단건/반복 모두 생성 직후 호출(요청 연결 등 후처리용)
   onClose: () => void;
 }
 
-export default function ScheduleModal({ entry, defaultDate, defaultClientId, onSave, onClose }: Props) {
+export default function ScheduleModal({ entry, defaultDate, defaultClientId, prefill, onSave, onCreated, onClose }: Props) {
   const { clients, members, saveEntries } = useApp();
   const activeClients = clients.filter(c => c.status !== 'inactive');
   const defaultClient = activeClients.find(c => c.id === defaultClientId) ?? activeClients[0];
@@ -63,6 +65,7 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
       clientName: defaultClient?.name ?? '',
       managerId: members[0]?.id ?? '',
       managerName: members[0]?.name ?? '',
+      ...prefill,   // 요청함 등에서 추론한 값으로 기본값 덮어쓰기(값 있는 키만)
     }
   );
   const [metrics, setMetrics] = useState<AIMetrics>(entry?.metrics ?? {});
@@ -149,11 +152,14 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, onS
         ...common,
       }));
       saveEntries(series);
+      onCreated?.(series);
       onClose();
       return;
     }
 
-    onSave({ id: entry?.id ?? Date.now().toString(), date: form.date!, endDate, ...common });
+    const newEntry: ScheduleEntry = { id: entry?.id ?? Date.now().toString(), date: form.date!, endDate, ...common };
+    onSave(newEntry);
+    onCreated?.([newEntry]);
   };
 
   const managers = members;

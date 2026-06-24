@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import { runSilentUpdate } from './utils/tauriUpdate';
 import { startVersionWatch } from './utils/versionCheck';
-import { getWindowLabel } from './utils/tauriWindow';
+import { getWindowLabel, onNotificationActivated, focusCurrentWindow } from './utils/tauriWindow';
 import type { AuthUser } from './types';
 
 // 라우트 페이지는 지연 로딩(코드 스플리팅) — 초기 번들을 줄여 첫 로딩을 빠르게 한다.
@@ -66,6 +66,27 @@ function AssistantWindowGuard() {
     if (location.pathname !== '/widget') navigate('/widget', { replace: true });
   }, [isAssistant, user, loading, location.pathname, navigate]);
 
+  return null;
+}
+
+// 데스크톱 앱: 네이티브 알림을 클릭하면 앱 창을 앞으로 가져오고, 알림에 실린 링크(요청함/공지 등
+//  특정 게시글: /requests?focus=…, /notices?focus=…)로 이동한다. 웹/비-Tauri 면 onNotificationActivated 가 no-op.
+function TauriNotificationRouter() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    (async () => {
+      // 트레이 위젯 창('assistant')은 제외 — 메인 창에서만 알림 클릭을 라우팅해 메인을 앞으로 띄운다.
+      const label = await getWindowLabel();
+      if (!active || label === 'assistant') return;
+      unlisten = await onNotificationActivated(link => {
+        void focusCurrentWindow();
+        if (link) navigate(link);
+      });
+    })();
+    return () => { active = false; if (unlisten) unlisten(); };
+  }, [navigate]);
   return null;
 }
 
@@ -170,6 +191,7 @@ export default function App() {
       <AuthProvider>
         <AppProvider>
           <AssistantWindowGuard />
+          <TauriNotificationRouter />
           <AppRoutes />
         </AppProvider>
       </AuthProvider>

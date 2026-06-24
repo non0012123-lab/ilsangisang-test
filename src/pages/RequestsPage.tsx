@@ -1,12 +1,15 @@
-import { useMemo, useState } from 'react';
-import { Inbox, Send, Plus, X, Check, CheckCheck, Clock, Trash2, ArrowRight, Undo2, Archive, Copy } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Inbox, Send, Plus, X, Check, CheckCheck, Clock, Trash2, ArrowRight, Undo2, Archive, Copy, CalendarPlus } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
+import ScheduleModal from '../components/ScheduleModal';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { WorkRequest, RequestStatus } from '../types';
 import LinkifiedText from '../components/LinkifiedText';
 import { convertNasInText } from '../utils/nasPath';
+import { inferScheduleFromRequest } from '../utils/requestToSchedule';
 
 const relTime = (ts: number): string => {
   const min = Math.floor((Date.now() - ts) / 60000);
@@ -40,7 +43,7 @@ function StatusBadge({ status }: { status: RequestStatus }) {
 
 export default function RequestsPage() {
   const { user } = useAuth();
-  const { requests, members, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest } = useApp();
+  const { requests, members, clients, saveEntry, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, markRequestScheduled } = useApp();
   const uid = user?.id;
   const [tab, setTab] = useState<Tab>('received');
   const [showForm, setShowForm] = useState(false);
@@ -49,6 +52,18 @@ export default function RequestsPage() {
   const [body, setBody] = useState('');
   const [completing, setCompleting] = useState<WorkRequest | null>(null); // 완료 메모 모달 대상
   const [doneNote, setDoneNote] = useState('');
+  const [scheduling, setScheduling] = useState<WorkRequest | null>(null); // 일정 등록 모달 대상
+
+  // 요청 카드의 '일정 등록' 버튼(이미 등록했으면 비활성 라벨). received·sent 탭 공용.
+  const schedButton = (r: WorkRequest) => r.scheduledEntryId ? (
+    <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-purple-600 bg-purple-50 border border-purple-200" title="이미 일정으로 등록된 요청입니다">
+      <CalendarPlus size={13} /> 일정 등록됨
+    </span>
+  ) : (
+    <button onClick={() => setScheduling(r)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-purple-200 text-purple-700 hover:bg-purple-50 transition-colors">
+      <CalendarPlus size={13} /> 일정 등록
+    </button>
+  );
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copyNote = (id: string, text: string) => { navigator.clipboard.writeText(text); setCopiedId(id); setTimeout(() => setCopiedId(c => c === id ? null : c), 1500); };
 
@@ -62,6 +77,24 @@ export default function RequestsPage() {
   const done = useMemo(() => sortReqs(requests.filter(r => (r.toUid === uid || r.fromUid === uid) && r.status === 'done')), [requests, uid]);
   const returned = useMemo(() => sortReqs(requests.filter(r => (r.toUid === uid || r.fromUid === uid) && r.status === 'returned')), [requests, uid]);
   const pendingReceived = received.filter(r => r.status === 'pending').length;
+
+  // PC/인앱 알림에서 ?focus=<요청id> 로 들어오면 그 요청이 속한 탭으로 전환 후 스크롤·강조한다.
+  const [params, setParams] = useSearchParams();
+  const focusId = params.get('focus');
+  const [highlight, setHighlight] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusId) return;
+    const r = requests.find(x => x.id === focusId);
+    if (!r) return; // 아직 로드 전이면 requests 갱신 시 재시도
+    const targetTab: Tab = r.status === 'done' ? 'done' : r.status === 'returned' ? 'returned' : r.toUid === uid ? 'received' : 'sent';
+    setTab(targetTab);
+    setHighlight(focusId);
+    // 탭 전환 후 DOM 이 그려지면 스크롤
+    const scroll = setTimeout(() => document.getElementById(`req-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+    const t = setTimeout(() => setHighlight(null), 2600);
+    const clean = setTimeout(() => setParams(p => { const next = new URLSearchParams(p); next.delete('focus'); return next; }, { replace: true }), 800);
+    return () => { clearTimeout(scroll); clearTimeout(t); clearTimeout(clean); };
+  }, [focusId, requests, uid, setParams]);
 
   // 담당자 후보(본인 제외) — 새 요청 대상
   const candidates = members.filter(m => m.id !== uid);
@@ -118,7 +151,7 @@ export default function RequestsPage() {
         ) : (
           <div className="space-y-2.5">
             {list.map(r => (
-              <div key={r.id} className={`bg-white rounded-2xl shadow-sm border p-4 ${r.status === 'pending' && tab === 'received' ? 'border-amber-200' : 'border-gray-100'}`}>
+              <div key={r.id} id={`req-${r.id}`} className={`bg-white rounded-2xl shadow-sm border p-4 transition-shadow ${highlight === r.id ? 'ring-2 ring-amber-400 border-amber-300' : r.status === 'pending' && tab === 'received' ? 'border-amber-200' : 'border-gray-100'}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -155,13 +188,17 @@ export default function RequestsPage() {
                         <button onClick={() => { setDoneNote(''); setCompleting(r); }} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors">
                           <CheckCheck size={13} /> 완료
                         </button>
+                        {schedButton(r)}
                       </>
                     )}
                     {tab === 'sent' && (
-                      <button onClick={() => { if (window.confirm('이 요청을 반려(회수)할까요? 받는 사람 요청함에서 사라집니다.')) returnRequest(r.id); }}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors">
-                        <Undo2 size={13} /> 반려
-                      </button>
+                      <>
+                        <button onClick={() => { if (window.confirm('이 요청을 반려(회수)할까요? 받는 사람 요청함에서 사라집니다.')) returnRequest(r.id); }}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors">
+                          <Undo2 size={13} /> 반려
+                        </button>
+                        {schedButton(r)}
+                      </>
                     )}
                     {(tab === 'done' || tab === 'returned') && (
                       <button onClick={() => { if (window.confirm('이 요청을 영구 삭제할까요? (되돌릴 수 없음)')) removeRequest(r.id); }}
@@ -245,6 +282,16 @@ export default function RequestsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 일정 등록 모달 — 요청에서 추론한 값으로 채워 열고, 사용자가 날짜 등 보정 후 저장 */}
+      {scheduling && (
+        <ScheduleModal
+          prefill={inferScheduleFromRequest(scheduling, clients, members)}
+          onSave={(e) => saveEntry(e)}
+          onCreated={(es) => { if (es[0]) markRequestScheduled(scheduling.id, es[0].id); setScheduling(null); }}
+          onClose={() => setScheduling(null)}
+        />
       )}
     </Layout>
   );

@@ -57,3 +57,35 @@ export async function resetCurrentWindowSize(): Promise<void> {
     console.warn('[tauri] 창 크기 초기화 실패:', e);
   }
 }
+
+// 현재 창을 앞으로 가져온다(트레이/최소화 상태에서 복원 + 포커스) — 알림 클릭 시 앱이 위로 뜨게.
+export async function focusCurrentWindow(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const w = getCurrentWindow();
+    try { await w.unminimize(); } catch { /* noop */ }
+    await w.show();
+    await w.setFocus();
+  } catch (e) {
+    console.warn('[tauri] 창 포커스 실패:', e);
+  }
+}
+
+// 데스크톱 네이티브 알림 클릭(activation) 구독. 콜백에 알림에 실린 link(extra.link)를 넘긴다.
+//  • 반환값은 해제 함수. 웹/비-Tauri 면 아무것도 하지 않고 no-op 해제 함수를 돌려준다.
+export async function onNotificationActivated(cb: (link?: string) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  try {
+    const { onAction } = await import('@tauri-apps/plugin-notification');
+    const listener = await onAction(notif => {
+      const extra = (notif as { extra?: Record<string, unknown> }).extra;
+      const link = extra && typeof extra.link === 'string' ? extra.link : undefined;
+      cb(link);
+    });
+    return () => { void listener.unregister(); };
+  } catch (e) {
+    console.warn('[tauri] 알림 클릭 구독 실패:', e);
+    return () => {};
+  }
+}

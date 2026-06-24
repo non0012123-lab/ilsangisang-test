@@ -103,6 +103,7 @@ interface AppContextType {
   completeRequest: (id: string, note?: string) => void;  // note: 결과물 경로 등 선택 메모(요청자에게 전달)
   returnRequest: (id: string) => void;   // 요청자가 잘못 보낸 요청을 회수/반려
   removeRequest: (id: string) => void;
+  markRequestScheduled: (id: string, entryId: string) => void;  // 요청을 일정으로 등록 후 연결
   notices: Notice[];
   sendNotice: (audience: NoticeAudience, audienceLabel: string, title: string, body?: string) => void;
   removeNotice: (id: string) => void;
@@ -598,7 +599,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     persistOne('requests', req);
     // self-request(나→나): realtime INSERT 는 prev 존재로 dedup 되어 "받은" 알림이 안 뜨므로 직접 띄운다.
     if (u.id === toId) {
-      pushNotification({ type: 'request', title: `${u.name}님이 업무 요청을 보냈어요`, body: text, link: '/requests' });
+      pushNotification({ type: 'request', title: `${u.name}님이 업무 요청을 보냈어요`, body: text, link: `/requests?focus=${req.id}` });
     }
   }, [pushNotification]);
   // 본인이 보낸 요청을 본인이 확인/완료한 경우(self-request) — realtime 변화감지 dedup 에 걸려
@@ -609,7 +610,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setOutgoingAlerts(list => [r, ...list.filter(x => x.id !== r.id)]);
     const verb = r.status === 'done' ? '완료했어요' : '확인했어요';
     const body = `${r.title}${r.status === 'done' && r.doneNote ? `\n📎 ${r.doneNote}` : ''}`;
-    pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 ${verb}`, body, link: '/requests' });
+    pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 ${verb}`, body, link: `/requests?focus=${r.id}` });
   };
   // 담당자가 "확인" — 대기중 요청만 확인됨으로. realtime UPDATE 로 요청자에게 알림이 간다.
   const confirmRequest = useCallback((id: string) => {
@@ -640,6 +641,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeRequest = useCallback((id: string) => {
     setRequests(prev => prev.filter(r => r.id !== id));
     persistDelete('requests', id);
+  }, []);
+  // 요청을 일정으로 등록한 뒤, 그 일정 id 를 요청에 연결(카드 '일정 등록됨' 표시·중복 방지). jsonb 저장이라 마이그레이션 불필요.
+  const markRequestScheduled = useCallback((id: string, entryId: string) => {
+    const cur = requestsRef.current.find(r => r.id === id);
+    if (!cur) return;
+    const updated: WorkRequest = { ...cur, scheduledEntryId: entryId };
+    setRequests(prev => prev.map(r => r.id === id ? updated : r));
+    persistOne('requests', updated);
   }, []);
 
   // ── 공지(팀/전체) ──
@@ -1639,7 +1648,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       count += 1;
       // 나에게 보낸 요청(self)은 realtime 이 dedup 으로 "받은" 알림을 안 띄우므로 여기서 직접 띄운다.
       if (u?.id && toId === u.id) {
-        pushNotification({ type: 'request', title: `${wr.fromName || '동료'}님이 업무 요청을 보냈어요`, body: wr.title, link: '/requests' });
+        pushNotification({ type: 'request', title: `${wr.fromName || '동료'}님이 업무 요청을 보냈어요`, body: wr.title, link: `/requests?focus=${wr.id}` });
       }
     });
 
@@ -2134,12 +2143,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setRequests(list => list.some(x => x.id === r.id) ? list.map(x => x.id === r.id ? r : x) : [r, ...list]);
         // 나에게 새로 들어온 요청 — 스티커메모는 화면에서 자동으로 뜨고, 여기선 종/PC 알림.
         if (r.toUid === uid && !prev) {
-          pushNotification({ type: 'request', title: `${r.fromName || '동료'}님이 업무 요청을 보냈어요`, body: r.title, link: '/requests' });
+          pushNotification({ type: 'request', title: `${r.fromName || '동료'}님이 업무 요청을 보냈어요`, body: r.title, link: `/requests?focus=${r.id}` });
           return;
         }
         // 내가 받은 요청을 요청자가 반려(회수)함 — 받은 요청함에서 사라지므로 알려준다.
         if (r.toUid === uid && prev && prev.status !== r.status && r.status === 'returned') {
-          pushNotification({ type: 'request', title: `${r.fromName || '요청자'}님이 요청을 회수했어요`, body: r.title, link: '/requests' });
+          pushNotification({ type: 'request', title: `${r.fromName || '요청자'}님이 요청을 회수했어요`, body: r.title, link: `/requests?focus=${r.id}` });
           return;
         }
         // 내가 보낸 요청의 상태가 바뀜(담당자가 확인/완료) — 요청자 화면에 스티커 + 종/PC 알림.
@@ -2147,7 +2156,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setOutgoingAlerts(list => [r, ...list.filter(x => x.id !== r.id)]);
           const verb = r.status === 'confirmed' ? '확인했어요' : '완료했어요';
           const body = `${r.title}${r.status === 'done' && r.doneNote ? `\n📎 ${r.doneNote}` : ''}`;
-          pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 ${verb}`, body, link: '/requests' });
+          pushNotification({ type: 'request', title: `${r.toName || '담당자'}님이 요청을 ${verb}`, body, link: `/requests?focus=${r.id}` });
         }
       })
       .subscribe();
@@ -2177,8 +2186,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const forMe = n.audience === 'all' || n.audience === myDept;
         if (!prev && forMe && n.fromUid !== uid) {
           const body = `[${n.audienceLabel}] ${n.title}`;
-          pushNotification({ type: 'notice', title: `${n.fromName || '동료'}님의 공지`, body, link: '/notices' });
-          pushStickyNotice({ type: 'notice', title: `📢 ${n.audienceLabel} 공지`, body: n.title, link: '/notices' });
+          pushNotification({ type: 'notice', title: `${n.fromName || '동료'}님의 공지`, body, link: `/notices?focus=${n.id}` });
+          pushStickyNotice({ type: 'notice', title: `📢 ${n.audienceLabel} 공지`, body: n.title, link: `/notices?focus=${n.id}` });
         }
       })
       .subscribe();
@@ -2352,7 +2361,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       salesEntries, salesAccess, saveSalesEntry, removeSalesEntry, addSalesReply, removeSalesReply,
       priceTable, priceRefreshing, priceProgress, priceUpdatedAt, refreshPriceTable,
       rankGuarantees, saveRankGuarantee, removeRankGuarantee,
-      requests, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, outgoingAlerts, dismissOutgoingAlert,
+      requests, sendRequest, confirmRequest, completeRequest, returnRequest, removeRequest, markRequestScheduled, outgoingAlerts, dismissOutgoingAlert,
       notices, sendNotice, removeNotice, confirmNotice,
       stickyNotices, dismissStickyNotice,
       notifications, unreadCount, markAllNotificationsRead, markNotificationRead, clearNotifications,
