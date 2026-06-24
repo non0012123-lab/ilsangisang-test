@@ -87,7 +87,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
             { role: 'user', content: [{ type: 'input_text', text: userInput }] },
           ],
           text: { format: { type: 'json_object' } },
-          reasoning: { effort: 'low' },
+          reasoning: { effort: 'none' }, // 짧은 요약 → 추론 없이 가장 빠르게(지연/타임아웃 최소화)
           store: false,
         }),
         signal: controller.signal,
