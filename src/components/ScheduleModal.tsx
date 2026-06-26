@@ -334,11 +334,16 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-semibold text-gray-500">발굴된 롱테일 <span className="text-gray-400 font-normal">(순위 잡힌 것만 · 수집기 자동)</span></span>
-                <span className="text-[11px] text-gray-400">{form.subKeywords?.length ?? 0}개</span>
+                <span className="flex items-center gap-2">
+                  <span className="text-[11px] text-gray-400">{form.subKeywords?.length ?? 0}개</span>
+                  {(form.subKeywords?.length ?? 0) > 0 && (
+                    <button type="button" onClick={() => set('subKeywords', [])} className="text-[11px] text-red-500 hover:text-red-600 hover:underline">모두 삭제</button>
+                  )}
+                </span>
               </div>
               {(form.subKeywords?.length ?? 0) > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {form.subKeywords!.map(s => {
+                  {form.subKeywords!.map((s, idx) => {
                     const best = bestRank(s.rankByTab);
                     return (
                       <span key={s.keyword} title={`검색량 ${s.volume.toLocaleString()} · ${s.source}`}
@@ -346,6 +351,8 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
                         {s.keyword}
                         <span className="text-gray-400">{s.volume.toLocaleString()}</span>
                         {best != null && <span className="font-semibold text-blue-600">{best}위</span>}
+                        <button type="button" onClick={() => set('subKeywords', form.subKeywords!.filter((_, i) => i !== idx))}
+                          className="text-gray-300 hover:text-red-500"><X size={11} /></button>
                       </span>
                     );
                   })}

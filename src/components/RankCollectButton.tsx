@@ -2,14 +2,15 @@
 //  - 범위: 본인(mine, 기본) / 특정 담당자(manager) / 전체(all)
 //  - 모드: 미발견만(pending, 기본 · 이미 잡힌 탭은 건너뜀) / 전체 재수집(all)
 //  - 트리거만 한다. 진행 현황은 전역 RankCollectWidget(어느 탭에서나 보임)이 표시.
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Radar, Loader2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { isRankTrackedCategory } from '../utils/searchTabs';
 import { useRankCollect, type RankScope, type RankMode } from '../hooks/useRankCollect';
 
 export default function RankCollectButton() {
-  const { members } = useApp();
+  const { members, entries } = useApp();
   const { user } = useAuth();
   const { collect, busy } = useRankCollect();
   const [open, setOpen] = useState(false);
@@ -18,8 +19,17 @@ export default function RankCollectButton() {
   const [managerId, setManagerId] = useState(user?.id ?? '');
   const [mode, setMode] = useState<RankMode>('pending');
 
+  // 이 범위로 실제 수집될 순위추적 일정 수 — 잘못된 범위 선택을 누르기 전에 알려준다.
+  const targetMgr = scope === 'manager' ? managerId : scope === 'mine' ? (user?.id ?? '') : '';
+  const matchCount = useMemo(() => {
+    const rt = entries.filter(e => isRankTrackedCategory(e.category) && (e.searchTabs?.length ?? 0) > 0 && e.keyword);
+    return scope === 'all' ? rt.length : rt.filter(e => e.managerId === targetMgr).length;
+  }, [entries, scope, targetMgr]);
+  const scopeLabel = scope === 'all' ? '전체' : scope === 'manager' ? (members.find(m => m.id === managerId)?.name ?? '담당자') : '내 담당';
+
   const run = async () => {
     const m = members.find(x => x.id === managerId);
+    if (!window.confirm(`[${scopeLabel}] 순위추적 ${matchCount}건을 수집 요청합니다.\n(${mode === 'all' ? '전체 재수집 + 롱테일' : '미발견만'})\n계속할까요?`)) return;
     await collect({
       scope,
       managerId: scope === 'manager' ? managerId : user?.id,
@@ -78,7 +88,10 @@ export default function RankCollectButton() {
               </p>
             </div>
 
-            <button onClick={run} disabled={busy}
+            <div className="text-[11px] text-gray-500 text-center">
+              <span className="font-semibold text-gray-700">{scopeLabel}</span> · 순위추적 <span className="font-semibold text-blue-600">{matchCount}건</span> 대상
+            </div>
+            <button onClick={run} disabled={busy || matchCount === 0}
               className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50">
               수집 요청
             </button>
