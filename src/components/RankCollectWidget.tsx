@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Check, AlertCircle, X, Radar, Ban } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 
 interface Job {
   id: string; status: string; mode: string;
@@ -16,25 +17,28 @@ const DISMISS_KEY = 'rankWidgetDismissedJob';
 const loadDismissed = () => { try { return localStorage.getItem(DISMISS_KEY) || ''; } catch { return ''; } };
 
 export default function RankCollectWidget() {
+  const { user } = useAuth();
+  const me = user?.id ?? '';
   const [job, setJob] = useState<Job | null>(null);
   // 닫힘 상태는 localStorage 에 보관 — Layout 리마운트(페이지 이동)에도 유지
   const [dismissed, setDismissed] = useState(loadDismissed);
   const dismiss = (id: string) => { try { localStorage.setItem(DISMISS_KEY, id); } catch { /* ignore */ } setDismissed(id); };
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || !me) return;
     let active = true;
-    supabase.from('rank_jobs').select('*').order('created_at', { ascending: false }).limit(1)
+    // 내가 요청한 작업만 추적/표시 — 멀티유저에서 남의 작업은 안 보이고 중단도 내 것만
+    supabase.from('rank_jobs').select('*').eq('requested_by', me).order('created_at', { ascending: false }).limit(1)
       .then(({ data }) => { if (active && data && data[0]) setJob(data[0] as Job); });
     const ch = supabase
-      .channel('rank_jobs_widget')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rank_jobs' }, payload => {
+      .channel('rank_jobs_widget_' + me)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rank_jobs', filter: `requested_by=eq.${me}` }, payload => {
         const r = payload.new as Job | undefined;
-        if (r && r.id) setJob(r);   // 단일 수집기 → 최신 변경이 곧 활성 작업
+        if (r && r.id) setJob(r);
       })
       .subscribe();
     return () => { active = false; ch.unsubscribe(); };
-  }, []);
+  }, [me]);
 
   if (!job) return null;
   const running = job.status === 'queued' || job.status === 'running';
