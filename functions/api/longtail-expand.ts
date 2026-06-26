@@ -52,36 +52,50 @@ async function llmCandidates(env: Env, keyword: string, title?: string): Promise
     '- 최대 20개. JSON 으로만: {"candidates": ["...", "..."]}',
   ].join('\n');
   const user = `메인 키워드: ${keyword}\n글 제목: ${title || '(제목 없음 — 메인 키워드 기준 합리적 변형만)'}`;
-  try {
-    const res = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
-      body: JSON.stringify({
-        model: env.OPENAI_MODEL || 'gpt-5.4-mini',
-        input: [
-          { role: 'developer', content: [{ type: 'input_text', text: developer }] },
-          { role: 'user', content: [{ type: 'input_text', text: user }] },
-        ],
-        text: { format: { type: 'json_object' } },
-        reasoning: { effort: 'low' },
-        store: false,
-      }),
-    });
-    if (!res.ok) return { list: [], status: res.status, error: (await res.text()).slice(0, 160) };
-    const parsed = JSON.parse(extractText(await res.json())) as { candidates?: unknown };
-    const list = Array.isArray(parsed?.candidates) ? parsed.candidates.filter((c): c is string => typeof c === 'string') : [];
-    return { list, status: 200 };
-  } catch (e) { return { list: [], error: (e as Error).message }; }
+  const reqBody = JSON.stringify({
+    model: env.OPENAI_MODEL || 'gpt-5.4-mini',
+    input: [
+      { role: 'developer', content: [{ type: 'input_text', text: developer }] },
+      { role: 'user', content: [{ type: 'input_text', text: user }] },
+    ],
+    text: { format: { type: 'json_object' } },
+    reasoning: { effort: 'low' },
+    store: false,
+  });
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  let lastStatus: number | undefined, lastErr: string | undefined;
+  // 429(레이트리밋)·5xx 는 일시적이라 백오프 재시도. 403(지역차단)은 재시도 무의미 → 즉시 반환(폴백).
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
+        body: reqBody,
+      });
+      if (res.ok) {
+        const parsed = JSON.parse(extractText(await res.json())) as { candidates?: unknown };
+        const list = Array.isArray(parsed?.candidates) ? parsed.candidates.filter((c): c is string => typeof c === 'string') : [];
+        return { list, status: 200 };
+      }
+      lastStatus = res.status; lastErr = (await res.text()).slice(0, 160);
+      if ((res.status === 429 || res.status >= 500) && attempt < 2) { await sleep(800 * (attempt + 1)); continue; }
+      return { list: [], status: lastStatus, error: lastErr };
+    } catch (e) { lastErr = (e as Error).message; if (attempt < 2) await sleep(600); }
+  }
+  return { list: [], status: lastStatus, error: lastErr };
 }
 
-// LLM 실패(예: OpenAI 지역차단 403) 시 폴백: 키워드 + 흔한 의도 접미어 + 제목 단어 조합.
-//  OpenAI 없이도 후보를 만들어 발굴이 멈추지 않게 한다. 검색량으로 실재 검색어만 살아남고, 순위확인이 최종 게이트.
+// LLM 완전 실패 시 '최후의' 폴백(쓰레기 방지). AI 의도기반이 정석이고, 이건 발굴이 0이 되는 것만 막는 보조.
+//  - 보편적으로 말 되는 접미어만(원인/증상/치료 같은 증상형 제외 → "문신제거 원인" 방지).
+//  - 키워드에 이미 든 단어는 스킵(→ "문신제거병원 병원" 중복 방지).
+//  - 검색량으로 실재 검색어만 살아남고, 순위확인이 최종 게이트.
 function ruleCandidates(keyword: string, title?: string): string[] {
-  const SUFFIX = ['병원', '원인', '치료', '증상', '후기', '추천', '잘하는곳', '비용', '가격', '상담', '문의', '예약'];
-  const out = SUFFIX.map(s => `${keyword} ${s}`);
+  const SAFE = ['추천', '후기', '잘하는곳', '비용', '가격', '상담'];
+  const out: string[] = [];
+  for (const s of SAFE) if (!keyword.includes(s)) out.push(`${keyword} ${s}`);
   if (title) {
-    const words = title.replace(/[^가-힣a-zA-Z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && w !== keyword);
-    for (const w of words.slice(0, 12)) out.push(`${keyword} ${w}`);
+    const words = title.replace(/[^가-힣a-zA-Z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && !keyword.includes(w));
+    for (const w of words.slice(0, 8)) out.push(`${keyword} ${w}`);   // 제목 단어 조합(증상형 일반접미어보다 글과 연관)
   }
   return Array.from(new Set(out));
 }
