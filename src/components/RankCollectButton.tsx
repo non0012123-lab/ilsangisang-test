@@ -17,7 +17,7 @@ export default function RankCollectButton() {
   const [done, setDone] = useState(false);
   const [scope, setScope] = useState<RankScope>('mine');
   const [managerId, setManagerId] = useState(user?.id ?? '');
-  const [mode, setMode] = useState<RankMode>('pending');
+  const [mode, setMode] = useState<RankMode>('all');   // 기본=전체 수집
 
   // 이 범위로 실제 수집될 순위추적 일정 수 — 잘못된 범위 선택을 누르기 전에 알려준다.
   const targetMgr = scope === 'manager' ? managerId : scope === 'mine' ? (user?.id ?? '') : '';
@@ -29,7 +29,7 @@ export default function RankCollectButton() {
 
   const run = async () => {
     const m = members.find(x => x.id === managerId);
-    if (!window.confirm(`[${scopeLabel}] 순위추적 ${matchCount}건을 수집 요청합니다.\n(${mode === 'all' ? '전체 재수집 + 롱테일' : '미발견만'})\n계속할까요?`)) return;
+    if (!window.confirm(`[${scopeLabel}] 순위추적 ${matchCount}건을 수집 요청합니다.\n(${mode === 'all' ? '전체 수집 + 롱테일 발굴' : '미발견만'})\n계속할까요?`)) return;
     await collect({
       scope,
       managerId: scope === 'manager' ? managerId : user?.id,
@@ -76,7 +76,7 @@ export default function RankCollectButton() {
             <div>
               <p className="text-[11px] font-semibold text-gray-500 mb-1">모드</p>
               <div className="flex gap-1">
-                {([['pending', '미발견만'], ['all', '전체 재수집']] as [RankMode, string][]).map(([v, lb]) => (
+                {([['all', '전체 수집'], ['pending', '미발견만']] as [RankMode, string][]).map(([v, lb]) => (
                   <button key={v} onClick={() => setMode(v)}
                     className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition ${mode === v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
                     {lb}
@@ -84,7 +84,9 @@ export default function RankCollectButton() {
                 ))}
               </div>
               <p className="mt-1 text-[10px] text-gray-400 leading-snug">
-                {mode === 'pending' ? '이미 순위가 잡힌 탭은 건너뛰고 미발견·미수집만 수집(프록시 절약).' : '범위 내 모든 탭을 다시 수집 + 롱테일 재발굴(순위 변동 확인용).'}
+                {mode === 'all'
+                  ? '모든 탭을 다시 수집 + 롱테일 재발굴(순위 변동 확인용). 기본값.'
+                  : '아직 안 잡힌 것만: 미발견 메인/롱테일 탭 재확인, 롱테일이 없던 글은 새로 발굴(프록시 절약).'}
               </p>
             </div>
 
