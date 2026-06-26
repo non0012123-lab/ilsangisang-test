@@ -40,9 +40,10 @@ async function llmCandidates(env: Env, keyword: string, title?: string): Promise
     '너는 한국 네이버 검색 롱테일 키워드 생성기다.',
     '주어진 "글 제목"과 "메인 키워드"에서, 한국 사용자가 실제로 검색창에 칠 법한 검색어 변형을 만든다.',
     '규칙:',
-    '- 제목 속 지역/업종/수식어(추천·가성비·2차 등)를 조합하되 어순 변형도 포함(예: "신도림 가성비 술집" / "신도림 술집 가성비").',
-    '- 2~5어절의 자연스러운 검색어. 문장·해시태그·특수문자 금지.',
-    '- 메인 키워드와 동일한 것은 제외. 너무 일반적이거나 글과 무관한 것은 제외.',
+    '- ★메인 키워드를 그대로(연속해서) 포함하고, 앞/뒤에 수식어만 덧붙인 확장형만 만든다. 메인 키워드를 쪼개거나 빼지 말 것.',
+    '  (예: 메인 "신사모발이식" → "신사모발이식 후기", "신사모발이식 흉터", "강남 신사모발이식". X: "탈모", "모발이식")',
+    '- 제목 속 수식어(후기·가격·비용·잘하는곳·흉터 등)를 활용. 2~5어절의 자연스러운 검색어. 문장·해시태그·특수문자 금지.',
+    '- 메인 키워드 자체보다 더 넓은(상위) 단어나 글과 무관한 것은 금지.',
     '- 최대 25개. JSON 으로만: {"candidates": ["...", "..."]}',
   ].join('\n');
   const user = `메인 키워드: ${keyword}\n글 제목: ${title || '(제목 없음 — 메인 키워드 기준으로 합리적 변형만)'}`;
@@ -93,10 +94,12 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     const llmVol = llm.length ? await keywordVolumes(env, llm) : new Map<string, number>();
 
     // ③ 통합 + dedup(같은 키워드면 검색량 큰 쪽 유지)
+    //    ★롱테일만: 메인 키워드를 포함하는 확장형만 채택(헤드/무관 단어 배제). 어순/띄어쓰기는 정규화로 흡수.
+    const baseNorm = normKw(keyword);
     const merged = new Map<string, { keyword: string; volume: number; source: 'llm' | 'related' }>();
     const add = (kw: string, volume: number, source: 'llm' | 'related') => {
       const n = normKw(kw);
-      if (!kw || excluded.has(n)) return;
+      if (!kw || excluded.has(n) || !n.includes(baseNorm)) return;
       const prev = merged.get(n);
       if (!prev || volume > prev.volume) merged.set(n, { keyword: kw.trim(), volume, source });
     };
