@@ -2,8 +2,9 @@
 //  - 성공(숫자) = 파랑 · 미노출(null) = 노랑 · 미수집(키없음) = 회색
 //  - 순위 추적 대상이 아니거나 탭 미설정이면 기존 단일 rank 표시(하위호환)
 //  - showChecked=true 면 마지막 수집 시각(상대시간)을 아래 작게 표시(카드용)
+import { AlertTriangle } from 'lucide-react';
 import type { ScheduleEntry, SearchTab } from '../types';
-import { SEARCH_TAB_ORDER, SEARCH_TAB_LABEL, isRankTrackedCategory } from '../utils/searchTabs';
+import { SEARCH_TAB_ORDER, SEARCH_TAB_LABEL, isRankTrackedCategory, linkKeywordMismatch } from '../utils/searchTabs';
 
 const SHORT: Record<SearchTab, string> = { integrated: '통합', blog: '블로그', cafe: '카페' };
 
@@ -35,9 +36,16 @@ export default function RankTabsBadge({ entry, showChecked = false }: { entry: S
     .filter((v): v is string => !!v)
     .sort()
     .slice(-1)[0];
+  const mismatch = linkKeywordMismatch(entry);
 
   return (
     <div className="flex flex-col gap-0.5 items-start">
+      {mismatch && (
+        <span title="제목이 키워드와 맞지 않고 어느 탭에도 미발견 — 링크가 잘못 들어갔는지 확인하세요"
+          className="inline-flex items-center gap-1 px-1.5 h-6 rounded-lg bg-red-50 text-red-600 text-[11px] font-semibold border border-red-200">
+          <AlertTriangle size={11} /> 링크확인
+        </span>
+      )}
       <div className="flex flex-wrap gap-1">
         {order.map(t => {
           const r = entry.rankByTab?.[t];

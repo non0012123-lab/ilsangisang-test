@@ -2,6 +2,8 @@ import { useState, type ReactNode } from 'react';
 import { Menu, BarChart3 } from 'lucide-react';
 import Sidebar from './Sidebar';
 import StickyRequests from './StickyRequests';
+import RankCollectWidget from './RankCollectWidget';
+import LinkWarningSticky from './LinkWarningSticky';
 
 export default function Layout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -25,6 +27,10 @@ export default function Layout({ children }: { children: ReactNode }) {
       </main>
       {/* 받은 미확인 요청을 어느 페이지에서든 우하단 스티커메모로 알림 */}
       <StickyRequests />
+      {/* 순위 수집 진행 현황을 어느 페이지에서든 좌하단에 표시 */}
+      <RankCollectWidget />
+      {/* 링크-키워드 불일치(잘못된 링크) 의심을 어느 페이지에서든 우상단에 알림 */}
+      <LinkWarningSticky />
     </div>
   );
 }

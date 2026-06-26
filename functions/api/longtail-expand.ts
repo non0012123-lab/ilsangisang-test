@@ -1,14 +1,14 @@
 // ───────────────────────────────────────────────────────────────
 // Cloudflare Pages Function:  POST /api/longtail-expand
 //  • 입력: { keyword, title?, existing?: string[], threshold?, max? }
-//  • 후보 생성: ① LLM(제목→검색형 조합)  ② 검색광고 연관키워드
-//    → 검색량(검색광고 keywordstool) ≥ threshold 만 채택 → 상위 max 개 반환.
-//  • 출력: { candidates: [{ keyword, volume, source:'llm'|'related' }] }
-//  • 검수 단계 없음(검색량 필터가 게이트). 메인 키워드/기존 키워드는 제외.
+//  • LLM 이 제목의 '의도'를 읽어 이 글이 노릴 만한 구체 검색어를 생성(지역 스왑·시술 압축 포함).
+//    → 검색량(검색광고) ≥ threshold(기본 10, 실재 검색어 게이트) → 상위 max(기본 5) 반환.
+//  • 광범위 헤드 키워드는 LLM 프롬프트로 배제하고, 최종 가치 판정은 수집기의 순위확인이 한다.
+//  • 메인 키워드 '포함' 강제(컨테인먼트) 없음 — 압구정피부과·신사리프팅 같은 의도형 서브를 살리기 위함.
 //
-// 환경변수: OPENAI_API_KEY(+OPENAI_MODEL, LLM은 선택) / NAVER_AD_*(검색량, 필수)
+// 환경변수: OPENAI_API_KEY(+OPENAI_MODEL) / NAVER_AD_*(검색량, 필수)
 // ───────────────────────────────────────────────────────────────
-import { keywordVolumes, relatedKeywords, normKw, type SearchAdEnv } from './_searchad';
+import { keywordVolumes, normKw, type SearchAdEnv } from './_searchad';
 
 interface Env extends SearchAdEnv {
   OPENAI_API_KEY?: string;
@@ -33,20 +33,25 @@ function extractText(data: unknown): string {
   return parts.join('\n').trim();
 }
 
-// 제목 + 메인 키워드 → 실제 검색형 롱테일 후보(문자열). 실패하면 []  (LLM 은 선택 소스)
+// 제목의 의도를 읽어 구체적 롱테일 후보 생성. 실패하면 [].
 async function llmCandidates(env: Env, keyword: string, title?: string): Promise<string[]> {
   if (!env.OPENAI_API_KEY) return [];
   const developer = [
-    '너는 한국 네이버 검색 롱테일 키워드 생성기다.',
-    '주어진 "글 제목"과 "메인 키워드"에서, 한국 사용자가 실제로 검색창에 칠 법한 검색어 변형을 만든다.',
+    '너는 한국 네이버 상위노출 롱테일 키워드 발굴기다.',
+    '"메인 키워드"와 "글 제목"을 보고, 이 글이 실제로 노출을 노릴 만한 구체적인 검색어를 만든다.',
+    '핵심(제목의 의도를 읽어라):',
+    '- 제목에 다른 지역/장소가 등장하면 그 지역으로 바꾼 조합도 만든다.',
+    '  (예: 메인 "신사피부과" + 제목에 "압구정" → "압구정피부과", "신사피부과 압구정")',
+    '- 제목이 특정 시술/항목을 강조하면 지역+항목을 압축한 키워드도 만든다.',
+    '  (예: 메인 "신사피부과" + 제목에 "리프팅" → "신사리프팅", "신사피부과 리프팅")',
+    '- 메인 키워드의 확장형(메인 + 수식어)도 포함한다. (예: "신사피부과 잘하는곳", "신사피부과 후기")',
     '규칙:',
-    '- ★메인 키워드를 그대로(연속해서) 포함하고, 앞/뒤에 수식어만 덧붙인 확장형만 만든다. 메인 키워드를 쪼개거나 빼지 말 것.',
-    '  (예: 메인 "신사모발이식" → "신사모발이식 후기", "신사모발이식 흉터", "강남 신사모발이식". X: "탈모", "모발이식")',
-    '- 제목 속 수식어(후기·가격·비용·잘하는곳·흉터 등)를 활용. 2~5어절의 자연스러운 검색어. 문장·해시태그·특수문자 금지.',
-    '- 메인 키워드 자체보다 더 넓은(상위) 단어나 글과 무관한 것은 금지.',
-    '- 최대 25개. JSON 으로만: {"candidates": ["...", "..."]}',
+    '- 사람이 실제로 검색창에 칠 법한 2~4어절(또는 지역+업종 압축형) 구체 검색어만.',
+    '- ★광범위한 단일 일반어 금지: "피부과", "리프팅", "성형", "탈모" 처럼 너무 넓은 단어는 절대 만들지 마라.',
+    '- 글 주제와 무관한 것 금지. 문장·해시태그·특수문자 금지.',
+    '- 최대 20개. JSON 으로만: {"candidates": ["...", "..."]}',
   ].join('\n');
-  const user = `메인 키워드: ${keyword}\n글 제목: ${title || '(제목 없음 — 메인 키워드 기준으로 합리적 변형만)'}`;
+  const user = `메인 키워드: ${keyword}\n글 제목: ${title || '(제목 없음 — 메인 키워드 기준 합리적 변형만)'}`;
   try {
     const res = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -79,34 +84,28 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const keyword = (body.keyword ?? '').trim();
   if (!keyword) return json({ error: '메인 키워드가 필요합니다.' }, 400);
-  // 롱테일은 본질적으로 저볼륨(네이버 "< 10" → 20). 검색량은 '실재 검색어(>0)' 게이트 역할만 하고
-  // 진짜 가치 필터는 다운스트림 순위확인이므로 기본 임계치를 낮게 둔다.
+  // 롱테일은 저볼륨이라 임계치는 '실재 검색어(>0)' 게이트 역할만. 진짜 가치는 수집기 순위확인이 판정.
   const threshold = typeof body.threshold === 'number' ? body.threshold : 10;
   const max = typeof body.max === 'number' ? body.max : 5;
   const excluded = new Set([normKw(keyword), ...(body.existing ?? []).map(normKw)]);
 
   try {
-    // ① 두 소스 동시 수집 (한쪽 실패해도 진행)
-    const [llm, related] = await Promise.all([
-      llmCandidates(env, keyword, body.title),
-      relatedKeywords(env, keyword, 100).catch(() => [] as { keyword: string; volume: number }[]),
-    ]);
+    // ① LLM 의도 기반 후보 (related API 는 광범위 헤드 키워드를 줘서 사용하지 않음)
+    const cands = await llmCandidates(env, keyword, body.title);
+    if (!cands.length) return json({ keyword, threshold, max, count: 0, candidates: [] });
 
-    // ② LLM 후보의 검색량 조회
-    const llmVol = llm.length ? await keywordVolumes(env, llm) : new Map<string, number>();
+    // ② 후보 검색량 조회
+    const vol = await keywordVolumes(env, cands);
 
-    // ③ 통합 + dedup(같은 키워드면 검색량 큰 쪽 유지)
-    //    ★롱테일만: 메인 키워드를 포함하는 확장형만 채택(헤드/무관 단어 배제). 어순/띄어쓰기는 정규화로 흡수.
-    const baseNorm = normKw(keyword);
-    const merged = new Map<string, { keyword: string; volume: number; source: 'llm' | 'related' }>();
-    const add = (kw: string, volume: number, source: 'llm' | 'related') => {
-      const n = normKw(kw);
-      if (!kw || excluded.has(n) || !n.includes(baseNorm)) return;
+    // ③ dedup + 메인/기존 제외 (컨테인먼트 강제 없음 — 의도형 서브 허용)
+    const merged = new Map<string, { keyword: string; volume: number; source: 'llm' }>();
+    for (const c of cands) {
+      const n = normKw(c);
+      if (!c || excluded.has(n)) continue;
+      const v = vol.get(n) ?? 0;
       const prev = merged.get(n);
-      if (!prev || volume > prev.volume) merged.set(n, { keyword: kw.trim(), volume, source });
-    };
-    for (const r of related) add(r.keyword, r.volume, 'related');
-    for (const c of llm) add(c, llmVol.get(normKw(c)) ?? 0, 'llm');
+      if (!prev || v > prev.volume) merged.set(n, { keyword: c.trim(), volume: v, source: 'llm' });
+    }
 
     // ④ 검색량 필터 → 정렬 → 상한
     const candidates = Array.from(merged.values())
