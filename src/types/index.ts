@@ -13,7 +13,7 @@ export type SearchTab = 'integrated' | 'blog' | 'cafe';
 export interface SubKeyword {
   keyword: string;
   volume: number;                                        // 월 검색량(PC+모바일) — 검색광고 API
-  source: 'gemini' | 'llm' | 'related' | 'rule';         // 생성 출처(gemini/openai/규칙폴백)
+  source: 'external' | 'gemini' | 'llm' | 'related' | 'rule'; // 생성 출처(external=수집기 직접/gemini/openai/규칙)
   rankByTab?: Partial<Record<SearchTab, number | null>>; // 탭별 순위(null=미노출)
   rankCheckedAt?: Partial<Record<SearchTab, string>>;    // 탭별 마지막 수집 시각(ISO)
   createdAt: string;                                     // 자동 등록 시각(ISO)

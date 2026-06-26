@@ -149,7 +149,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     return json({ error: '검색광고 API 키가 설정되지 않았습니다(검색량 필터 필요).' }, 500);
   }
 
-  let body: { keyword?: string; title?: string; existing?: string[]; threshold?: number; max?: number };
+  let body: { keyword?: string; title?: string; existing?: string[]; threshold?: number; max?: number; candidates?: string[] };
   try { body = await request.json(); } catch { return json({ error: '잘못된 요청 본문입니다.' }, 400); }
 
   const keyword = (body.keyword ?? '').trim();
@@ -161,28 +161,35 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const excluded = new Set([normKw(keyword), ...(body.existing ?? []).map(normKw)]);
 
   try {
-    // ① AI 의도 기반 후보: Gemini 우선(지역차단 없음) → OpenAI 폴백 → 규칙 폴백.
+    // ① 후보 확보. 호출자가 candidates 를 직접 주면(수집기가 한국에서 LLM 호출) 그걸 쓰고 LLM 건너뜀
+    //    — Cloudflare colo 가 지역차단(HK 등)이라 함수 내 LLM 이 막히는 환경 대응.
+    //    candidates 없으면: Gemini → OpenAI → 규칙 (허용 지역 호출자용).
     let cands: string[] = [];
-    let via: 'gemini' | 'llm' | 'rule' = 'rule';
+    let via: 'external' | 'gemini' | 'llm' | 'rule' = 'rule';
     const diag: { geminiStatus?: number; geminiError?: string; llmStatus?: number; llmError?: string } = {};
-    if (env.GEMINI_API_KEY) {
-      const g = await geminiCandidates(env, keyword, body.title);
-      diag.geminiStatus = g.status; diag.geminiError = g.error;
-      if (g.list.length) { cands = g.list; via = 'gemini'; }
+    if (Array.isArray(body.candidates) && body.candidates.length) {
+      cands = body.candidates.filter((c): c is string => typeof c === 'string' && c.trim().length > 0);
+      via = 'external';
+    } else {
+      if (env.GEMINI_API_KEY) {
+        const g = await geminiCandidates(env, keyword, body.title);
+        diag.geminiStatus = g.status; diag.geminiError = g.error;
+        if (g.list.length) { cands = g.list; via = 'gemini'; }
+      }
+      if (!cands.length) {
+        const o = await llmCandidates(env, keyword, body.title);
+        diag.llmStatus = o.status; diag.llmError = o.error;
+        if (o.list.length) { cands = o.list; via = 'llm'; }
+      }
+      if (!cands.length) { cands = ruleCandidates(keyword, body.title); via = 'rule'; }
     }
-    if (!cands.length) {
-      const o = await llmCandidates(env, keyword, body.title);
-      diag.llmStatus = o.status; diag.llmError = o.error;
-      if (o.list.length) { cands = o.list; via = 'llm'; }
-    }
-    if (!cands.length) { cands = ruleCandidates(keyword, body.title); via = 'rule'; }
     if (!cands.length) return json({ keyword, threshold, max, via, ...diag, count: 0, candidates: [] });
 
     // ② 후보 검색량 조회
     const vol = await keywordVolumes(env, cands);
 
     // ③ dedup + 메인/기존 제외 (컨테인먼트 강제 없음 — 의도형 서브 허용)
-    const merged = new Map<string, { keyword: string; volume: number; source: 'gemini' | 'llm' | 'rule' }>();
+    const merged = new Map<string, { keyword: string; volume: number; source: 'external' | 'gemini' | 'llm' | 'rule' }>();
     for (const c of cands) {
       const n = normKw(c);
       if (!c || excluded.has(n)) continue;
