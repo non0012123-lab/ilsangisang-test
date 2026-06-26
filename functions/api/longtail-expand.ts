@@ -13,6 +13,36 @@ import { keywordVolumes, normKw, type SearchAdEnv } from './_searchad';
 interface Env extends SearchAdEnv {
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
+  GEMINI_API_KEY?: string;   // 있으면 Gemini 를 우선 사용(OpenAI 지역차단 회피, 한국 정상)
+  GEMINI_MODEL?: string;      // 기본 gemini-2.0-flash (키가 지원하는 모델로 덮어쓰기 가능)
+}
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+// 후보 생성 지시문(공통: OpenAI·Claude 동일). 의도 기반 + 헤드 키워드 금지.
+const GEN_INSTRUCTIONS = [
+  '너는 한국 네이버 상위노출 롱테일 키워드 발굴기다.',
+  '"메인 키워드"와 "글 제목"을 보고, 이 글이 실제로 노출을 노릴 만한 구체적인 검색어를 만든다.',
+  '핵심(제목의 의도를 읽어라):',
+  '- 제목에 다른 지역/장소가 등장하면 그 지역으로 바꾼 조합도 만든다.',
+  '  (예: 메인 "신사피부과" + 제목에 "압구정" → "압구정피부과", "신사피부과 압구정")',
+  '- 제목이 특정 시술/항목을 강조하면 지역+항목을 압축한 키워드도 만든다.',
+  '  (예: 메인 "신사피부과" + 제목에 "리프팅" → "신사리프팅", "신사피부과 리프팅")',
+  '- 메인 키워드의 확장형(메인 + 수식어)도 포함한다. (예: "신사피부과 잘하는곳", "신사피부과 후기")',
+  '규칙:',
+  '- 사람이 실제로 검색창에 칠 법한 2~4어절(또는 지역+업종 압축형) 구체 검색어만.',
+  '- ★광범위한 단일 일반어 금지: "피부과", "리프팅", "성형", "탈모" 처럼 너무 넓은 단어는 절대 만들지 마라.',
+  '- 글 주제와 무관한 것 금지. 문장·해시태그·특수문자 금지.',
+  '- 최대 20개. JSON 으로만 출력: {"candidates": ["...", "..."]}',
+].join('\n');
+
+const genUser = (keyword: string, title?: string) =>
+  `메인 키워드: ${keyword}\n글 제목: ${title || '(제목 없음 — 메인 키워드 기준 합리적 변형만)'}`;
+
+// 텍스트에서 JSON 객체만 추출(모델이 앞뒤에 군말을 붙이는 경우 대비).
+function extractJson(s: string): string {
+  const a = s.indexOf('{'); const b = s.lastIndexOf('}');
+  return a >= 0 && b > a ? s.slice(a, b + 1) : s;
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -33,36 +63,48 @@ function extractText(data: unknown): string {
   return parts.join('\n').trim();
 }
 
-// 제목의 의도를 읽어 구체적 롱테일 후보 생성. 실패하면 list:[] + 사유(status/error)를 함께 반환.
+// 제미나이로 후보 생성(지역차단 없음, 한국 정상). 실패하면 list:[] + 사유.
+async function geminiCandidates(env: Env, keyword: string, title?: string): Promise<{ list: string[]; status?: number; error?: string }> {
+  if (!env.GEMINI_API_KEY) return { list: [], error: 'GEMINI_API_KEY 없음' };
+  const model = env.GEMINI_MODEL || 'gemini-2.0-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
+  const reqBody = JSON.stringify({
+    system_instruction: { parts: [{ text: GEN_INSTRUCTIONS }] },
+    contents: [{ role: 'user', parts: [{ text: genUser(keyword, title) }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.7, maxOutputTokens: 1024 },
+  });
+  let lastStatus: number | undefined, lastErr: string | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: reqBody });
+      if (res.ok) {
+        const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+        const text = (data.candidates?.[0]?.content?.parts ?? []).map(p => p?.text ?? '').join('');
+        const parsed = JSON.parse(extractJson(text)) as { candidates?: unknown };
+        const list = Array.isArray(parsed?.candidates) ? parsed.candidates.filter((c): c is string => typeof c === 'string') : [];
+        return { list, status: 200 };
+      }
+      lastStatus = res.status; lastErr = (await res.text()).slice(0, 160);
+      if ((res.status === 429 || res.status >= 500) && attempt < 2) { await sleep(800 * (attempt + 1)); continue; }
+      return { list: [], status: lastStatus, error: lastErr };
+    } catch (e) { lastErr = (e as Error).message; if (attempt < 2) await sleep(600); }
+  }
+  return { list: [], status: lastStatus, error: lastErr };
+}
+
+// OpenAI 폴백(지역차단 가능). 실패하면 list:[] + 사유(status/error).
 async function llmCandidates(env: Env, keyword: string, title?: string): Promise<{ list: string[]; status?: number; error?: string }> {
   if (!env.OPENAI_API_KEY) return { list: [], error: 'OPENAI_API_KEY 없음' };
-  const developer = [
-    '너는 한국 네이버 상위노출 롱테일 키워드 발굴기다.',
-    '"메인 키워드"와 "글 제목"을 보고, 이 글이 실제로 노출을 노릴 만한 구체적인 검색어를 만든다.',
-    '핵심(제목의 의도를 읽어라):',
-    '- 제목에 다른 지역/장소가 등장하면 그 지역으로 바꾼 조합도 만든다.',
-    '  (예: 메인 "신사피부과" + 제목에 "압구정" → "압구정피부과", "신사피부과 압구정")',
-    '- 제목이 특정 시술/항목을 강조하면 지역+항목을 압축한 키워드도 만든다.',
-    '  (예: 메인 "신사피부과" + 제목에 "리프팅" → "신사리프팅", "신사피부과 리프팅")',
-    '- 메인 키워드의 확장형(메인 + 수식어)도 포함한다. (예: "신사피부과 잘하는곳", "신사피부과 후기")',
-    '규칙:',
-    '- 사람이 실제로 검색창에 칠 법한 2~4어절(또는 지역+업종 압축형) 구체 검색어만.',
-    '- ★광범위한 단일 일반어 금지: "피부과", "리프팅", "성형", "탈모" 처럼 너무 넓은 단어는 절대 만들지 마라.',
-    '- 글 주제와 무관한 것 금지. 문장·해시태그·특수문자 금지.',
-    '- 최대 20개. JSON 으로만: {"candidates": ["...", "..."]}',
-  ].join('\n');
-  const user = `메인 키워드: ${keyword}\n글 제목: ${title || '(제목 없음 — 메인 키워드 기준 합리적 변형만)'}`;
   const reqBody = JSON.stringify({
     model: env.OPENAI_MODEL || 'gpt-5.4-mini',
     input: [
-      { role: 'developer', content: [{ type: 'input_text', text: developer }] },
-      { role: 'user', content: [{ type: 'input_text', text: user }] },
+      { role: 'developer', content: [{ type: 'input_text', text: GEN_INSTRUCTIONS }] },
+      { role: 'user', content: [{ type: 'input_text', text: genUser(keyword, title) }] },
     ],
     text: { format: { type: 'json_object' } },
     reasoning: { effort: 'low' },
     store: false,
   });
-  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
   let lastStatus: number | undefined, lastErr: string | undefined;
   // 429(레이트리밋)·5xx 는 일시적이라 백오프 재시도. 403(지역차단)은 재시도 무의미 → 즉시 반환(폴백).
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -118,19 +160,28 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const excluded = new Set([normKw(keyword), ...(body.existing ?? []).map(normKw)]);
 
   try {
-    // ① LLM 의도 기반 후보. 실패(OpenAI 차단/레이트리밋 등)로 0이면 규칙기반 폴백.
-    const llm = await llmCandidates(env, keyword, body.title);
-    let cands = llm.list;
-    let via: 'llm' | 'rule' = 'llm';
+    // ① AI 의도 기반 후보: Gemini 우선(지역차단 없음) → OpenAI 폴백 → 규칙 폴백.
+    let cands: string[] = [];
+    let via: 'gemini' | 'llm' | 'rule' = 'rule';
+    const diag: { geminiStatus?: number; geminiError?: string; llmStatus?: number; llmError?: string } = {};
+    if (env.GEMINI_API_KEY) {
+      const g = await geminiCandidates(env, keyword, body.title);
+      diag.geminiStatus = g.status; diag.geminiError = g.error;
+      if (g.list.length) { cands = g.list; via = 'gemini'; }
+    }
+    if (!cands.length) {
+      const o = await llmCandidates(env, keyword, body.title);
+      diag.llmStatus = o.status; diag.llmError = o.error;
+      if (o.list.length) { cands = o.list; via = 'llm'; }
+    }
     if (!cands.length) { cands = ruleCandidates(keyword, body.title); via = 'rule'; }
-    const diag = { llmStatus: llm.status, llmError: llm.error };  // 삼킨 실패 사유 노출(403=지역차단 / 429=레이트리밋·쿼터)
     if (!cands.length) return json({ keyword, threshold, max, via, ...diag, count: 0, candidates: [] });
 
     // ② 후보 검색량 조회
     const vol = await keywordVolumes(env, cands);
 
     // ③ dedup + 메인/기존 제외 (컨테인먼트 강제 없음 — 의도형 서브 허용)
-    const merged = new Map<string, { keyword: string; volume: number; source: 'llm' | 'rule' }>();
+    const merged = new Map<string, { keyword: string; volume: number; source: 'gemini' | 'llm' | 'rule' }>();
     for (const c of cands) {
       const n = normKw(c);
       if (!c || excluded.has(n)) continue;
