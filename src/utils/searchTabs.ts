@@ -12,6 +12,17 @@ export const SEARCH_TAB_LABEL: Record<SearchTab, string> = {
   cafe: '카페탭',
 };
 
+// 칩 등 좁은 곳용 짧은 탭명.
+export const SEARCH_TAB_SHORT: Record<SearchTab, string> = {
+  integrated: '통합',
+  blog: '블로그',
+  cafe: '카페',
+};
+
+// rankByTab 중 '순위가 잡힌(숫자) 탭'만 순서대로. (롱테일 등 노출 영역+순위 표시용)
+export const foundRanks = (rankByTab?: Partial<Record<SearchTab, number | null>>): { tab: SearchTab; rank: number }[] =>
+  rankByTab ? SEARCH_TAB_ORDER.filter(t => typeof rankByTab[t] === 'number').map(t => ({ tab: t, rank: rankByTab[t] as number })) : [];
+
 // 순위 수집 대상(검색 탭 선택을 노출할) 카테고리.
 export const isRankTrackedCategory = (c?: Category | string): boolean =>
   c === '블로그 상위노출' || c === '블로그관리' || c === '카페 상위노출';

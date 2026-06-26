@@ -7,7 +7,7 @@ import ImageThumb from './ImageThumb';
 import { MAX_IMAGES, entryImages } from '../utils/entryImages';
 import { recurrenceOccurrences } from '../utils/recurrence';
 import { CATEGORY_GROUPS, CATEGORY_METRICS, catLabel } from '../data/categories';
-import { SEARCH_TAB_ORDER, SEARCH_TAB_LABEL, isRankTrackedCategory, defaultSearchTabs, bestRank } from '../utils/searchTabs';
+import { SEARCH_TAB_ORDER, SEARCH_TAB_LABEL, SEARCH_TAB_SHORT, isRankTrackedCategory, defaultSearchTabs, foundRanks } from '../utils/searchTabs';
 
 // 반복 옵션(UI) → Recurrence 규칙 매핑. 'none' 이면 반복 없음(단건).
 type RecurOpt = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
@@ -344,12 +344,14 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
               {(form.subKeywords?.length ?? 0) > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
                   {form.subKeywords!.map((s, idx) => {
-                    const best = bestRank(s.rankByTab);
+                    const fr = foundRanks(s.rankByTab);   // 잡힌 탭만(통합/블로그/카페)
                     return (
                       <span key={s.keyword} title={s.source}
                         className="inline-flex items-center gap-1.5 px-2 h-6 rounded-lg bg-white border border-gray-200 text-[11px] text-gray-700">
                         {s.keyword}
-                        {best != null && <span className="font-semibold text-blue-600">{best}위</span>}
+                        {fr.length > 0
+                          ? fr.map(f => <span key={f.tab} className="font-semibold text-blue-600">{SEARCH_TAB_SHORT[f.tab]} {f.rank}위</span>)
+                          : <span className="text-amber-600">미노출</span>}
                         <button type="button" onClick={() => set('subKeywords', form.subKeywords!.filter((_, i) => i !== idx))}
                           className="text-gray-300 hover:text-red-500"><X size={11} /></button>
                       </span>
