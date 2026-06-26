@@ -3,6 +3,12 @@ import { overlapsRange, isMultiDay, entryEnd } from './dateRange';
 import { entryImages } from './entryImages';
 import { buildGalleryGroups } from './galleryGroups';
 import { catHex as categoryColor, catLabel, CATEGORY_ICON, NAVER_FAMILY } from '../data/categories';
+import { isRankTrackedCategory, foundRanks, SEARCH_TAB_SHORT } from './searchTabs';
+
+// rankByTab → "통합 4위 · 블로그 2위"(잡힌 탭만). 없으면 빈 문자열.
+function tabRankText(rbt?: Partial<Record<'integrated' | 'blog' | 'cafe', number | null>>): string {
+  return foundRanks(rbt).map(f => `${SEARCH_TAB_SHORT[f.tab]} ${f.rank}위`).join(' · ');
+}
 
 function num(n: number | undefined) {
   if (!n) return '-';
@@ -49,6 +55,33 @@ export function buildReportHtml(report: Report, client: Client, allEntries: Sche
     </li>`
   ).join('');
 
+  // 네이버 상위노출 순위 현황 — 순위추적 카테고리 중 '메인 또는 롱테일이 한 탭이라도 잡힌' 항목만.
+  const rankEntries = clientEntries.filter(e =>
+    isRankTrackedCategory(e.category) &&
+    (foundRanks(e.rankByTab).length > 0 || (e.subKeywords ?? []).some(s => foundRanks(s.rankByTab).length > 0))
+  );
+  const rankStatusHtml = rankEntries.length ? `
+    <p style="font-size:11px;font-weight:700;color:#6b7280;letter-spacing:2px;margin-bottom:12px;">네이버 상위노출 순위 현황</p>
+    <div style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:24px;">
+      ${rankEntries.map((e, i) => {
+        const main = tabRankText(e.rankByTab);
+        const subs = (e.subKeywords ?? []).filter(s => foundRanks(s.rankByTab).length > 0);
+        const subHtml = subs.length ? `
+          <div style="font-size:11px;color:#6b7280;margin-top:5px;padding-left:14px;line-height:1.7;">
+            <span style="color:#9ca3af;">└ 롱테일</span>
+            ${subs.map(s => `<span style="margin-left:6px;">${s.keyword} <span style="color:#2563eb;font-weight:600;">${tabRankText(s.rankByTab)}</span></span>`).join('<span style="color:#d1d5db;"> / </span>')}
+          </div>` : '';
+        return `
+        <div style="padding:11px 16px;background:${i % 2 === 0 ? '#ffffff' : '#f9fafb'};${i ? 'border-top:1px solid #f3f4f6;' : ''}">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span style="font-size:13px;font-weight:600;color:#111827;">${e.keyword ?? '-'}</span>
+            <span style="font-size:13px;font-weight:700;color:#2563eb;white-space:nowrap;">${main || '<span style="color:#d97706;">미노출</span>'}</span>
+          </div>
+          ${subHtml}
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
   const entryRows = regularEntries.map((e, i) => {
     const imgs = entryImages(e);
     return `
@@ -67,8 +100,8 @@ export function buildReportHtml(report: Report, client: Client, allEntries: Sche
       <td style="padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6;">
         <span style="background:${statusColor(e.status)}22;color:${statusColor(e.status)};font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;">${statusLabel(e.status)}</span>
       </td>
-      <td style="padding:8px 10px;font-size:12px;color:#2563eb;font-weight:700;border-bottom:1px solid #f3f4f6;text-align:center;">
-        ${e.rank ? `${e.rank}위` : (e.metrics?.views ? num(e.metrics.views) + '회' : '-')}
+      <td style="padding:8px 10px;font-size:12px;color:#2563eb;font-weight:700;border-bottom:1px solid #f3f4f6;text-align:center;white-space:nowrap;">
+        ${tabRankText(e.rankByTab) || (e.rank ? `${e.rank}위` : (e.metrics?.views ? num(e.metrics.views) + '회' : '-'))}
       </td>
       <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;text-align:center;font-size:11px;color:#6b7280;white-space:nowrap;">
         ${imgs.length ? `${imgs.length}장` : '<span style="color:#d1d5db;">없음</span>'}
@@ -216,6 +249,9 @@ export function buildReportHtml(report: Report, client: Client, allEntries: Sche
         </div>`;
       }).join('')}
     </div>` : ''}
+
+    <!-- 네이버 상위노출 순위 현황(탭별 + 발굴 롱테일) -->
+    ${rankStatusHtml}
 
     <!-- Highlights -->
     ${highlightRows ? `
