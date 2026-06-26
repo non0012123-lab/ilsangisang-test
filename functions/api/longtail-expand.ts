@@ -14,7 +14,7 @@ interface Env extends SearchAdEnv {
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
   GEMINI_API_KEY?: string;   // 있으면 Gemini 를 우선 사용(OpenAI 지역차단 회피, 한국 정상)
-  GEMINI_MODEL?: string;      // 기본 gemini-2.0-flash (키가 지원하는 모델로 덮어쓰기 가능)
+  GEMINI_MODEL?: string;      // 기본 gemini-2.5-flash (퇴역 대비: gemini-flash-latest 도 가능)
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -66,7 +66,7 @@ function extractText(data: unknown): string {
 // 제미나이로 후보 생성(지역차단 없음, 한국 정상). 실패하면 list:[] + 사유.
 async function geminiCandidates(env: Env, keyword: string, title?: string): Promise<{ list: string[]; status?: number; error?: string }> {
   if (!env.GEMINI_API_KEY) return { list: [], error: 'GEMINI_API_KEY 없음' };
-  const model = env.GEMINI_MODEL || 'gemini-2.0-flash';
+  const model = env.GEMINI_MODEL || 'gemini-2.5-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
   const reqBody = JSON.stringify({
     system_instruction: { parts: [{ text: GEN_INSTRUCTIONS }] },
