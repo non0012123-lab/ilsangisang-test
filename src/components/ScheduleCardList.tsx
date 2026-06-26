@@ -3,6 +3,7 @@ import CategoryBadge from './CategoryBadge';
 import InlineStatus from './InlineStatus';
 import InlineScreenshot from './InlineScreenshot';
 import InlineLink from './InlineLink';
+import RankTabsBadge from './RankTabsBadge';
 import { isMultiDay } from '../utils/dateRange';
 import { entryImages } from '../utils/entryImages';
 import type { ScheduleEntry, ScheduleStatus } from '../types';
@@ -42,7 +43,7 @@ export default function ScheduleCardList({ entries, onPatch, onPreview, onEdit, 
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             <CategoryBadge category={entry.category} />
             <InlineStatus status={entry.status} onChange={(s: ScheduleStatus) => onPatch(entry.id, { status: s })} />
-            {entry.rank ? <span className="inline-flex items-center justify-center px-2 h-6 rounded-lg bg-blue-50 text-blue-700 font-bold text-xs">{entry.rank}위</span> : null}
+            {(entry.rank != null || (entry.searchTabs?.length ?? 0) > 0) ? <RankTabsBadge entry={entry} showChecked /> : null}
           </div>
           <p className="font-semibold text-gray-900 text-sm mb-0.5 break-words">{entry.opinionTitle ?? entry.keyword ?? '-'}</p>
           <p className="text-xs text-gray-500 mb-2">{entry.managerName} · {entry.clientName}</p>

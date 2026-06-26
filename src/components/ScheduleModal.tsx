@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { X, Sparkles, ChevronDown, ChevronUp, Repeat } from 'lucide-react';
-import type { ScheduleEntry, Category, ScheduleStatus, AIMetrics, Recurrence } from '../types';
+import type { ScheduleEntry, Category, ScheduleStatus, AIMetrics, Recurrence, SearchTab } from '../types';
 import { useApp } from '../context/AppContext';
 import ImageDropzone from './ImageDropzone';
 import ImageThumb from './ImageThumb';
 import { MAX_IMAGES, entryImages } from '../utils/entryImages';
 import { recurrenceOccurrences } from '../utils/recurrence';
 import { CATEGORY_GROUPS, CATEGORY_METRICS, catLabel } from '../data/categories';
+import { SEARCH_TAB_ORDER, SEARCH_TAB_LABEL, isRankTrackedCategory, defaultSearchTabs, bestRank } from '../utils/searchTabs';
 
 // 반복 옵션(UI) → Recurrence 규칙 매핑. 'none' 이면 반복 없음(단건).
 type RecurOpt = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
@@ -88,6 +89,13 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
   const set = (key: keyof ScheduleEntry, value: unknown) =>
     setForm(prev => ({ ...prev, [key]: value }));
 
+  // 순위 수집 탭(다중). 미설정이면 카테고리 기본값을 보여주고, 토글하면 명시 저장.
+  const searchTabs = form.searchTabs ?? defaultSearchTabs(form.category);
+  const toggleTab = (t: SearchTab) => {
+    const next = searchTabs.includes(t) ? searchTabs.filter(x => x !== t) : [...searchTabs, t];
+    set('searchTabs', SEARCH_TAB_ORDER.filter(x => next.includes(x)));  // 표준 순서로 정규화 저장
+  };
+
   // 이미지(시안/인사이트) — 레거시 screenshot/문자열 호환 + 신규 {url,kind} 배열, 최대 MAX_IMAGES 장
   const images = entryImages(form);
   const setImages = (imgs: typeof images) => setForm(prev => ({ ...prev, images: imgs, screenshot: undefined }));
@@ -128,11 +136,17 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
     const endDate = form.endDate && form.endDate > form.date! ? form.endDate : undefined;
 
     const hasMetrics = Object.values(metrics).some(v => v !== undefined && v !== '');
+    // 순위 수집 대상 카테고리면 선택 탭(미설정 시 기본값)을 저장. 그 외엔 탭 없음.
+    const tabsForSave = isRankTrackedCategory(form.category)
+      ? (form.searchTabs ?? defaultSearchTabs(form.category))
+      : undefined;
     const common = {
       managerId: form.managerId!, managerName: form.managerName!,
       category: form.category!, clientId: form.clientId!, clientName: form.clientName!,
       status: form.status!,
       keyword: form.keyword, link: form.link, rank: form.rank,
+      searchTabs: tabsForSave, rankByTab: form.rankByTab, rankCheckedAt: form.rankCheckedAt,
+      postTitle: form.postTitle, subKeywords: form.subKeywords,
       opinionTitle: form.opinionTitle, opinionContent: form.opinionContent, opinionComments: form.opinionComments,
       images: images.length ? images : undefined, screenshot: undefined,
       metrics: hasMetrics ? { ...metrics, aiAnalyzed: false } : undefined,
@@ -282,6 +296,65 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
               </div>
             )}
           </div>
+
+          {/* 순위 수집 탭 — 블로그/카페 상위노출·블로그관리에서만, 다중 선택 */}
+          {!isOpinion && isRankTrackedCategory(form.category) && (
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">
+                순위 수집 탭 <span className="text-gray-400 font-normal">(다중 선택 · 선택한 탭에서 자동 수집, 대표 순위는 최고값)</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {SEARCH_TAB_ORDER.map(t => {
+                  const sel = searchTabs.includes(t);
+                  const r = form.rankByTab?.[t];
+                  return (
+                    <button type="button" key={t} onClick={() => toggleTab(t)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition ${sel ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
+                      {SEARCH_TAB_LABEL[t]}{sel && r != null ? ` · ${r}위` : ''}
+                    </button>
+                  );
+                })}
+              </div>
+              {searchTabs.length === 0 && (
+                <p className="mt-1 text-xs text-amber-600">탭을 1개 이상 선택해야 순위를 수집합니다.</p>
+              )}
+            </div>
+          )}
+
+          {/* 롱테일(발굴된 것만 읽기전용) — 수집기가 순위 잡힌 롱테일만 자동 기입 */}
+          {!isOpinion && isRankTrackedCategory(form.category) && (
+            <div className="rounded-xl border border-gray-200 p-3 space-y-2 bg-gray-50/60">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">
+                  글 제목 <span className="text-gray-400 font-normal">(선택 · 롱테일 발굴 입력 · 수집 시 자동 채워짐)</span>
+                </label>
+                <input type="text" value={form.postTitle ?? ''} onChange={e => set('postTitle', e.target.value)}
+                  placeholder="예: 신도림 술집 추천 가성비로 2차하기 좋은 곳"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-gray-500">발굴된 롱테일 <span className="text-gray-400 font-normal">(순위 잡힌 것만 · 수집기 자동)</span></span>
+                <span className="text-[11px] text-gray-400">{form.subKeywords?.length ?? 0}개</span>
+              </div>
+              {(form.subKeywords?.length ?? 0) > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {form.subKeywords!.map(s => {
+                    const best = bestRank(s.rankByTab);
+                    return (
+                      <span key={s.keyword} title={`검색량 ${s.volume.toLocaleString()} · ${s.source}`}
+                        className="inline-flex items-center gap-1.5 px-2 h-6 rounded-lg bg-white border border-gray-200 text-[11px] text-gray-700">
+                        {s.keyword}
+                        <span className="text-gray-400">{s.volume.toLocaleString()}</span>
+                        {best != null && <span className="font-semibold text-blue-600">{best}위</span>}
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-[11px] text-gray-400">아직 발굴된 롱테일이 없습니다. 순위 수집 시 자동으로 채워집니다.</p>
+              )}
+            </div>
+          )}
 
           {/* Dynamic fields */}
           {isOpinion ? (

@@ -11,6 +11,8 @@ import InlineScreenshot from '../components/InlineScreenshot';
 import { entryImages } from '../utils/entryImages';
 import InlineLink from '../components/InlineLink';
 import ScheduleModal from '../components/ScheduleModal';
+import RankCollectButton from '../components/RankCollectButton';
+import RankTabsBadge from '../components/RankTabsBadge';
 import type { ScheduleEntry, Category, ScheduleStatus } from '../types';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
@@ -78,6 +80,7 @@ export default function FullSchedulePage() {
                 <User size={14} /> 내 일정
               </button>
             )}
+            <RankCollectButton />
             <button onClick={() => setShowFilters(v => !v)}
               className={`flex items-center gap-2 px-4 py-2 border rounded-xl text-sm transition-colors ${showFilters ? 'border-blue-500 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               <Filter size={14} /> 필터
@@ -188,9 +191,7 @@ export default function FullSchedulePage() {
                       <td className="px-4 py-3">
                         {entry.category === '네이버 여론작업' ? (
                           entry.metrics?.comments ? <span className="text-xs text-sky-600 font-medium">💬{entry.metrics.comments}</span> : <span className="text-gray-300">-</span>
-                        ) : entry.rank ? (
-                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-50 text-blue-700 font-bold text-xs">{entry.rank}</span>
-                        ) : <span className="text-gray-300">-</span>}
+                        ) : <RankTabsBadge entry={entry} />}
                       </td>
                       <td className="px-4 py-3">
                         <InlineScreenshot

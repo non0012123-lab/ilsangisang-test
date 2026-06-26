@@ -37,3 +37,6 @@ dist-ssr
 
 # 데스크톱 업데이터 서명 개인키 — 절대 커밋 금지(서명은 CI 의 secret 으로 수행)
 src-tauri/.updater-private-key
+
+# 순위수집 스파이크/핸드오프(파서·계약·service_role 키 포함) — 커밋 금지, 로컬 참고용
+spike-rank/

@@ -4,6 +4,20 @@ export type Category =
   | '카페 상위노출' | '카페 배포' | '클립'
   | '영상제작' | '디자인제작' | '네이버 여론작업' | '기타';
 export type ScheduleStatus = 'pending' | 'in-progress' | 'completed';
+// 순위 수집 대상 검색 탭(다중 선택 가능). 통합검색 / 블로그탭 / 카페탭.
+export type SearchTab = 'integrated' | 'blog' | 'cafe';
+
+// 자동 확장된 롱테일 서브키워드. 제목/연관키워드에서 생성 → 검색량 필터 통과분만 등록.
+//  • 탭/링크는 부모 일정(ScheduleEntry)을 상속해 같이 수집한다(별도 지정 없음).
+//  • 순위는 메인 키워드와 동일하게 탭별로 채워진다(수집기 patch).
+export interface SubKeyword {
+  keyword: string;
+  volume: number;                                        // 월 검색량(PC+모바일) — 검색광고 API
+  source: 'llm' | 'related';                             // 생성 출처
+  rankByTab?: Partial<Record<SearchTab, number | null>>; // 탭별 순위(null=미노출)
+  rankCheckedAt?: Partial<Record<SearchTab, string>>;    // 탭별 마지막 수집 시각(ISO)
+  createdAt: string;                                     // 자동 등록 시각(ISO)
+}
 export type UserRole = 'admin' | 'manager' | 'client' | 'pending';
 
 export interface AIMetrics {
@@ -235,7 +249,12 @@ export interface ScheduleEntry {
   category: Category;
   keyword?: string;
   link?: string;
-  rank?: number;
+  rank?: number;                                       // 대표 순위 = 선택 탭 중 최고(min). 수집기/수동 입력.
+  searchTabs?: SearchTab[];                            // 순위 수집 대상 탭(다중). 비어있으면 수집 안 함
+  rankByTab?: Partial<Record<SearchTab, number | null>>; // 수집기가 채우는 탭별 순위(null=미노출)
+  rankCheckedAt?: Partial<Record<SearchTab, string>>;  // 탭별 마지막 수집 시각(ISO)
+  postTitle?: string;                                  // 매칭된 글 제목(롱테일 생성 입력) — 수집기가 캡처
+  subKeywords?: SubKeyword[];                          // 자동 확장된 롱테일 키워드(+ 각자의 탭별 순위)
   opinionTitle?: string;
   opinionContent?: string;
   opinionComments?: string;
