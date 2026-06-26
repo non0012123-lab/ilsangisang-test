@@ -86,7 +86,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   if (!keyword) return json({ error: '메인 키워드가 필요합니다.' }, 400);
   // 롱테일은 저볼륨이라 임계치는 '실재 검색어(>0)' 게이트 역할만. 진짜 가치는 수집기 순위확인이 판정.
   const threshold = typeof body.threshold === 'number' ? body.threshold : 10;
-  const max = typeof body.max === 'number' ? body.max : 5;
+  const max = typeof body.max === 'number' ? body.max : 8;
   const excluded = new Set([normKw(keyword), ...(body.existing ?? []).map(normKw)]);
 
   try {

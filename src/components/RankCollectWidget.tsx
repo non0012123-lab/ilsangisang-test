@@ -3,7 +3,7 @@
 //  - 메인 키워드 개수 + 진행 바(탭 done/total) + 성공/미노출/실패.
 //  - 실행 중이거나 '최근(10분 내) 완료' 면 표시, 완료건은 닫기로 숨김.
 import { useEffect, useState } from 'react';
-import { Loader2, Check, AlertCircle, X, Radar } from 'lucide-react';
+import { Loader2, Check, AlertCircle, X, Radar, Ban } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface Job {
@@ -42,7 +42,13 @@ export default function RankCollectWidget() {
     : job.status === 'running' ? '순위 수집 중'
     : job.status === 'done' ? '수집 완료'
     : job.status === 'empty' ? '수집할 대상 없음'
+    : job.status === 'cancelled' ? '수집 중단됨'
     : job.status === 'error' ? `오류: ${job.error ?? '알 수 없음'}` : job.status;
+
+  const cancel = () => {
+    if (!supabase || !window.confirm('수집을 중단할까요? 진행 중인 작업이 종료됩니다.')) return;
+    void supabase.rpc('cancel_rank_job', { p_job_id: job.id });
+  };
 
   return (
     <div className="fixed bottom-4 left-4 lg:left-[16rem] z-40 w-[18rem] max-w-[calc(100vw-2rem)] bg-white rounded-xl shadow-xl border border-gray-200 p-3 space-y-2.5">
@@ -50,11 +56,15 @@ export default function RankCollectWidget() {
         <span className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
           {running ? <Loader2 size={13} className="animate-spin text-blue-600" />
             : job.status === 'error' ? <AlertCircle size={13} className="text-red-500" />
+            : job.status === 'cancelled' ? <Ban size={13} className="text-gray-400" />
             : job.status === 'empty' ? <Radar size={13} className="text-gray-400" />
             : <Check size={13} className="text-green-600" />}
           순위 수집 · {statusText}
         </span>
-        {!running && <button onClick={() => setDismissed(job.id)} className="p-1 -m-1 text-gray-400 hover:text-gray-600"><X size={14} /></button>}
+        {running
+          ? <button onClick={cancel} title="수집 중단"
+              className="flex items-center gap-1 px-1.5 py-0.5 -my-0.5 rounded-md text-[11px] font-semibold text-red-600 hover:bg-red-50"><Ban size={12} /> 중단</button>
+          : <button onClick={() => setDismissed(job.id)} className="p-1 -m-1 text-gray-400 hover:text-gray-600"><X size={14} /></button>}
       </div>
 
       {/* 메인 키워드 개수 */}
