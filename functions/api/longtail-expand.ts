@@ -73,6 +73,18 @@ async function llmCandidates(env: Env, keyword: string, title?: string): Promise
   } catch { return []; }
 }
 
+// LLM 실패(예: OpenAI 지역차단 403) 시 폴백: 키워드 + 흔한 의도 접미어 + 제목 단어 조합.
+//  OpenAI 없이도 후보를 만들어 발굴이 멈추지 않게 한다. 검색량으로 실재 검색어만 살아남고, 순위확인이 최종 게이트.
+function ruleCandidates(keyword: string, title?: string): string[] {
+  const SUFFIX = ['병원', '원인', '치료', '증상', '후기', '추천', '잘하는곳', '비용', '가격', '상담', '문의', '예약'];
+  const out = SUFFIX.map(s => `${keyword} ${s}`);
+  if (title) {
+    const words = title.replace(/[^가-힣a-zA-Z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && w !== keyword);
+    for (const w of words.slice(0, 12)) out.push(`${keyword} ${w}`);
+  }
+  return Array.from(new Set(out));
+}
+
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
   if (!env.NAVER_AD_API_KEY || !env.NAVER_AD_SECRET_KEY || !env.NAVER_AD_CUSTOMER_ID) {
@@ -91,21 +103,23 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const excluded = new Set([normKw(keyword), ...(body.existing ?? []).map(normKw)]);
 
   try {
-    // ① LLM 의도 기반 후보 (related API 는 광범위 헤드 키워드를 줘서 사용하지 않음)
-    const cands = await llmCandidates(env, keyword, body.title);
-    if (!cands.length) return json({ keyword, threshold, max, count: 0, candidates: [] });
+    // ① LLM 의도 기반 후보. 실패(OpenAI 차단 등)로 0이면 규칙기반 폴백.
+    let cands = await llmCandidates(env, keyword, body.title);
+    let via: 'llm' | 'rule' = 'llm';
+    if (!cands.length) { cands = ruleCandidates(keyword, body.title); via = 'rule'; }
+    if (!cands.length) return json({ keyword, threshold, max, count: 0, candidates: [], via });
 
     // ② 후보 검색량 조회
     const vol = await keywordVolumes(env, cands);
 
     // ③ dedup + 메인/기존 제외 (컨테인먼트 강제 없음 — 의도형 서브 허용)
-    const merged = new Map<string, { keyword: string; volume: number; source: 'llm' }>();
+    const merged = new Map<string, { keyword: string; volume: number; source: 'llm' | 'rule' }>();
     for (const c of cands) {
       const n = normKw(c);
       if (!c || excluded.has(n)) continue;
       const v = vol.get(n) ?? 0;
       const prev = merged.get(n);
-      if (!prev || v > prev.volume) merged.set(n, { keyword: c.trim(), volume: v, source: 'llm' });
+      if (!prev || v > prev.volume) merged.set(n, { keyword: c.trim(), volume: v, source: via });
     }
 
     // ④ 정렬(검색량 desc) → 임계치 통과분 우선, 없으면 LLM 후보 그대로 폴백 → 상한
@@ -114,7 +128,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     const strong = ranked.filter(c => c.volume >= threshold);
     const candidates = (strong.length ? strong : ranked).slice(0, max);
 
-    return json({ keyword, threshold, max, count: candidates.length, candidates });
+    return json({ keyword, threshold, max, via, count: candidates.length, candidates });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : '확장 중 오류가 발생했습니다.' }, 502);
   }
