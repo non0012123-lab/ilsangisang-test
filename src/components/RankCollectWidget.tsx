@@ -12,9 +12,14 @@ interface Job {
   main_count: number; error?: string | null; finished_at?: string | null;
 }
 
+const DISMISS_KEY = 'rankWidgetDismissedJob';
+const loadDismissed = () => { try { return localStorage.getItem(DISMISS_KEY) || ''; } catch { return ''; } };
+
 export default function RankCollectWidget() {
   const [job, setJob] = useState<Job | null>(null);
-  const [dismissed, setDismissed] = useState('');
+  // 닫힘 상태는 localStorage 에 보관 — Layout 리마운트(페이지 이동)에도 유지
+  const [dismissed, setDismissed] = useState(loadDismissed);
+  const dismiss = (id: string) => { try { localStorage.setItem(DISMISS_KEY, id); } catch { /* ignore */ } setDismissed(id); };
 
   useEffect(() => {
     if (!supabase) return;
@@ -64,7 +69,7 @@ export default function RankCollectWidget() {
         {running
           ? <button onClick={cancel} title="수집 중단"
               className="flex items-center gap-1 px-1.5 py-0.5 -my-0.5 rounded-md text-[11px] font-semibold text-red-600 hover:bg-red-50"><Ban size={12} /> 중단</button>
-          : <button onClick={() => setDismissed(job.id)} className="p-1 -m-1 text-gray-400 hover:text-gray-600"><X size={14} /></button>}
+          : <button onClick={() => dismiss(job.id)} className="p-1 -m-1 text-gray-400 hover:text-gray-600"><X size={14} /></button>}
       </div>
 
       {/* 메인 키워드 개수 */}
