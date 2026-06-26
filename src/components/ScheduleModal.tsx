@@ -346,10 +346,9 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
                   {form.subKeywords!.map((s, idx) => {
                     const best = bestRank(s.rankByTab);
                     return (
-                      <span key={s.keyword} title={`검색량 ${s.volume.toLocaleString()} · ${s.source}`}
+                      <span key={s.keyword} title={s.source}
                         className="inline-flex items-center gap-1.5 px-2 h-6 rounded-lg bg-white border border-gray-200 text-[11px] text-gray-700">
                         {s.keyword}
-                        <span className="text-gray-400">{s.volume.toLocaleString()}</span>
                         {best != null && <span className="font-semibold text-blue-600">{best}위</span>}
                         <button type="button" onClick={() => set('subKeywords', form.subKeywords!.filter((_, i) => i !== idx))}
                           className="text-gray-300 hover:text-red-500"><X size={11} /></button>
