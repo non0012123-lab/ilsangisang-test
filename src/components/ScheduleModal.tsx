@@ -95,6 +95,8 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
     const next = searchTabs.includes(t) ? searchTabs.filter(x => x !== t) : [...searchTabs, t];
     set('searchTabs', SEARCH_TAB_ORDER.filter(x => next.includes(x)));  // 표준 순서로 정규화 저장
   };
+  // 롱테일은 '순위 잡힌 탭이 있는 것'만 표시(둘 다 미노출이면 애초에 없어야 함 — 안전망).
+  const rankedSubs = (form.subKeywords ?? []).filter(s => foundRanks(s.rankByTab).length > 0);
 
   // 이미지(시안/인사이트) — 레거시 screenshot/문자열 호환 + 신규 {url,kind} 배열, 최대 MAX_IMAGES 장
   const images = entryImages(form);
@@ -335,28 +337,23 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-semibold text-gray-500">발굴된 롱테일 <span className="text-gray-400 font-normal">(순위 잡힌 것만 · 수집기 자동)</span></span>
                 <span className="flex items-center gap-2">
-                  <span className="text-[11px] text-gray-400">{form.subKeywords?.length ?? 0}개</span>
-                  {(form.subKeywords?.length ?? 0) > 0 && (
+                  <span className="text-[11px] text-gray-400">{rankedSubs.length}개</span>
+                  {rankedSubs.length > 0 && (
                     <button type="button" onClick={() => set('subKeywords', [])} className="text-[11px] text-red-500 hover:text-red-600 hover:underline">모두 삭제</button>
                   )}
                 </span>
               </div>
-              {(form.subKeywords?.length ?? 0) > 0 ? (
+              {rankedSubs.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {form.subKeywords!.map((s, idx) => {
-                    const fr = foundRanks(s.rankByTab);   // 잡힌 탭만(통합/블로그/카페)
-                    return (
-                      <span key={s.keyword} title={s.source}
-                        className="inline-flex items-center gap-1.5 px-2 h-6 rounded-lg bg-white border border-gray-200 text-[11px] text-gray-700">
-                        {s.keyword}
-                        {fr.length > 0
-                          ? fr.map(f => <span key={f.tab} className="font-semibold text-blue-600">{SEARCH_TAB_SHORT[f.tab]} {f.rank}위</span>)
-                          : <span className="text-amber-600">미노출</span>}
-                        <button type="button" onClick={() => set('subKeywords', form.subKeywords!.filter((_, i) => i !== idx))}
-                          className="text-gray-300 hover:text-red-500"><X size={11} /></button>
-                      </span>
-                    );
-                  })}
+                  {rankedSubs.map(s => (
+                    <span key={s.keyword} title={s.source}
+                      className="inline-flex items-center gap-1.5 px-2 h-6 rounded-lg bg-white border border-gray-200 text-[11px] text-gray-700">
+                      {s.keyword}
+                      {foundRanks(s.rankByTab).map(f => <span key={f.tab} className="font-semibold text-blue-600">{SEARCH_TAB_SHORT[f.tab]} {f.rank}위</span>)}
+                      <button type="button" onClick={() => set('subKeywords', (form.subKeywords ?? []).filter(x => x.keyword !== s.keyword))}
+                        className="text-gray-300 hover:text-red-500"><X size={11} /></button>
+                    </span>
+                  ))}
                 </div>
               ) : (
                 <p className="text-[11px] text-gray-400">아직 발굴된 롱테일이 없습니다. 순위 수집 시 자동으로 채워집니다.</p>
