@@ -84,9 +84,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const keyword = (body.keyword ?? '').trim();
   if (!keyword) return json({ error: '메인 키워드가 필요합니다.' }, 400);
-  // 롱테일은 저볼륨이라 임계치는 '실재 검색어(>0)' 게이트 역할만. 진짜 가치는 수집기 순위확인이 판정.
-  const threshold = typeof body.threshold === 'number' ? body.threshold : 10;
-  const max = typeof body.max === 'number' ? body.max : 8;
+  // 임계치는 '우선순위'로만 쓴다(하드 게이트 아님). 잘못된 파라미터(과도한 threshold·max 0 등)가 와도
+  // 후보가 0이 되지 않도록 클램프 + 폴백. 진짜 가치 판정은 수집기 순위확인.
+  const threshold = Math.max(0, typeof body.threshold === 'number' ? body.threshold : 10);
+  const max = Math.min(20, Math.max(1, typeof body.max === 'number' ? body.max : 8));
   const excluded = new Set([normKw(keyword), ...(body.existing ?? []).map(normKw)]);
 
   try {
@@ -107,11 +108,11 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       if (!prev || v > prev.volume) merged.set(n, { keyword: c.trim(), volume: v, source: 'llm' });
     }
 
-    // ④ 검색량 필터 → 정렬 → 상한
-    const candidates = Array.from(merged.values())
-      .filter(c => c.volume >= threshold)
-      .sort((a, b) => b.volume - a.volume)
-      .slice(0, max);
+    // ④ 정렬(검색량 desc) → 임계치 통과분 우선, 없으면 LLM 후보 그대로 폴백 → 상한
+    //    (임계치로 후보가 0이 되어 발굴이 멈추는 일을 방지. 순위확인이 최종 게이트)
+    const ranked = Array.from(merged.values()).sort((a, b) => b.volume - a.volume);
+    const strong = ranked.filter(c => c.volume >= threshold);
+    const candidates = (strong.length ? strong : ranked).slice(0, max);
 
     return json({ keyword, threshold, max, count: candidates.length, candidates });
   } catch (e) {
