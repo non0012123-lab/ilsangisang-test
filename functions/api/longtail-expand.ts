@@ -33,9 +33,9 @@ function extractText(data: unknown): string {
   return parts.join('\n').trim();
 }
 
-// 제목의 의도를 읽어 구체적 롱테일 후보 생성. 실패하면 [].
-async function llmCandidates(env: Env, keyword: string, title?: string): Promise<string[]> {
-  if (!env.OPENAI_API_KEY) return [];
+// 제목의 의도를 읽어 구체적 롱테일 후보 생성. 실패하면 list:[] + 사유(status/error)를 함께 반환.
+async function llmCandidates(env: Env, keyword: string, title?: string): Promise<{ list: string[]; status?: number; error?: string }> {
+  if (!env.OPENAI_API_KEY) return { list: [], error: 'OPENAI_API_KEY 없음' };
   const developer = [
     '너는 한국 네이버 상위노출 롱테일 키워드 발굴기다.',
     '"메인 키워드"와 "글 제목"을 보고, 이 글이 실제로 노출을 노릴 만한 구체적인 검색어를 만든다.',
@@ -67,10 +67,11 @@ async function llmCandidates(env: Env, keyword: string, title?: string): Promise
         store: false,
       }),
     });
-    if (!res.ok) return [];
+    if (!res.ok) return { list: [], status: res.status, error: (await res.text()).slice(0, 160) };
     const parsed = JSON.parse(extractText(await res.json())) as { candidates?: unknown };
-    return Array.isArray(parsed?.candidates) ? parsed.candidates.filter((c): c is string => typeof c === 'string') : [];
-  } catch { return []; }
+    const list = Array.isArray(parsed?.candidates) ? parsed.candidates.filter((c): c is string => typeof c === 'string') : [];
+    return { list, status: 200 };
+  } catch (e) { return { list: [], error: (e as Error).message }; }
 }
 
 // LLM 실패(예: OpenAI 지역차단 403) 시 폴백: 키워드 + 흔한 의도 접미어 + 제목 단어 조합.
@@ -103,11 +104,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const excluded = new Set([normKw(keyword), ...(body.existing ?? []).map(normKw)]);
 
   try {
-    // ① LLM 의도 기반 후보. 실패(OpenAI 차단 등)로 0이면 규칙기반 폴백.
-    let cands = await llmCandidates(env, keyword, body.title);
+    // ① LLM 의도 기반 후보. 실패(OpenAI 차단/레이트리밋 등)로 0이면 규칙기반 폴백.
+    const llm = await llmCandidates(env, keyword, body.title);
+    let cands = llm.list;
     let via: 'llm' | 'rule' = 'llm';
     if (!cands.length) { cands = ruleCandidates(keyword, body.title); via = 'rule'; }
-    if (!cands.length) return json({ keyword, threshold, max, count: 0, candidates: [], via });
+    const diag = { llmStatus: llm.status, llmError: llm.error };  // 삼킨 실패 사유 노출(403=지역차단 / 429=레이트리밋·쿼터)
+    if (!cands.length) return json({ keyword, threshold, max, via, ...diag, count: 0, candidates: [] });
 
     // ② 후보 검색량 조회
     const vol = await keywordVolumes(env, cands);
@@ -128,7 +131,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     const strong = ranked.filter(c => c.volume >= threshold);
     const candidates = (strong.length ? strong : ranked).slice(0, max);
 
-    return json({ keyword, threshold, max, via, count: candidates.length, candidates });
+    return json({ keyword, threshold, max, via, ...diag, count: candidates.length, candidates });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : '확장 중 오류가 발생했습니다.' }, 502);
   }
