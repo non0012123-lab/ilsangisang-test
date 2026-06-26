@@ -79,7 +79,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const keyword = (body.keyword ?? '').trim();
   if (!keyword) return json({ error: '메인 키워드가 필요합니다.' }, 400);
-  const threshold = typeof body.threshold === 'number' ? body.threshold : 50;
+  // 롱테일은 본질적으로 저볼륨(네이버 "< 10" → 20). 검색량은 '실재 검색어(>0)' 게이트 역할만 하고
+  // 진짜 가치 필터는 다운스트림 순위확인이므로 기본 임계치를 낮게 둔다.
+  const threshold = typeof body.threshold === 'number' ? body.threshold : 10;
   const max = typeof body.max === 'number' ? body.max : 5;
   const excluded = new Set([normKw(keyword), ...(body.existing ?? []).map(normKw)]);
 
