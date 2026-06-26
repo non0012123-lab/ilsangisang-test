@@ -1,10 +1,9 @@
-// 순위 수집 작업을 큐에 적재(enqueue)만 하는 훅. 진행 표시는 전역 RankCollectWidget 가 담당.
-//  - 버튼은 트리거만 하고, 다른 페이지로 가도 진행 현황은 전역 위젯에서 계속 보인다.
+// 순위 수집 작업을 큐에 적재(enqueue). 대상은 '화면에 보이는 일정 id 목록'.
+//  - 버튼은 트리거만, 진행 현황은 전역 RankCollectWidget 가 담당.
 import { useCallback, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 
-export type RankScope = 'mine' | 'manager' | 'all';
 export type RankMode = 'pending' | 'all';
 
 export function useRankCollect() {
@@ -12,18 +11,19 @@ export function useRankCollect() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const collect = useCallback(async (opts: { scope: RankScope; managerId?: string; managerName?: string; mode: RankMode }) => {
-    if (!supabase || !user) return;
+  // entryIds = 이 화면의 순위추적 일정 id 들. 그 일정만 수집한다.
+  const collect = useCallback(async (opts: { entryIds: string[]; mode: RankMode }) => {
+    if (!supabase || !user || opts.entryIds.length === 0) return;
     setBusy(true); setError('');
     try {
-      const all = opts.scope === 'all';
       const { error: e } = await supabase.rpc('enqueue_rank_job', {
-        p_scope_type: opts.scope,
-        p_manager_id: all ? null : (opts.managerId ?? user.id),
-        p_manager_name: all ? null : (opts.managerName ?? user.name ?? ''),
+        p_scope_type: 'all',          // entry_ids 가 실제 대상을 정함(scope 무관)
+        p_manager_id: null,
+        p_manager_name: null,
         p_mode: opts.mode,
         p_requested_by: user.id,
         p_requested_by_name: user.name ?? '',
+        p_entry_ids: opts.entryIds,
       });
       if (e) throw e;
     } catch (e) {

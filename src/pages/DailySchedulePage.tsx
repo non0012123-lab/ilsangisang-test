@@ -107,7 +107,7 @@ export default function DailySchedulePage() {
                   <User size={14} /> 내 일정
                 </button>
               )}
-              <RankCollectButton />
+              <RankCollectButton entries={dayEntries} />
               <button onClick={() => setShowFilters(v => !v)}
                 className={`flex items-center gap-1.5 px-3 py-2 border rounded-xl text-sm transition-colors ${showFilters ? 'border-blue-500 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                 <Filter size={14} /> 필터
