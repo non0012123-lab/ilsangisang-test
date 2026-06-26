@@ -26,15 +26,30 @@ export default function RankCollectWidget() {
 
   useEffect(() => {
     if (!supabase || !me) return;
+    const sb = supabase;
     let active = true;
-    // 내가 요청한 작업만 추적/표시 — 멀티유저에서 남의 작업은 안 보이고 중단도 내 것만
-    supabase.from('rank_jobs').select('*').eq('requested_by', me).order('created_at', { ascending: false }).limit(1)
-      .then(({ data }) => { if (active && data && data[0]) setJob(data[0] as Job); });
-    const ch = supabase
+    // 표시 우선순위: 내 '활성(queued/running)' 작업 → 없으면 최신(완료/취소 10분 표시용).
+    //  작업이 연달아 생겨도 '지금 도는' 작업을 잡아, 중단이 엉뚱한 최신 작업을 취소하지 않게.
+    const loadJob = async () => {
+      const act = await sb.from('rank_jobs').select('*').eq('requested_by', me)
+        .in('status', ['queued', 'running']).order('created_at', { ascending: false }).limit(1);
+      let row = act.data?.[0];
+      if (!row) {
+        const last = await sb.from('rank_jobs').select('*').eq('requested_by', me)
+          .order('created_at', { ascending: false }).limit(1);
+        row = last.data?.[0];
+      }
+      if (active && row) setJob(row as Job);
+    };
+    void loadJob();
+    const ch = sb
       .channel('rank_jobs_widget_' + me)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rank_jobs', filter: `requested_by=eq.${me}` }, payload => {
         const r = payload.new as Job | undefined;
-        if (r && r.id) setJob(r);
+        if (!r || !r.id) return;
+        // 활성 변화는 그대로 반영, 끝난(완료/오류/취소) 변화면 아직 도는 다른 작업을 우선 재탐색
+        if (r.status === 'queued' || r.status === 'running') setJob(r);
+        else void loadJob();
       })
       .subscribe();
     return () => { active = false; ch.unsubscribe(); };
@@ -54,9 +69,12 @@ export default function RankCollectWidget() {
     : job.status === 'cancelled' ? '수집 중단됨'
     : job.status === 'error' ? `오류: ${job.error ?? '알 수 없음'}` : job.status;
 
-  const cancel = () => {
+  const cancel = async () => {
     if (!supabase || !window.confirm('수집을 중단할까요? 진행 중인 작업이 종료됩니다.')) return;
-    void supabase.rpc('cancel_rank_job', { p_job_id: job.id });
+    // 표시 중 1건이 최신이 아닐 수 있어, 내 '활성(queued/running)' 작업을 모두 취소(단일 수집기라 보통 1건).
+    const { data } = await supabase.from('rank_jobs').select('id').eq('requested_by', me).in('status', ['queued', 'running']);
+    for (const r of (data ?? []) as { id: string }[]) await supabase.rpc('cancel_rank_job', { p_job_id: r.id });
+    void supabase.rpc('cancel_rank_job', { p_job_id: job.id });   // 표시 작업도 멱등 처리
   };
 
   return (
