@@ -71,7 +71,8 @@ async function geminiCandidates(env: Env, keyword: string, title?: string): Prom
   const reqBody = JSON.stringify({
     system_instruction: { parts: [{ text: GEN_INSTRUCTIONS }] },
     contents: [{ role: 'user', parts: [{ text: genUser(keyword, title) }] }],
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.7, maxOutputTokens: 1024 },
+    // 2.5-flash 는 thinking 모델 → thinking 끄지 않으면 출력토큰을 추론이 먹어 JSON 이 잘린다.
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.7, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 0 } },
   });
   let lastStatus: number | undefined, lastErr: string | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
