@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useSessionState } from '../hooks/usePersisted';
 import {
   Plus, Mail, Calendar, X, Pencil, Users, Phone, Save, Check, Copy, Sparkles,
   Link2, FileText, AlertTriangle, MessageSquare, BookOpen, ChevronDown, ChevronUp,
@@ -165,14 +166,16 @@ export default function ClientManagementPage() {
   const isAdmin = user?.role === 'admin';
 
   const [selected, setSelected] = useState<Client | null>(null);
+  // 보던 광고주 상세를 다른 메뉴 갔다 와도 유지(세션 한정 — 탭 닫으면 초기화)
+  const [savedClientId, setSavedClientId] = useSessionState<string | null>('clientMgmt.client', null);
   const [showForm, setShowForm] = useState(false);
   const [editClient, setEditClient] = useState<Client | null>(null);
   const [form, setForm] = useState<Omit<Client, 'id'>>(EMPTY_CLIENT);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [search, setSearch] = useState('');
 
-  // 상세 화면 탭 + 인수인계 인라인 편집 상태
-  const [tab, setTab] = useState<DetailTab>('overview');
+  // 상세 화면 탭 + 인수인계 인라인 편집 상태 (탭도 세션 유지)
+  const [tab, setTab] = useSessionState<DetailTab>('clientMgmt.tab', 'overview');
   const [hoEditing, setHoEditing] = useState(false);
   const [hoDraft, setHoDraft] = useState<HandoverDoc | null>(null);
   const [promptCopied, setPromptCopied] = useState(false);
@@ -203,8 +206,18 @@ export default function ClientManagementPage() {
     setBudgetEditing(false); setBudgetDraft([]);
     setAiOpen(false); setAiText(''); setAiInstruction(''); setAiError(''); setAiResult(null); setAiLoading(false);
   };
-  const openClient = (c: Client) => { setSelected(c); setTab('overview'); resetSubStates(); };
-  const closeClient = () => { setSelected(null); resetSubStates(); };
+  const openClient = (c: Client) => { setSelected(c); setSavedClientId(c.id); setTab('overview'); resetSubStates(); };
+  const closeClient = () => { setSelected(null); setSavedClientId(null); resetSubStates(); };
+
+  // 다른 메뉴 갔다가 재진입하면 세션에 저장된 광고주 상세를 복원('목록으로'로 닫았으면 복원 안 함).
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || selected) return;
+    if (!savedClientId) { restoredRef.current = true; return; }
+    const c = clients.find(x => x.id === savedClientId);
+    if (c) { setSelected(c); restoredRef.current = true; }
+    // clients 로딩 전이면 restoredRef 를 세우지 않아 다음 렌더에서 재시도
+  }, [clients, savedClientId, selected]);
 
   const handleDeleteClient = () => {
     if (!selected || !isAdmin) return;

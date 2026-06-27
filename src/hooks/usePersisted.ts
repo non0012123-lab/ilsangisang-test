@@ -20,6 +20,21 @@ export function usePersistedState<T>(key: string, initial: T) {
   return [value, setValue] as const;
 }
 
+// 세션 한정 영속 상태(sessionStorage). 새로고침·라우트 이동엔 유지, 탭/브라우저 닫으면 초기화.
+//  - 용도: "보던 상세 화면을 다른 메뉴 갔다 와도 유지"(예: 클라이언트 관리에서 선택한 광고주).
+//  - localStorage(=usePersistedState)와 달리 '껐다 키면 첫 화면'이 됨.
+export function useSessionState<T>(key: string, initial: T) {
+  const full = PREFIX + key;
+  const [value, setValue] = useState<T>(() => {
+    try { const raw = sessionStorage.getItem(full); if (raw != null) return JSON.parse(raw) as T; } catch { /* 무시 */ }
+    return initial;
+  });
+  useEffect(() => {
+    try { sessionStorage.setItem(full, JSON.stringify(value)); } catch { /* 무시 */ }
+  }, [full, value]);
+  return [value, setValue] as const;
+}
+
 // 담당자 필터: 저장된 선택이 있으면 그걸, 없으면 selfId(로그인 본인)가 준비되는 즉시 '내 일정'으로 기본 설정.
 //  - user/members 는 비동기 로딩 → selfId 가 처음엔 ''(빈값)이라 effect 로 늦게 적용.
 //  - 사용자가 명시적으로 바꾸면(set 호출) 그 선택을 저장해 다음 로드에도 유지.
