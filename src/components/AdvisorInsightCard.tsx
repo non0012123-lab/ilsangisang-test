@@ -8,7 +8,13 @@ import {
   Loader2, BarChart3, Search, TrendingUp, Users2, AlertCircle, KeyRound, RefreshCw,
   Copy, Check, X, Eye, Maximize2,
 } from 'lucide-react';
-import { useAdvisorInsight, type AdvisorPayload, type TrendPoint } from '../hooks/useAdvisorInsight';
+import { useAdvisorInsight, type AdvisorPayload, type AdvisorPeriod, type TrendPoint } from '../hooks/useAdvisorInsight';
+
+const PERIODS: { key: AdvisorPeriod; label: string }[] = [
+  { key: '1d', label: '어제' },
+  { key: '7d', label: '7일' },
+  { key: '30d', label: '30일' },
+];
 
 const fmt = (n: number) => n.toLocaleString('ko-KR');
 const pct = (r: number) => `${Math.round(r * 100)}%`;
@@ -148,16 +154,28 @@ function FullInsight({ data }: { data: AdvisorPayload }) {
 }
 
 export default function AdvisorInsightCard({ clientId, clientName }: { clientId: string; clientName: string }) {
-  const { data, collectedAt, job, collecting, collect, busy, error } = useAdvisorInsight(clientId, clientName);
-  const [period, setPeriod] = useState<'7d' | '30d'>('30d');
+  const { byPeriod, job, collect, busy, error } = useAdvisorInsight(clientId, clientName);
+  const [period, setPeriod] = useState<AdvisorPeriod>('30d');
   const [open, setOpen] = useState(false);
 
+  // 선택한 기간의 스냅샷만 표시(기간끼리 서로 안 덮음)
+  const snap = byPeriod[period];
+  const data = snap?.data ?? {};
+  const collectedAt = snap?.collectedAt ?? null;
+  // '수집 중'은 이 기간 작업일 때만(다른 기간 수집 중이어도 이 버튼은 멀쩡)
+  const jobActive = job?.status === 'queued' || job?.status === 'running';
+  const collecting = jobActive && (job?.period ?? '30d') === period;
+
+  const periodLabel = PERIODS.find(p => p.key === period)?.label ?? '';
   const inflow = data.inflowKeywords ?? [];
   const trend = data.viewsTrend?.points ?? [];
   const hasAny = inflow.length > 0 || trend.length > 0 || !!data.demographics?.gender || (data.demographics?.age?.length ?? 0) > 0;
 
+  // 종료 상태(need_login/empty/error)는 그 작업의 기간이 지금 보는 기간과 같을 때만 표시(혼동 방지)
+  const jobMatchesPeriod = (job?.period ?? '30d') === period;
   const statusMsg =
     collecting ? (job?.status === 'queued' ? '대기 중 · 수집기 응답 대기' : `수집 중${job && job.total > 0 ? ` ${job.done}/${job.total}` : ''}`)
+    : !jobMatchesPeriod ? ''
     : job?.status === 'need_login' ? '수집기에서 이 광고주 네이버 로그인이 필요합니다'
     : job?.status === 'empty' ? '수집할 광고주를 찾지 못했습니다'
     : job?.status === 'error' ? `오류: ${job.error ?? '알 수 없음'}`
@@ -176,12 +194,16 @@ export default function AdvisorInsightCard({ clientId, clientName }: { clientId:
         </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-[11px] font-semibold">
-            {(['7d', '30d'] as const).map(p => (
-              <button key={p} onClick={() => setPeriod(p)} disabled={collecting}
-                className={`px-2.5 py-1.5 ${period === p ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
-                {p === '7d' ? '7일' : '30일'}
-              </button>
-            ))}
+            {PERIODS.map(p => {
+              const has = !!byPeriod[p.key]?.collectedAt;
+              return (
+                <button key={p.key} onClick={() => setPeriod(p.key)}
+                  title={has ? '' : '이 기간은 아직 수집 안 됨'}
+                  className={`px-2.5 py-1.5 ${period === p.key ? 'bg-blue-600 text-white' : `${has ? 'text-gray-600' : 'text-gray-300'} hover:bg-gray-50`}`}>
+                  {p.label}
+                </button>
+              );
+            })}
           </div>
           <button onClick={() => collect(period)} disabled={busy || collecting}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors">
@@ -203,7 +225,7 @@ export default function AdvisorInsightCard({ clientId, clientName }: { clientId:
 
       {!hasAny && !statusMsg && (
         <p className="text-xs text-gray-400 py-4 text-center">
-          아직 수집된 인사이트가 없습니다. ‘수집하기’를 누르면 수집기가 광고주 어드바이저 데이터를 가져옵니다.
+          ‘{periodLabel}’ 기간은 아직 수집된 인사이트가 없습니다. ‘수집하기’를 누르면 이 기간 데이터를 가져옵니다.
         </p>
       )}
 

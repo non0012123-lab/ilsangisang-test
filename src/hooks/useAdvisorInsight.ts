@@ -1,11 +1,13 @@
-// 광고주(Client) 1곳의 크리에이터 어드바이저 인사이트 — 로드 + realtime + 수집 트리거.
-//  - advisor_insights(스냅샷 1행)을 로컬 캐시로 즉시 그리고 Supabase/realtime 으로 갱신.
-//  - advisor_jobs(이 광고주 작업)을 구독해 수집 진행/상태(need_login 등) 표시.
-//  - 수집기는 service_role 로 patch_advisor_insight 되써넣음. 앱은 enqueue_advisor_job 트리거만.
-//  계약: spike-rank/ADVISOR-CONTRACT.md / 마이그레이션 0034_advisor_jobs.sql
+// 광고주(Client)의 크리에이터 어드바이저 인사이트 — 기간(period)별 로드 + realtime + 수집 트리거.
+//  - advisor_insights 는 (client_id, period) 단위(0036) → 어제(1d)/7일(7d)/30일(30d)을 각각 따로 보관.
+//    기간 버튼은 '재수집' 없이 해당 기간 스냅샷만 보여준다(서로 안 덮음).
+//  - 수집기는 service_role 로 patch_advisor_insight(client_id, period, payload) 되써넣음. 앱은 enqueue 만.
+//  계약: spike-rank/ADVISOR-CONTRACT.md / 마이그레이션 0034·0036
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+
+export type AdvisorPeriod = '1d' | '7d' | '30d';
 
 export interface InflowKeyword { keyword: string; count: number; }
 export interface TrendPoint { date: string; views: number; visitors: number; }
@@ -22,49 +24,53 @@ export interface AdvisorJob {
   id: string; status: string; period?: string;
   total: number; done: number; error?: string | null; finished_at?: string | null;
 }
+interface PeriodSnap { data: AdvisorPayload; collectedAt: string | null; }
+type ByPeriod = Partial<Record<string, PeriodSnap>>;
 
-const cacheKey = (id: string) => `ilsangisang.advisorInsight.${id}.v1`;
-
-interface Cached { data: AdvisorPayload; collectedAt: string | null; }
-const loadCache = (id: string): Cached | null => {
-  try { const raw = localStorage.getItem(cacheKey(id)); return raw ? JSON.parse(raw) as Cached : null; }
-  catch { return null; }
+const cacheKey = (id: string) => `ilsangisang.advisorInsight.${id}.v2`;
+const loadCache = (id: string): ByPeriod => {
+  try { const raw = localStorage.getItem(cacheKey(id)); return raw ? JSON.parse(raw) as ByPeriod : {}; }
+  catch { return {}; }
 };
-const saveCache = (id: string, c: Cached) => {
-  try { localStorage.setItem(cacheKey(id), JSON.stringify(c)); } catch { /* 용량초과 시 무시(메모리로 동작) */ }
+const saveCache = (id: string, map: ByPeriod) => {
+  try { localStorage.setItem(cacheKey(id), JSON.stringify(map)); } catch { /* 용량초과 무시 */ }
 };
 
 export function useAdvisorInsight(clientId: string | null, clientName?: string) {
   const { user } = useAuth();
-  const [data, setData] = useState<AdvisorPayload>({});
-  const [collectedAt, setCollectedAt] = useState<string | null>(null);
+  const [byPeriod, setByPeriod] = useState<ByPeriod>({});
   const [job, setJob] = useState<AdvisorJob | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  // 캐시로 즉시 렌더 + Supabase 응답으로 갱신 + realtime 구독
   useEffect(() => {
     setError('');
-    if (!clientId) { setData({}); setCollectedAt(null); setJob(null); return; }
-    const cached = loadCache(clientId);
-    setData(cached?.data ?? {});
-    setCollectedAt(cached?.collectedAt ?? null);
+    if (!clientId) { setByPeriod({}); setJob(null); return; }
+    setByPeriod(loadCache(clientId));  // 캐시로 즉시 렌더
     if (!supabase) return;
     const sb = supabase;
     let active = true;
 
-    const applyInsight = (row: { data?: AdvisorPayload; collected_at?: string | null } | undefined) => {
-      if (!active || !row) return;
-      const next = (row.data ?? {}) as AdvisorPayload;
-      setData(next);
-      setCollectedAt(row.collected_at ?? null);
-      saveCache(clientId, { data: next, collectedAt: row.collected_at ?? null });
+    const applyRow = (row: { period?: string; data?: AdvisorPayload; collected_at?: string | null } | undefined) => {
+      if (!active || !row?.period) return;
+      setByPeriod(prev => {
+        const next = { ...prev, [row.period as string]: { data: (row.data ?? {}) as AdvisorPayload, collectedAt: row.collected_at ?? null } };
+        saveCache(clientId, next);
+        return next;
+      });
     };
 
-    void sb.from('advisor_insights').select('data, collected_at').eq('client_id', clientId).maybeSingle()
-      .then(({ data: row }) => applyInsight(row ?? undefined));
+    void sb.from('advisor_insights').select('period, data, collected_at').eq('client_id', clientId)
+      .then(({ data: rows }) => {
+        if (!active || !rows) return;
+        const map: ByPeriod = {};
+        for (const r of rows as { period: string; data: AdvisorPayload; collected_at: string | null }[]) {
+          map[r.period] = { data: r.data ?? {}, collectedAt: r.collected_at ?? null };
+        }
+        setByPeriod(map);
+        saveCache(clientId, map);
+      });
 
-    // 이 광고주의 최근 작업 1건(진행/상태 표시)
     const loadJob = async () => {
       const { data: rows } = await sb.from('advisor_jobs').select('*')
         .eq('client_id', clientId).order('created_at', { ascending: false }).limit(1);
@@ -74,7 +80,7 @@ export function useAdvisorInsight(clientId: string | null, clientName?: string) 
 
     const ch = sb.channel('advisor_' + clientId)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'advisor_insights', filter: `client_id=eq.${clientId}` },
-        payload => applyInsight(payload.new as { data?: AdvisorPayload; collected_at?: string | null }))
+        payload => applyRow(payload.new as { period?: string; data?: AdvisorPayload; collected_at?: string | null }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'advisor_jobs', filter: `client_id=eq.${clientId}` },
         payload => { const r = payload.new as AdvisorJob | undefined; if (r?.id) setJob(r); })
       .subscribe();
@@ -82,8 +88,8 @@ export function useAdvisorInsight(clientId: string | null, clientName?: string) 
     return () => { active = false; ch.unsubscribe(); };
   }, [clientId]);
 
-  // 수집하기 버튼 → 작업 큐 적재(같은 광고주 진행중 작업 있으면 서버가 재사용)
-  const collect = useCallback(async (period: '7d' | '30d' = '30d') => {
+  // 수집하기 — 그 기간 작업을 큐에 적재(같은 광고주+같은 기간 진행중이면 서버가 재사용)
+  const collect = useCallback(async (period: AdvisorPeriod) => {
     if (!supabase || !user || !clientId) return;
     setBusy(true); setError('');
     try {
@@ -102,6 +108,5 @@ export function useAdvisorInsight(clientId: string | null, clientName?: string) 
     }
   }, [user, clientId, clientName]);
 
-  const collecting = job?.status === 'queued' || job?.status === 'running';
-  return { data, collectedAt, job, collecting, collect, busy, error };
+  return { byPeriod, job, collect, busy, error };
 }
