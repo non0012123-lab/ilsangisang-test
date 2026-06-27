@@ -7,6 +7,7 @@ import {
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
+import AdvisorInsightCard from '../components/AdvisorInsightCard';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { openAiPlanPrint } from '../utils/aiPlanPdf';
@@ -548,6 +549,9 @@ export default function ClientManagementPage() {
                     <p className="mt-4 text-sm text-gray-600 bg-gray-50 rounded-xl px-4 py-3 whitespace-pre-wrap">{selected.description}</p>
                   )}
                 </div>
+
+                {/* 크리에이터 어드바이저 인사이트 */}
+                <AdvisorInsightCard clientId={selected.id} clientName={selected.name} />
 
                 {/* 인수인계 개요 + 주요 링크 */}
                 <div className="max-w-3xl">
