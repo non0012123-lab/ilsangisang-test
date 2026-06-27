@@ -23,10 +23,12 @@ const freshness = (iso: string | null) =>
 
 const sumViews = (pts: TrendPoint[]) => pts.reduce((s, p) => s + (p.views || 0), 0);
 const sumVisitors = (pts: TrendPoint[]) => pts.reduce((s, p) => s + (p.visitors || 0), 0);
+const mdLabel = (d: string) => { const p = d.split('-'); return p.length >= 3 ? `${+p[1]}/${+p[2]}` : d; };
 
-// 조회수·방문자 2계열 미니 스파크라인(의존성 0, 인라인 SVG)
+// 조회수·방문자 2계열 일별 추이(의존성 0, 인라인 SVG) — X축=날짜, Y축=명(최대값 표기).
+// 포인트 2개 미만(어제 1일치 등)은 추이가 없으므로 그래프를 그리지 않음(호출부에서 숫자만 표시).
 function Sparkline({ points, height = 90 }: { points: TrendPoint[]; height?: number }) {
-  if (points.length < 2) return <p className="text-xs text-gray-400">데이터 포인트가 부족합니다.</p>;
+  if (points.length < 2) return null;
   const W = 520, H = height, P = 4;
   const max = Math.max(1, ...points.map(p => Math.max(p.views, p.visitors)));
   const x = (i: number) => P + (i / (points.length - 1)) * (W - 2 * P);
@@ -34,10 +36,23 @@ function Sparkline({ points, height = 90 }: { points: TrendPoint[]; height?: num
   const path = (key: 'views' | 'visitors') =>
     points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(p[key]).toFixed(1)}`).join(' ');
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height }} preserveAspectRatio="none">
-      <path d={path('views')} fill="none" stroke="#3b82f6" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-      <path d={path('visitors')} fill="none" stroke="#a855f7" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-    </svg>
+    <div>
+      {/* Y축 안내: 단위(명) + 최대값 */}
+      <div className="flex items-center justify-between text-[10px] text-gray-400 mb-0.5">
+        <span>세로축 = 명(일별)</span>
+        <span>최대 {fmt(max)}</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full border-b border-gray-100" style={{ height }} preserveAspectRatio="none">
+        <path d={path('views')} fill="none" stroke="#3b82f6" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+        <path d={path('visitors')} fill="none" stroke="#a855f7" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+      </svg>
+      {/* X축 안내: 시작~끝 날짜 */}
+      <div className="flex items-center justify-between text-[10px] text-gray-400 mt-0.5">
+        <span>{mdLabel(points[0].date)}</span>
+        <span>가로축 = 날짜</span>
+        <span>{mdLabel(points[points.length - 1].date)}</span>
+      </div>
+    </div>
   );
 }
 
@@ -103,14 +118,14 @@ function FullInsight({ data, basis }: { data: AdvisorPayload; basis: string }) {
       {/* 조회수·방문자 */}
       <section>
         <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500"><TrendingUp size={14} /> 조회수·방문자 추이{data.viewsTrend?.period ? ` (${data.viewsTrend.period})` : ''}</div>
-          {trend.length > 0 && <TrendLegend />}
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500"><TrendingUp size={14} /> 조회수·방문자{trend.length > 1 ? ' 추이' : ''}</div>
+          {trend.length > 1 && <TrendLegend />}
         </div>
         {trend.length > 0 ? (
           <>
             <div className="grid grid-cols-2 gap-2 mb-3">
-              <Stat label="기간 조회수" value={fmt(sumViews(trend))} icon={<Eye size={12} />} />
-              <Stat label="기간 방문자" value={fmt(sumVisitors(trend))} icon={<Users2 size={12} />} />
+              <Stat label="조회수" value={fmt(sumViews(trend))} icon={<Eye size={12} />} />
+              <Stat label="방문자" value={fmt(sumVisitors(trend))} icon={<Users2 size={12} />} />
             </div>
             <Sparkline points={trend} height={140} />
           </>
@@ -241,11 +256,12 @@ export default function AdvisorInsightCard({ clientId, clientName }: { clientId:
       {hasAny && (
         <div className="space-y-3">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <Stat label="기간 조회수" value={trend.length ? fmt(sumViews(trend)) : '-'} icon={<Eye size={12} />} />
-            <Stat label="기간 방문자" value={trend.length ? fmt(sumVisitors(trend)) : '-'} icon={<Users2 size={12} />} />
+            <Stat label="조회수" value={trend.length ? fmt(sumViews(trend)) : '-'} icon={<Eye size={12} />} />
+            <Stat label="방문자" value={trend.length ? fmt(sumVisitors(trend)) : '-'} icon={<Users2 size={12} />} />
             <Stat label="유입 검색어" value={inflow.length ? `${inflow.length}개` : '-'} icon={<Search size={12} />} />
           </div>
-          {trend.length > 0 && (
+          {/* 추이 그래프는 2일 이상일 때만(어제=1포인트는 위 숫자로 충분) */}
+          {trend.length > 1 && (
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[11px] font-semibold text-gray-400">조회수·방문자 추이</span>
