@@ -3,7 +3,7 @@
 //  "수집하기" 버튼 → enqueue_advisor_job, 진행/상태(need_login)는 realtime 으로 useAdvisorInsight 가 추적.
 //  계약: spike-rank/ADVISOR-CONTRACT.md
 import { useState } from 'react';
-import { Loader2, BarChart3, Search, TrendingUp, Users2, AlertCircle, KeyRound, RefreshCw } from 'lucide-react';
+import { Loader2, BarChart3, Search, TrendingUp, Users2, AlertCircle, KeyRound, RefreshCw, Copy, Check } from 'lucide-react';
 import { useAdvisorInsight, type TrendPoint } from '../hooks/useAdvisorInsight';
 
 const fmt = (n: number) => n.toLocaleString('ko-KR');
@@ -25,6 +25,22 @@ function Sparkline({ points }: { points: TrendPoint[] }) {
       <path d={path('views')} fill="none" stroke="#3b82f6" strokeWidth={2} vectorEffect="non-scaling-stroke" />
       <path d={path('visitors')} fill="none" stroke="#a855f7" strokeWidth={2} vectorEffect="non-scaling-stroke" />
     </svg>
+  );
+}
+
+// 수집기에 붙여넣을 client_id 복사 배지 (수집기 세션 매핑용)
+function ClientIdBadge({ clientId }: { clientId: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(clientId); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { /* 클립보드 차단 환경: 무시 */ }
+  };
+  return (
+    <button onClick={copy} title="수집기에 입력할 광고주 ID 복사"
+      className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-50 border border-gray-200 text-[11px] font-mono text-gray-600 hover:bg-gray-100 transition-colors">
+      {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} className="text-gray-400" />}
+      <span className="truncate max-w-[12rem]">ID: {clientId}</span>
+    </button>
   );
 }
 
@@ -62,10 +78,11 @@ export default function AdvisorInsightCard({ clientId, clientName }: { clientId:
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 lg:p-6 space-y-4">
       {/* 헤더 */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
           <BarChart3 size={16} className="text-blue-600 shrink-0" />
           <h3 className="text-sm font-bold text-gray-900">어드바이저 인사이트</h3>
           <span className="text-[11px] text-gray-400">· {freshness(collectedAt)}</span>
+          <ClientIdBadge clientId={clientId} />
         </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-[11px] font-semibold">
