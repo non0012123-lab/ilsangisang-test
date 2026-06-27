@@ -92,7 +92,7 @@ function ClientIdBadge({ clientId }: { clientId: string }) {
 }
 
 // 전체 인사이트(모달 본문) — 모든 묶음을 풀로, 없는 묶음은 '아직 수집 안 됨' 안내
-function FullInsight({ data }: { data: AdvisorPayload }) {
+function FullInsight({ data, basis }: { data: AdvisorPayload; basis: string }) {
   const inflow = (data.inflowKeywords ?? []).slice(0, 20);
   const trend = data.viewsTrend?.points ?? [];
   const gender = data.demographics?.gender;
@@ -119,7 +119,10 @@ function FullInsight({ data }: { data: AdvisorPayload }) {
 
       {/* 유입 검색어 */}
       <section>
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2"><Search size={14} /> 유입 검색어 {inflow.length > 0 ? `Top ${inflow.length}` : ''}</div>
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2">
+          <Search size={14} /> 유입 검색어 {inflow.length > 0 ? `Top ${inflow.length}` : ''}
+          <span className="font-normal text-[10px] text-gray-400">· {basis}</span>
+        </div>
         {inflow.length > 0 ? (
           <ol className="grid sm:grid-cols-2 gap-x-6 gap-y-1">
             {inflow.map((k, i) => (
@@ -135,7 +138,10 @@ function FullInsight({ data }: { data: AdvisorPayload }) {
 
       {/* 성별·연령 */}
       <section>
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2"><Users2 size={14} /> 방문자 성별·연령</div>
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2">
+          <Users2 size={14} /> 방문자 성별·연령
+          <span className="font-normal text-[10px] text-gray-400">· {basis}</span>
+        </div>
         {(gender || ages.length > 0) ? (
           <div className="space-y-1.5 max-w-md">
             {gender && (
@@ -167,6 +173,8 @@ export default function AdvisorInsightCard({ clientId, clientName }: { clientId:
   const collecting = jobActive && (job?.period ?? '30d') === period;
 
   const periodLabel = PERIODS.find(p => p.key === period)?.label ?? '';
+  // 유입검색어·성별/연령은 네이버가 일·주·월 집계로만 줌(수집기 안내): 1d=어제 / 7d=최근 주간 / 30d=이번 달 기준
+  const aggBasis = period === '1d' ? '어제 기준' : period === '7d' ? '최근 주간 기준' : '이번 달 기준';
   const inflow = data.inflowKeywords ?? [];
   const trend = data.viewsTrend?.points ?? [];
   const hasAny = inflow.length > 0 || trend.length > 0 || !!data.demographics?.gender || (data.demographics?.age?.length ?? 0) > 0;
@@ -268,7 +276,7 @@ export default function AdvisorInsightCard({ clientId, clientName }: { clientId:
               <button onClick={() => setOpen(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18} /></button>
             </div>
             <div className="px-6 py-5">
-              <FullInsight data={data} />
+              <FullInsight data={data} basis={aggBasis} />
             </div>
           </div>
         </div>
