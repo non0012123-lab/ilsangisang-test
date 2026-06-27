@@ -1,32 +1,73 @@
-// 광고주 상세 — 크리에이터 어드바이저 인사이트 카드.
-//  유입검색어 Top20 + 조회수·방문자 트렌드(미니 스파크라인) + 성별·연령.
-//  "수집하기" 버튼 → enqueue_advisor_job, 진행/상태(need_login)는 realtime 으로 useAdvisorInsight 가 추적.
+// 광고주 상세 — 크리에이터 어드바이저 인사이트.
+//  개요 탭엔 요약(조회수·방문자 숫자 + 미니 그래프) + '자세히 보기' → 펼침 모달에서 전체 표시.
+//  데이터 묶음: viewsTrend(조회수·방문자 추이) / inflowKeywords(유입검색어 Top20) / demographics(성별·연령).
+//  "수집하기" → enqueue_advisor_job, 진행/상태(need_login)는 realtime 으로 useAdvisorInsight 가 추적.
 //  계약: spike-rank/ADVISOR-CONTRACT.md
-import { useState } from 'react';
-import { Loader2, BarChart3, Search, TrendingUp, Users2, AlertCircle, KeyRound, RefreshCw, Copy, Check } from 'lucide-react';
-import { useAdvisorInsight, type TrendPoint } from '../hooks/useAdvisorInsight';
+import { useState, type ReactNode } from 'react';
+import {
+  Loader2, BarChart3, Search, TrendingUp, Users2, AlertCircle, KeyRound, RefreshCw,
+  Copy, Check, X, Eye, Maximize2,
+} from 'lucide-react';
+import { useAdvisorInsight, type AdvisorPayload, type TrendPoint } from '../hooks/useAdvisorInsight';
 
 const fmt = (n: number) => n.toLocaleString('ko-KR');
 const pct = (r: number) => `${Math.round(r * 100)}%`;
 const freshness = (iso: string | null) =>
   iso ? `${new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 수집` : '아직 수집 안 됨';
 
+const sumViews = (pts: TrendPoint[]) => pts.reduce((s, p) => s + (p.views || 0), 0);
+const sumVisitors = (pts: TrendPoint[]) => pts.reduce((s, p) => s + (p.visitors || 0), 0);
+
 // 조회수·방문자 2계열 미니 스파크라인(의존성 0, 인라인 SVG)
-function Sparkline({ points }: { points: TrendPoint[] }) {
+function Sparkline({ points, height = 90 }: { points: TrendPoint[]; height?: number }) {
   if (points.length < 2) return <p className="text-xs text-gray-400">데이터 포인트가 부족합니다.</p>;
-  const W = 520, H = 90, P = 4;
+  const W = 520, H = height, P = 4;
   const max = Math.max(1, ...points.map(p => Math.max(p.views, p.visitors)));
   const x = (i: number) => P + (i / (points.length - 1)) * (W - 2 * P);
   const y = (v: number) => H - P - (v / max) * (H - 2 * P);
   const path = (key: 'views' | 'visitors') =>
     points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(p[key]).toFixed(1)}`).join(' ');
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[90px]" preserveAspectRatio="none">
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height }} preserveAspectRatio="none">
       <path d={path('views')} fill="none" stroke="#3b82f6" strokeWidth={2} vectorEffect="non-scaling-stroke" />
       <path d={path('visitors')} fill="none" stroke="#a855f7" strokeWidth={2} vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
+
+function Bar({ label, ratio, color }: { label: string; ratio: number; color: string }) {
+  return (
+    <div className="flex items-center gap-2 text-[11px]">
+      <span className="w-10 text-gray-500 shrink-0">{label}</span>
+      <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
+        <div className={`h-full ${color} rounded-full`} style={{ width: pct(Math.max(0, Math.min(1, ratio))) }} />
+      </div>
+      <span className="w-9 text-right font-semibold text-gray-700 shrink-0">{pct(ratio)}</span>
+    </div>
+  );
+}
+
+function Stat({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
+  return (
+    <div className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2">
+      <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-400 mb-0.5">{icon} {label}</div>
+      <p className="text-base font-bold text-gray-900">{value}</p>
+    </div>
+  );
+}
+
+function TrendLegend() {
+  return (
+    <div className="flex items-center gap-3 text-[10px] font-medium">
+      <span className="flex items-center gap-1 text-blue-600"><span className="w-2 h-2 rounded-full bg-blue-500" /> 조회수</span>
+      <span className="flex items-center gap-1 text-purple-600"><span className="w-2 h-2 rounded-full bg-purple-500" /> 방문자</span>
+    </div>
+  );
+}
+
+const SectionEmpty = ({ msg }: { msg: string }) => (
+  <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-4 text-center">{msg}</p>
+);
 
 // 수집기에 붙여넣을 client_id 복사 배지 (수집기 세션 매핑용)
 function ClientIdBadge({ clientId }: { clientId: string }) {
@@ -44,14 +85,64 @@ function ClientIdBadge({ clientId }: { clientId: string }) {
   );
 }
 
-function Bar({ label, ratio, color }: { label: string; ratio: number; color: string }) {
+// 전체 인사이트(모달 본문) — 모든 묶음을 풀로, 없는 묶음은 '아직 수집 안 됨' 안내
+function FullInsight({ data }: { data: AdvisorPayload }) {
+  const inflow = (data.inflowKeywords ?? []).slice(0, 20);
+  const trend = data.viewsTrend?.points ?? [];
+  const gender = data.demographics?.gender;
+  const ages = data.demographics?.age ?? [];
+
   return (
-    <div className="flex items-center gap-2 text-[11px]">
-      <span className="w-10 text-gray-500 shrink-0">{label}</span>
-      <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
-        <div className={`h-full ${color} rounded-full`} style={{ width: pct(Math.max(0, Math.min(1, ratio))) }} />
-      </div>
-      <span className="w-9 text-right font-semibold text-gray-700 shrink-0">{pct(ratio)}</span>
+    <div className="space-y-6">
+      {/* 조회수·방문자 */}
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500"><TrendingUp size={14} /> 조회수·방문자 추이{data.viewsTrend?.period ? ` (${data.viewsTrend.period})` : ''}</div>
+          {trend.length > 0 && <TrendLegend />}
+        </div>
+        {trend.length > 0 ? (
+          <>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <Stat label="기간 조회수" value={fmt(sumViews(trend))} icon={<Eye size={12} />} />
+              <Stat label="기간 방문자" value={fmt(sumVisitors(trend))} icon={<Users2 size={12} />} />
+            </div>
+            <Sparkline points={trend} height={140} />
+          </>
+        ) : <SectionEmpty msg="조회수 추이가 아직 수집되지 않았습니다." />}
+      </section>
+
+      {/* 유입 검색어 */}
+      <section>
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2"><Search size={14} /> 유입 검색어 {inflow.length > 0 ? `Top ${inflow.length}` : ''}</div>
+        {inflow.length > 0 ? (
+          <ol className="grid sm:grid-cols-2 gap-x-6 gap-y-1">
+            {inflow.map((k, i) => (
+              <li key={k.keyword + i} className="flex items-center gap-2 text-sm">
+                <span className="w-5 text-[11px] font-bold text-gray-300 text-right shrink-0">{i + 1}</span>
+                <span className="flex-1 text-gray-800 truncate">{k.keyword}</span>
+                <span className="text-xs font-semibold text-gray-500 shrink-0">{fmt(k.count)}</span>
+              </li>
+            ))}
+          </ol>
+        ) : <SectionEmpty msg="유입 검색어가 아직 수집되지 않았습니다." />}
+      </section>
+
+      {/* 성별·연령 */}
+      <section>
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 mb-2"><Users2 size={14} /> 방문자 성별·연령</div>
+        {(gender || ages.length > 0) ? (
+          <div className="space-y-1.5 max-w-md">
+            {gender && (
+              <>
+                {typeof gender.male === 'number' && <Bar label="남성" ratio={gender.male} color="bg-blue-500" />}
+                {typeof gender.female === 'number' && <Bar label="여성" ratio={gender.female} color="bg-pink-500" />}
+                {ages.length > 0 && <div className="h-1" />}
+              </>
+            )}
+            {ages.map(a => <Bar key={a.bucket} label={`${a.bucket}대`} ratio={a.ratio} color="bg-indigo-400" />)}
+          </div>
+        ) : <SectionEmpty msg="성별·연령은 아직 수집되지 않았습니다(글 조회수 5 미만이면 네이버가 제공하지 않음)." />}
+      </section>
     </div>
   );
 }
@@ -59,12 +150,11 @@ function Bar({ label, ratio, color }: { label: string; ratio: number; color: str
 export default function AdvisorInsightCard({ clientId, clientName }: { clientId: string; clientName: string }) {
   const { data, collectedAt, job, collecting, collect, busy, error } = useAdvisorInsight(clientId, clientName);
   const [period, setPeriod] = useState<'7d' | '30d'>('30d');
+  const [open, setOpen] = useState(false);
 
-  const inflow = (data.inflowKeywords ?? []).slice(0, 20);
+  const inflow = data.inflowKeywords ?? [];
   const trend = data.viewsTrend?.points ?? [];
-  const gender = data.demographics?.gender;
-  const ages = data.demographics?.age ?? [];
-  const hasAny = inflow.length > 0 || trend.length > 0 || !!gender || ages.length > 0;
+  const hasAny = inflow.length > 0 || trend.length > 0 || !!data.demographics?.gender || (data.demographics?.age?.length ?? 0) > 0;
 
   const statusMsg =
     collecting ? (job?.status === 'queued' ? '대기 중 · 수집기 응답 대기' : `수집 중${job && job.total > 0 ? ` ${job.done}/${job.total}` : ''}`)
@@ -117,58 +207,50 @@ export default function AdvisorInsightCard({ clientId, clientName }: { clientId:
         </p>
       )}
 
+      {/* 요약(개요 탭) — 조회수·방문자 숫자 + 미니 그래프 + 자세히 보기 */}
       {hasAny && (
-        <div className="grid lg:grid-cols-2 gap-5">
-          {/* 유입 검색어 Top20 */}
-          {inflow.length > 0 && (
-            <div className="lg:row-span-2">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 mb-2"><Search size={13} /> 유입 검색어 Top {inflow.length}</div>
-              <ol className="space-y-1">
-                {inflow.map((k, i) => (
-                  <li key={k.keyword + i} className="flex items-center gap-2 text-sm">
-                    <span className="w-5 text-[11px] font-bold text-gray-300 text-right shrink-0">{i + 1}</span>
-                    <span className="flex-1 text-gray-800 truncate">{k.keyword}</span>
-                    <span className="text-xs font-semibold text-gray-500 shrink-0">{fmt(k.count)}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-
-          {/* 조회수·방문자 트렌드 */}
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <Stat label="기간 조회수" value={trend.length ? fmt(sumViews(trend)) : '-'} icon={<Eye size={12} />} />
+            <Stat label="기간 방문자" value={trend.length ? fmt(sumVisitors(trend)) : '-'} icon={<Users2 size={12} />} />
+            <Stat label="유입 검색어" value={inflow.length ? `${inflow.length}개` : '-'} icon={<Search size={12} />} />
+          </div>
           {trend.length > 0 && (
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400"><TrendingUp size={13} /> 조회수·방문자 추이</div>
-                <div className="flex items-center gap-3 text-[10px] font-medium">
-                  <span className="flex items-center gap-1 text-blue-600"><span className="w-2 h-2 rounded-full bg-blue-500" /> 조회수</span>
-                  <span className="flex items-center gap-1 text-purple-600"><span className="w-2 h-2 rounded-full bg-purple-500" /> 방문자</span>
-                </div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-gray-400">조회수·방문자 추이</span>
+                <TrendLegend />
               </div>
-              <Sparkline points={trend} />
+              <Sparkline points={trend} height={70} />
             </div>
           )}
-
-          {/* 성별·연령 */}
-          {(gender || ages.length > 0) && (
-            <div>
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 mb-2"><Users2 size={13} /> 방문자 성별·연령</div>
-              <div className="space-y-1.5">
-                {gender && (
-                  <>
-                    {typeof gender.male === 'number' && <Bar label="남성" ratio={gender.male} color="bg-blue-500" />}
-                    {typeof gender.female === 'number' && <Bar label="여성" ratio={gender.female} color="bg-pink-500" />}
-                    {ages.length > 0 && <div className="h-1" />}
-                  </>
-                )}
-                {ages.map(a => <Bar key={a.bucket} label={`${a.bucket}대`} ratio={a.ratio} color="bg-indigo-400" />)}
-              </div>
-            </div>
-          )}
+          <button onClick={() => setOpen(true)}
+            className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
+            <Maximize2 size={13} /> 자세히 보기 (유입검색어·성별·연령 전체)
+          </button>
         </div>
       )}
 
       {error && <p className="text-xs text-red-500">요청 실패: {error}</p>}
+
+      {/* 펼침 모달 — 전체 인사이트 */}
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white">
+              <div className="flex items-center gap-2 min-w-0">
+                <BarChart3 size={16} className="text-blue-600 shrink-0" />
+                <h2 className="text-base font-bold text-gray-900 truncate">{clientName} · 어드바이저 인사이트</h2>
+                <span className="text-[11px] text-gray-400 shrink-0">· {freshness(collectedAt)}</span>
+              </div>
+              <button onClick={() => setOpen(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18} /></button>
+            </div>
+            <div className="px-6 py-5">
+              <FullInsight data={data} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
