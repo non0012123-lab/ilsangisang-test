@@ -35,22 +35,19 @@ function Sparkline({ points, height = 90 }: { points: TrendPoint[]; height?: num
   const y = (v: number) => H - P - (v / max) * (H - 2 * P);
   const path = (key: 'views' | 'visitors') =>
     points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(p[key]).toFixed(1)}`).join(' ');
+  // X축 날짜 라벨: 기본은 전부 표시. 너무 많으면(월간 등) 겹치지 않게 일정 간격으로 솎되 마지막 날은 포함.
+  const step = Math.max(1, Math.ceil(points.length / 16));
+  const ticks = points.filter((_, i) => i % step === 0);
+  if (ticks[ticks.length - 1] !== points[points.length - 1]) ticks.push(points[points.length - 1]);
   return (
     <div>
-      {/* Y축 안내: 단위(명) + 최대값 */}
-      <div className="flex items-center justify-between text-[10px] text-gray-400 mb-0.5">
-        <span>세로축 = 명(일별)</span>
-        <span>최대 {fmt(max)}</span>
-      </div>
+      <div className="flex justify-end mb-0.5"><span className="text-[9px] text-gray-300">최대 {fmt(max)}</span></div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full border-b border-gray-100" style={{ height }} preserveAspectRatio="none">
         <path d={path('views')} fill="none" stroke="#3b82f6" strokeWidth={2} vectorEffect="non-scaling-stroke" />
         <path d={path('visitors')} fill="none" stroke="#a855f7" strokeWidth={2} vectorEffect="non-scaling-stroke" />
       </svg>
-      {/* X축 안내: 시작~끝 날짜 */}
-      <div className="flex items-center justify-between text-[10px] text-gray-400 mt-0.5">
-        <span>{mdLabel(points[0].date)}</span>
-        <span>가로축 = 날짜</span>
-        <span>{mdLabel(points[points.length - 1].date)}</span>
+      <div className="flex justify-between text-[9px] text-gray-400 mt-1">
+        {ticks.map((p, i) => <span key={p.date + i} className="whitespace-nowrap">{mdLabel(p.date)}</span>)}
       </div>
     </div>
   );
