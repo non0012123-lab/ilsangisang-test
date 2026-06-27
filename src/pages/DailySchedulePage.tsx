@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { usePersistedState, usePersistedManagerFilter } from '../hooks/usePersisted';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, Search, Filter, CalendarRange, User } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
@@ -26,7 +27,8 @@ export default function DailySchedulePage() {
   const { entries, saveEntry, removeEntry, patchEntry, clients, members } = useApp();
   const { notify, show: showToast } = useCopyToast();
 
-  const [date, setDate] = useState(toDateStr(new Date()));
+  // 날짜는 영속(새로고침/배포 후에도 보던 날짜 유지 — 오늘로 튕기지 않음)
+  const [date, setDate] = usePersistedState('sched.daily.date', toDateStr(new Date()));
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -34,7 +36,6 @@ export default function DailySchedulePage() {
   const [filterClient, setFilterClient] = useState('all');
   const [filterCategory, setFilterCategory] = useState<Category | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<ScheduleStatus | 'all'>('all');
-  const [filterManager, setFilterManager] = useState('all');
   const [filterTeam, setFilterTeam] = useState('all');
 
   // 담당자 필터는 실제 가입·승인된 담당자(Supabase profiles)를 사용 (스케줄 등록 모달과 동일 소스)
@@ -45,6 +46,8 @@ export default function DailySchedulePage() {
   // "내 일정" 빠른 버튼 — 로그인 본인을 담당자 필터로 토글(기존 filterManager 재사용)
   const { user } = useAuth();
   const selfId = user?.id && members.some(m => m.id === user.id) ? user.id : '';
+  // 담당자 필터는 기본 '내 일정'(selfId), 사용자가 바꾸면 그 선택을 기억(영속)
+  const [filterManager, setFilterManager] = usePersistedManagerFilter('sched.daily.manager', selfId);
   const myView = !!selfId && filterManager === selfId;
   const toggleMine = () => setFilterManager(myView ? 'all' : selfId);
 

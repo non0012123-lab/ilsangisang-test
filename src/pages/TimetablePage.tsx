@@ -1,4 +1,5 @@
 import { useMemo, useState, useRef, useEffect } from 'react';
+import { usePersistedState, usePersistedManagerFilter } from '../hooks/usePersisted';
 import { ChevronLeft, ChevronRight, Plus, Sparkles, Calendar, X, CalendarRange, ExternalLink, Trash2, Repeat, Search, User } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
@@ -57,7 +58,8 @@ export default function TimetablePage() {
   // 담당자(개인) 필터 — 이름 검색 자동완성 + "내 일정" 빠른 선택
   const { user } = useAuth();
   const selfId = user?.id && members.some(m => m.id === user.id) ? user.id : '';
-  const [filterManagerId, setFilterManagerId] = useState('all');
+  // 담당자 필터는 기본 '내 일정'(selfId), 사용자가 바꾸면 그 선택을 기억(영속)
+  const [filterManagerId, setFilterManagerId] = usePersistedManagerFilter('tt.manager', selfId);
   const [mgrQuery, setMgrQuery] = useState('');
   const [mgrOpen, setMgrOpen] = useState(false);
   const mgrRef = useRef<HTMLDivElement>(null);
@@ -78,8 +80,12 @@ export default function TimetablePage() {
   const clearManager = () => { setFilterManagerId('all'); setMgrQuery(''); };
   const [catFilter, setCatFilter] = useState<string[]>([]); // 선택 카테고리(여러 개). 비어 있으면 전체
   const toggleCat = (cat: string) => setCatFilter(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
-  const [curDate, setCurDate] = useState(new Date());
-  const [selectedDay, setSelectedDay] = useState<number | null>(new Date().getDate());
+  // 월/선택일은 영속(새로고침/배포 후에도 보던 달·날짜 유지 — 오늘로 튕기지 않음)
+  const fmtDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const [curDateStr, setCurDateStr] = usePersistedState('tt.date', fmtDate(new Date()));
+  const curDate = new Date(curDateStr + 'T00:00:00');
+  const setCurDate = (d: Date) => setCurDateStr(fmtDate(d));
+  const [selectedDay, setSelectedDay] = usePersistedState<number | null>('tt.selectedDay', new Date().getDate());
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null; date?: string }>({ open: false });
   const [aiOpen, setAiOpen] = useState(false);
 
