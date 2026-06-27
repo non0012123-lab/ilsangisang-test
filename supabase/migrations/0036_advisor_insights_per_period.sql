@@ -10,10 +10,18 @@
 -- ───────────────────────────────────────────────────────────────
 
 -- ── advisor_insights: period 컬럼 추가 + PK (client_id, period) ──
+-- (재실행 안전: 컬럼/제약을 조건부로 처리. 0036 이 타임아웃으로 중간까지 적용됐어도 깨끗이 마무리됨)
 alter table public.advisor_insights add column if not exists period text not null default '30d';
--- 기존 단일 PK(client_id) 제거 후 복합 PK. 기존 행은 period 기본 '30d' 로 보존됨.
 alter table public.advisor_insights drop constraint if exists advisor_insights_pkey;
-alter table public.advisor_insights add primary key (client_id, period);
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.advisor_insights'::regclass and contype = 'p'
+  ) then
+    alter table public.advisor_insights add primary key (client_id, period);
+  end if;
+end $$;
 
 -- ── patch: 기간별 스냅샷 upsert(최상위 키 || 병합 = 그 기간 안에서 준 묶음만 갱신, 부분수집 보존) ──
 drop function if exists public.patch_advisor_insight(text, jsonb);

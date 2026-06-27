@@ -58,40 +58,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 세션의 사용자에 대응하는 profiles 행을 읽어 상태에 반영
   const loadProfile = async (session: Session | null) => {
     if (!supabase || !session?.user) { setUser(null); return; }
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*') // '*' 로 조회해 title/position 컬럼이 아직 없어도(마이그레이션 전) 쿼리가 실패하지 않게 함
-      .eq('id', session.user.id)
-      .single();
-    if (error || !data) {
-      // 프로필이 아직 없으면 승인 대기로 취급 (안전 기본값)
-      setUser({
-        id: session.user.id,
-        name: (session.user.user_metadata?.name as string) ?? session.user.email ?? '사용자',
-        email: session.user.email ?? '',
-        role: 'pending',
-        department: (session.user.user_metadata?.department as string) ?? undefined,
-      });
-      return;
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*') // '*' 로 조회해 title/position 컬럼이 아직 없어도(마이그레이션 전) 쿼리가 실패하지 않게 함
+        .eq('id', session.user.id)
+        .single();
+      if (error || !data) {
+        // 프로필이 아직 없으면 승인 대기로 취급 (안전 기본값)
+        setUser({
+          id: session.user.id,
+          name: (session.user.user_metadata?.name as string) ?? session.user.email ?? '사용자',
+          email: session.user.email ?? '',
+          role: 'pending',
+          department: (session.user.user_metadata?.department as string) ?? undefined,
+        });
+        return;
+      }
+      setUser(toAuthUser(data as ProfileRow, session.user.email ?? undefined));
+    } catch {
+      // 네트워크/DB 지연·오류로 프로필 조회가 실패해도 앱이 멈추지 않게(세션은 onAuthStateChange 로 보정).
+      setUser(prev => prev);
     }
-    setUser(toAuthUser(data as ProfileRow, session.user.email ?? undefined));
   };
 
   useEffect(() => {
     if (!supabase) { setLoading(false); return; }
     let active = true;
+    const done = () => { if (active) setLoading(false); };
+    // ★안전장치: getSession/profiles 조회가 지연·실패해도 앱이 '불러오는 중'에 영원히 갇히지 않게.
+    //   (DB 락/네트워크 문제 시에도 일정 시간 후 로딩 해제 → 로그인/라우팅은 계속 동작)
+    const failsafe = setTimeout(done, 8000);
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!active) return;
-      await loadProfile(data.session);
-      if (active) setLoading(false);
-    });
+    supabase.auth.getSession()
+      .then(async ({ data }) => { if (active) await loadProfile(data.session); })
+      .catch(() => { /* 무시 — finally 에서 로딩 해제 */ })
+      .finally(() => { clearTimeout(failsafe); done(); });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       loadProfile(session);
     });
 
-    return () => { active = false; sub.subscription.unsubscribe(); };
+    return () => { active = false; clearTimeout(failsafe); sub.subscription.unsubscribe(); };
   }, []);
 
   const login = async (email: string, password: string): Promise<{ error?: string }> => {
