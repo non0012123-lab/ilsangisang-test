@@ -24,6 +24,6 @@ as $$
    where e.data->>'clientId' = p_client_id
      and coalesce(e.data->>'link', '') <> ''
      and e.data->>'link' like '%blog.naver.com%'
-   order by e.data->>'link', e.date desc;
+   order by e.data->>'link', e.data->>'date' desc;
 $$;
 grant execute on function public.advisor_post_targets(text) to authenticated;
