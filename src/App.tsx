@@ -1,10 +1,11 @@
-import { useEffect, useState, lazy, Suspense } from 'react';
+import { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import { runSilentUpdate } from './utils/tauriUpdate';
 import { startVersionWatch } from './utils/versionCheck';
 import { getWindowLabel, onNotificationActivated, focusCurrentWindow } from './utils/tauriWindow';
+import { todayStr } from './utils/today';
 import type { AuthUser } from './types';
 
 // 라우트 페이지는 지연 로딩(코드 스플리팅) — 초기 번들을 줄여 첫 로딩을 빠르게 한다.
@@ -87,6 +88,41 @@ function TauriNotificationRouter() {
     })();
     return () => { active = false; if (unlisten) unlisten(); };
   }, [navigate]);
+  return null;
+}
+
+// 날짜 경계 홈 복귀 — 같은 세션의 새로고침/배포 리로드는 보던 화면을 유지하되,
+//  날짜가 바뀐 뒤 처음 앱이 뜨면(어제 켜둔 창을 오늘 리로드·오늘 새로 켠 앱) 한 번만 메인으로 돌려보낸다.
+//  • URL 은 브라우저/데스크톱 셸이 그대로 복원하므로, 아무 처리도 안 하면 '어제 보던 페이지'에 머문다.
+//  • 마지막 방문 날짜를 localStorage 에 저장해 두고, 오늘과 다르면 1회만 홈으로 이동시킨다.
+//    (같은 날 새로고침/배포 리로드는 날짜가 같아 화면 유지 — 의도된 동작 보존)
+function DayBoundaryHome() {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const decided = useRef(false);
+
+  useEffect(() => {
+    if (decided.current || loading || !user) return;
+    decided.current = true; // 이번 실행에서 1회만 판단(이후 일반 네비게이션은 그대로 둠)
+
+    void getWindowLabel().then(label => {
+      if (label === 'assistant') return; // 트레이 위젯 창은 /widget 고정(AssistantWindowGuard 가 관리)
+      const KEY = 'ilsangisang.lastVisitDate';
+      const today = todayStr();
+      let last: string | null = null;
+      try { last = localStorage.getItem(KEY); } catch { /* 무시 */ }
+      try { localStorage.setItem(KEY, today); } catch { /* 무시 */ }
+      // 날짜가 바뀌었고(또는 기록 없음) 인증 흐름 화면이 아니면 메인으로 복귀
+      if (last !== today) {
+        const p = location.pathname;
+        if (p !== '/login' && p !== '/signup' && p !== '/widget') {
+          navigate(homeFor(user), { replace: true });
+        }
+      }
+    });
+  }, [user, loading, navigate, location.pathname]);
+
   return null;
 }
 
@@ -192,6 +228,7 @@ export default function App() {
         <AppProvider>
           <AssistantWindowGuard />
           <TauriNotificationRouter />
+          <DayBoundaryHome />
           <AppRoutes />
         </AppProvider>
       </AuthProvider>
