@@ -44,9 +44,21 @@ export const bestRank = (rankByTab?: Partial<Record<SearchTab, number | null>>):
 
 const norm = (s: string) => s.replace(/\s+/g, '').toLowerCase();
 
+// 문자열의 2글자 조각(bigram) 집합. "대전피부과" → [대전,전피,피부,부과]
+const bigrams = (s: string): string[] => {
+  const out: string[] = [];
+  for (let i = 0; i < s.length - 1; i++) out.push(s.slice(i, i + 2));
+  return out;
+};
+
 // 링크-키워드 불일치 의심 판정(잘못된 링크 삽입 감지).
-//  • 수집됨(postTitle 있음) + 키워드 토큰이 제목에 전혀 안 보임 + 어느 탭에도 순위 미발견 → 의심.
+//  • 수집됨(postTitle 있음) + 키워드 흔적이 제목에 전혀 안 보임 + 어느 탭에도 순위 미발견 → 의심.
 //  • 두 신호(제목 무관 + 미발견)를 모두 만족할 때만 → 오탐 최소화. 경고(소프트)일 뿐 차단 아님.
+//  • '관련됨' 판정 3종 (하나라도 만족하면 정상):
+//    1) 제목에 키워드 전체가 그대로 들어있음
+//    2) 공백 토큰(2글자+) 중 하나가 제목에 들어있음 ("대전 피부과" → "피부과")
+//    3) ★bigram 겹침 ≥ 67%: 붙여쓴 키워드("대전피부과")가 제목에선 떨어져 있어도("대전 둔산동 피부과")
+//       지역+업종 글자조각이 대부분 제목에 있으면 정상으로 본다(오탐 방지).
 export const linkKeywordMismatch = (entry: {
   category?: string; keyword?: string; postTitle?: string;
   rankByTab?: Partial<Record<SearchTab, number | null>>;
@@ -58,6 +70,8 @@ export const linkKeywordMismatch = (entry: {
   const nt = norm(entry.postTitle);
   const nk = norm(entry.keyword);
   const tokens = entry.keyword.split(/\s+/).map(norm).filter(t => t.length >= 2);
-  const related = nt.includes(nk) || tokens.some(t => nt.includes(t));
+  const kb = bigrams(nk);
+  const overlap = kb.length >= 2 ? kb.filter(g => nt.includes(g)).length / kb.length : 0;
+  const related = nt.includes(nk) || tokens.some(t => nt.includes(t)) || overlap >= 0.67;
   return !related;   // 제목에 키워드 흔적이 전혀 없음 + 미발견 → 의심
 };
