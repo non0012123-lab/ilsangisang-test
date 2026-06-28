@@ -27,13 +27,19 @@ export const foundRanks = (rankByTab?: Partial<Record<SearchTab, number | null>>
 export const isRankTrackedCategory = (c?: Category | string): boolean =>
   c === '블로그 상위노출' || c === '블로그관리' || c === '카페 상위노출';
 
-// 카테고리별 기본 선택 탭. 블로그관리는 통합/블로그 어디든 잡히면 되므로 둘 다 기본.
+// 카테고리별 기본 선택 탭. 블로그(상위노출/관리)는 통합/블로그 어디든 잡히면 되므로 둘 다 기본.
 export const defaultSearchTabs = (c?: Category | string): SearchTab[] => {
   if (c === '카페 상위노출') return ['cafe'];
   if (c === '블로그관리') return ['integrated', 'blog'];
-  if (c === '블로그 상위노출') return ['integrated'];
+  if (c === '블로그 상위노출') return ['integrated', 'blog'];
   return [];
 };
+
+// 실제 수집/표시에 쓸 탭. 명시 저장된 searchTabs 가 있으면 그걸, 없으면(과거 항목·AI 등록 등)
+//  카테고리 기본값으로 대체한다 → 일정을 한 번도 '수정'하지 않아도 즉시 수집 대상이 된다.
+//  (서버 rank_job_targets RPC 도 동일하게 기본값 대체 — 0037 마이그레이션)
+export const effectiveSearchTabs = (entry: { category?: Category | string; searchTabs?: SearchTab[] }): SearchTab[] =>
+  entry.searchTabs && entry.searchTabs.length ? entry.searchTabs : defaultSearchTabs(entry.category);
 
 // 대표 순위 = 선택 탭 중 최고(min). 수집값이 하나도 없으면 undefined.
 export const bestRank = (rankByTab?: Partial<Record<SearchTab, number | null>>): number | undefined => {

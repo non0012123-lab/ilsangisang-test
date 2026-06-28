@@ -9,6 +9,8 @@ import { supabase } from '../lib/supabase';
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { todayStr, normDateTime } from '../utils/today';
 import { recurrenceOccurrences } from '../utils/recurrence';
+import { defaultSearchTabs, isRankTrackedCategory, bestRank, effectiveSearchTabs, SEARCH_TAB_ORDER } from '../utils/searchTabs';
+import type { SearchTab } from '../types';
 import { fireDesktop, requestNotifyPermission, isNotifySupported } from '../utils/notifications';
 import { useAuth } from './AuthContext';
 import { CATEGORIES as ASSISTANT_CATEGORIES, normalizeNaverCategory, applyCategoryChoice } from '../data/categories';
@@ -1231,6 +1233,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             managerName: e.managerName, clientName: e.clientName,
             category: e.category, keyword: e.keyword, status: e.status,
             link: e.link ?? null, rank: e.rank ?? null,
+            // 순위추적(블로그/카페)이면 탭별 순위·수집시각을 함께 전달 — "어제 작업건 몇위/미노출/노출" 응답·수정용.
+            //  숫자=노출(순위), null=미노출(수집했으나 못 찾음), 키 없음=미수집.
+            ...(isRankTrackedCategory(e.category)
+              ? { rankByTab: e.rankByTab ?? {}, rankCheckedAt: e.rankCheckedAt ?? {} }
+              : {}),
           })),
         }),
       });
@@ -1499,6 +1506,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         link: e.link || undefined,
         rank: parseRank(e.rank), // "키워드 N위로 등록" → 순위 N ("3위"/"3등" 등 비정형 표기도 허용)
         status: (['pending', 'in-progress', 'completed'].includes(e.status ?? '') ? e.status : 'pending') as ScheduleStatus,
+        // 순위추적 카테고리면 수집 대상 탭을 기본값으로 채워 등록 → '수정' 한 번 안 눌러도 바로 수집 대상.
+        ...(isRankTrackedCategory(category) ? { searchTabs: defaultSearchTabs(category) } : {}),
       };
       // 반복("매월 7일", "매주 화요일" 등) → 해당 날짜마다 실제 일정 N개 생성 + seriesId 로 묶음(수동 등록과 동일 로직).
       if (e.recurrence && e.recurrence.freq) {
@@ -1562,9 +1571,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (up.status && ['pending', 'in-progress', 'completed'].includes(up.status)) patch.status = up.status as ScheduleStatus;
       // 스케줄 링크: 문자열이면 추가/수정, 빈 문자열("")이면 삭제, null/생략이면 변경 안 함
       if (up.link !== undefined && up.link !== null && up.link !== 'null') patch.link = up.link ? up.link : undefined;
-      // 순위: 양수면 변경, null/생략이면 변경 안 함 ("신사피부과 5위로 바꿔줘")
+      // 순위 변경. 순위추적(블로그/카페) 카테고리는 탭별(rankByTab)로 반영해야 표에 보인다.
+      //  → 수집기 안 돌리고 한 키워드만 직접 고칠 때. 손댄 탭은 수집시각=현재로 기록.
       const r = parseRank(up.rank);
-      if (r !== undefined) patch.rank = r;
+      const isRT = isRankTrackedCategory(cur.category);
+      const tabPatch: Partial<Record<SearchTab, number | null>> = {};
+      if (isRT && up.rankByTab && typeof up.rankByTab === 'object') {
+        for (const t of SEARCH_TAB_ORDER) {
+          if (!(t in up.rankByTab)) continue;
+          const v = up.rankByTab[t];
+          tabPatch[t] = v === null ? null : (parseRank(v) ?? null);
+        }
+      }
+      // 탭 미지정 단일 순위("○○ 5위로 바꿔줘")도 순위추적이면 기본(통합/카페) 탭에 반영해 표에 보이게
+      if (isRT && Object.keys(tabPatch).length === 0 && r !== undefined) {
+        const primary = effectiveSearchTabs(cur)[0];
+        if (primary) tabPatch[primary] = r;
+      }
+      if (Object.keys(tabPatch).length) {
+        const merged: Partial<Record<SearchTab, number | null>> = { ...cur.rankByTab, ...tabPatch };
+        const now = new Date().toISOString();
+        const checked: Partial<Record<SearchTab, string>> = { ...cur.rankCheckedAt };
+        (Object.keys(tabPatch) as SearchTab[]).forEach(t => { checked[t] = now; });
+        patch.rankByTab = merged;
+        patch.rankCheckedAt = checked;
+        patch.rank = bestRank(merged);
+      } else if (r !== undefined) {
+        patch.rank = r; // 비-순위추적(레거시 단일 순위)
+      }
       if (Object.keys(patch).length) {
         if (!patchedIds.has(cur.id)) { undo.updatedPrev.push({ ...cur }); patchedIds.add(cur.id); count += 1; }
         patchEntry(cur.id, patch);

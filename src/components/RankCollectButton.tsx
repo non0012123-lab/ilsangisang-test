@@ -8,7 +8,7 @@ import { Radar, Loader2 } from 'lucide-react';
 import type { ScheduleEntry } from '../types';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import { isRankTrackedCategory } from '../utils/searchTabs';
+import { isRankTrackedCategory, effectiveSearchTabs } from '../utils/searchTabs';
 import { useRankCollect, type RankMode } from '../hooks/useRankCollect';
 
 type Scope = 'mine' | 'manager' | 'all';
@@ -37,7 +37,8 @@ export default function RankCollectButton({ entries }: { entries: ScheduleEntry[
 
   // 이 화면의 순위추적 대상(범위 필터까지) = 모드 무관 '전체 모집단'
   const scoped = useMemo(() => {
-    const rt = entries.filter(e => isRankTrackedCategory(e.category) && (e.searchTabs?.length ?? 0) > 0 && e.keyword);
+    // 명시 탭이 없어도 카테고리 기본 탭으로 수집 가능 → 과거·AI등록 항목도 편집 없이 포함.
+    const rt = entries.filter(e => isRankTrackedCategory(e.category) && effectiveSearchTabs(e).length > 0 && e.keyword);
     if (scope === 'all') return rt;
     const mid = scope === 'manager' ? managerId : (user?.id ?? '');
     return rt.filter(e => e.managerId === mid);
@@ -49,8 +50,9 @@ export default function RankCollectButton({ entries }: { entries: ScheduleEntry[
     let ents = 0, tabsN = 0;
     const ids: string[] = [];
     for (const e of scoped) {
-      let n = matchTabs(e.searchTabs, e.rankByTab, mode);
-      for (const s of e.subKeywords ?? []) n += matchTabs(e.searchTabs, s.rankByTab, mode);
+      const eff = effectiveSearchTabs(e);
+      let n = matchTabs(eff, e.rankByTab, mode);
+      for (const s of e.subKeywords ?? []) n += matchTabs(eff, s.rankByTab, mode);
       if (n > 0) { ents++; tabsN += n; ids.push(e.id); }
     }
     return { ents, tabsN, ids };

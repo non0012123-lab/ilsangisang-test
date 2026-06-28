@@ -24,6 +24,10 @@ interface CtxEntry {
   status?: string;
   link?: string | null;
   rank?: number | null;
+  // 순위추적(블로그/카페) 일정의 탭별 수집 결과 — "어제 작업건 몇위/미노출/노출" 응답·수정 근거.
+  //  값=순위숫자(노출) · null=미노출(수집했으나 못 찾음) · 키 없음=미수집. 탭: integrated(통합)/blog(블로그)/cafe(카페).
+  rankByTab?: Record<string, number | null>;
+  rankCheckedAt?: Record<string, string>; // 탭별 마지막 수집 시각(ISO) — "어제 수집" 등 날짜 판단용
 }
 
 interface CtxHandover {
@@ -302,7 +306,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '{',
     '  "reply": "사용자에게 보여줄 자연스러운 한국어 답변",',
     '  "entries": [ { "date":"YYYY-MM-DD", "endDate":"YYYY-MM-DD 또는 null", "managerName":"", "clientName":"", "category":"", "categoryOptions":["블로그/카페 등 어느 세부인지 모호할 때만 후보 2개 이상, 아니면 생략"], "keyword":"", "status":"pending|in-progress|completed", "link":"결과/키워드 링크 URL(없으면 생략)", "rank":"순위 숫자(예: 3, 언급 없으면 생략)", "recurrence":{ "freq":"daily|weekly|monthly", "interval":1, "weekday":"weekly일 때 0(일)~6(토)", "day":"monthly일 때 1~31", "count":"생성 횟수(미지정 시 생략)", "until":"YYYY-MM-DD(종료일 있으면)" } } ],',
-    '  "updates": [ { "id":"기존 일정 id(아래 목록에서 정확히 복사)", "clientName":"대상 업체명(식별 보조 — id 와 함께 항상 채움)", "keyword":"대상 일정의 키워드/제목(있으면)", "matchDate":"대상 일정의 날짜 YYYY-MM-DD(변경 전 그 일정이 잡힌 날, 식별용)", "date":"새 날짜 YYYY-MM-DD 또는 null(날짜를 옮길 때만)", "endDate":"YYYY-MM-DD 또는 null", "managerName":"문자열 또는 null", "status":"상태 또는 null", "link":"링크 URL(추가/수정) 또는 ""(빈문자열=링크 삭제) 또는 null(변경 안 함)", "rank":"순위 숫자(변경) 또는 null(변경 안 함)" } ],',
+    '  "updates": [ { "id":"기존 일정 id(아래 목록에서 정확히 복사)", "clientName":"대상 업체명(식별 보조 — id 와 함께 항상 채움)", "keyword":"대상 일정의 키워드/제목(있으면)", "matchDate":"대상 일정의 날짜 YYYY-MM-DD(변경 전 그 일정이 잡힌 날, 식별용)", "date":"새 날짜 YYYY-MM-DD 또는 null(날짜를 옮길 때만)", "endDate":"YYYY-MM-DD 또는 null", "managerName":"문자열 또는 null", "status":"상태 또는 null", "link":"링크 URL(추가/수정) 또는 ""(빈문자열=링크 삭제) 또는 null(변경 안 함)", "rank":"순위 숫자(변경) 또는 null(변경 안 함)", "rankByTab":"순위추적(블로그/카페) 일정의 탭별 순위 변경 시에만 — {\\"integrated\\":통합순위, \\"blog\\":블로그탭순위, \\"cafe\\":카페탭순위} 형태로 바꿀 탭만. 숫자=노출순위, null=미노출. 변경 없으면 생략" } ],',
     '  "deletes": [ "삭제할 기존 일정 id" ],',
     '  "clients": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 업체 id", "name":"", "industry":"", "categories":[], "contactPerson":"", "phone":"", "email":"", "status":"active|inactive|pending", "reportAnchorDate":"YYYY-MM-DD (월간 보고 기준 시작일)" } ],',
     '  "handovers": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 인수인계 id(없으면 clientName 으로 식별)", "clientName":"", "overview":"", "guidelines":"운영 가이드라인", "tone":"톤앤매너", "dontDo":"절대 하지 말 것", "specialNotes":"특이사항", "managerMemo":"인수인계 메모" } ],',
@@ -409,6 +413,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- ★ 카테고리 신호어는 keyword 에 넣지 않는다: "강남치과 상노 등록해줘"면 category="블로그 상위노출"(또는 모호 시 후보), keyword="강남치과"로만 한다. "상노/상위노출/배포/관리/블관/카상" 같은 업무종류·줄임말을 keyword 에 중복해서 붙이지 말 것(키워드는 순수 검색어/주제만).',
     '- 기간 작업이 아니면 endDate 는 null. status 미지정이면 "pending".',
     '- 순위(rank): "신사피부과 3위로 등록해줘", "○○ 키워드 5위", "철산역치과 순위는 4위야 추가해줘" 처럼 순위를 말하면 그 숫자(정수)만 rank 에 담는다(신규는 entries.rank, 기존 일정 순위 변경/추가는 updates.rank). "1위/3등/순위 2" 등에서 숫자만 뽑아 넣고(예: 4), "4위"처럼 글자를 붙이지 말 것. 순위 언급이 없으면 entries 에선 생략·updates 에선 null. 기존 일정 순위 변경/추가 요청이면(위 "추가=변경" 규칙 적용) 위 현재 일정 목록에서 키워드·업체·날짜로 대상을 찾아 그 id(+clientName·keyword·matchDate)로 updates 에 담는다. "엊그제/일주일 전/6/5 ○○ 순위 N위로 바꿔줘" 같은 과거 일정도 matchDate 로 그 날짜를 넣어 정확히 잡는다.',
+    '- ★ 순위추적(블로그 상위노출/블로그관리/카페 상위노출) 일정의 순위는 "탭별"이다(rankByTab). 이 카테고리의 순위를 바꿀 땐 updates.rankByTab 에 담아라(updates.rank 만 쓰면 표에 반영 안 됨). 탭 매핑: "통합"→integrated, "블로그탭/블로그"→blog, "카페탭/카페"→cafe. 예: "○○ 통합 3위로 바꿔줘"→rankByTab:{"integrated":3}; "△△ 블로그 2위 통합 5위"→rankByTab:{"blog":2,"integrated":5}; "□□ 미노출로 바꿔/안 잡혀"→해당 탭 null. 탭을 말 안 하고 그냥 "○○ 5위"면 블로그류는 통합(integrated), 카페류는 cafe 에 넣는다. 바꿀 탭만 넣고 나머진 생략. 이렇게 하면 수집기를 안 돌려도 그 한 건만 바로 수정된다.',
+    '- ★ 순위 조회/정리("어제 작업건 몇위야?", "○○ 지금 순위", "어제 미노출건/노출건 정리해줘", "안 잡힌 키워드 알려줘"): 아래 "현재 등록된 일정"의 rankByTab(탭별 순위)·rankCheckedAt(수집 시각)를 근거로 reply 로만 답한다(액션 배열 비움). 해석: 숫자=노출(그 순위) · null=미노출(수집했으나 못 찾음) · 키 없음=미수집(아직 안 돌림). "어제 작업/수집"은 rankCheckedAt 또는 일정 date 가 어제인 것으로 판단. 탭이 여러 개면 탭별로(통합 N위·블로그 M위) 정리하고, "노출/미노출 정리"면 노출된 건과 미노출 건을 나눠 목록으로 답한다.',
     '- 액션(entries/updates/clients/handovers)을 제안할 때 reply 에는 무엇을 제안하는지 요약하고, 사용자가 "적용" 버튼을 눌러야 실제 반영된다는 뉘앙스로 안내한다.',
     '- 확실하지 않은 정보를 지어내지 말 것. 모르면 reply 에서 추가 정보를 요청.',
     '',
@@ -430,6 +436,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     `내부 일정 종류(internalEvents 용 — 없으면 새로 만들어도 됨): ${internalCategories.join(', ') || '회의실, 미팅, 면접, 촬영, 휴가'}`,
     '',
     '현재 등록된 일정(팀 전체 클라이언트 업무 일정 · JSON, id 포함 — updates 에 이 id 사용. "내 일정"은 managerName 이 본인인 것):',
+    '  · 순위추적(블로그/카페) 일정은 rankByTab(탭별 순위)·rankCheckedAt(탭별 수집시각)를 포함한다. rankByTab 값: 숫자=노출(순위), null=미노출, 키 없음=미수집. 탭: integrated(통합)/blog(블로그탭)/cafe(카페탭).',
     JSON.stringify(entries),
     '',
     '현재 내부 일정(수정 시 op:"update" 에 이 id 사용):',
