@@ -254,6 +254,7 @@ export interface ScheduleEntry {
   rankByTab?: Partial<Record<SearchTab, number | null>>; // 수집기가 채우는 탭별 순위(null=미노출)
   rankCheckedAt?: Partial<Record<SearchTab, string>>;  // 탭별 마지막 수집 시각(ISO)
   postTitle?: string;                                  // 매칭된 글 제목(롱테일 생성 입력) — 수집기가 캡처
+  linkConfirmedTitle?: string;                         // '링크확인' 경고를 사용자가 확인 처리한 시점의 postTitle. 이 값==현재 postTitle 이면 경고 숨김(제목 바뀌면 자동 재경고)
   subKeywords?: SubKeyword[];                          // 자동 확장된 롱테일 키워드(+ 각자의 탭별 순위)
   opinionTitle?: string;
   opinionContent?: string;

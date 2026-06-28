@@ -1,31 +1,20 @@
 // 링크-키워드 불일치(잘못된 링크 삽입) 의심 항목을 어느 페이지에서든 우상단에 알림.
 //  • "몇월 몇일 · 클라이언트 · 키워드 — 링크가 키워드와 맞지 않습니다" 목록.
-//  • 닫힌 항목 id 를 localStorage 에 보관 → Layout 리마운트(페이지 이동)에도 닫힘 유지.
-//    새로 생긴(다른 id) 경고는 다시 표시된다.
-import { useMemo, useState } from 'react';
+//  • 닫기 = 그 일정의 현재 제목을 '확인 처리'(linkConfirmedTitle) 로 저장(Supabase 영속).
+//    → 표 배지·이 알림이 함께 사라지고, 재배포·다른 기기에도 유지. 제목/링크가 바뀌면 자동 재경고.
+import { useMemo } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { linkKeywordMismatch } from '../utils/searchTabs';
 
-const DISMISS_KEY = 'linkWarnDismissedIds';
-const loadDismissed = (): Set<string> => {
-  try { return new Set(JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]') as string[]); } catch { return new Set(); }
-};
-
 export default function LinkWarningSticky() {
-  const { entries } = useApp();
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(loadDismissed);
+  const { entries, patchEntry } = useApp();
 
-  const warnings = useMemo(() => entries.filter(linkKeywordMismatch), [entries]);
-  const visible = warnings.filter(w => !dismissedIds.has(w.id));
+  const visible = useMemo(() => entries.filter(linkKeywordMismatch), [entries]);
   if (visible.length === 0) return null;
 
-  const save = (next: Set<string>) => {
-    try { localStorage.setItem(DISMISS_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
-    setDismissedIds(next);
-  };
-  const dismiss = () => { const next = new Set(dismissedIds); visible.forEach(w => next.add(w.id)); save(next); };
-  const dismissOne = (id: string) => { const next = new Set(dismissedIds); next.add(id); save(next); };
+  const dismissOne = (id: string, title?: string) => patchEntry(id, { linkConfirmedTitle: title ?? '' });
+  const dismiss = () => visible.forEach(w => dismissOne(w.id, w.postTitle));
 
   const fmt = (d: string) => { const p = d.split('-'); return `${Number(p[1])}/${Number(p[2])}`; };
 
@@ -42,7 +31,7 @@ export default function LinkWarningSticky() {
               <span className="text-gray-400">{fmt(e.date)}</span> · <span className="font-medium">{e.clientName}</span> · {e.keyword}
               <span className="text-red-500"> — 링크가 키워드와 맞지 않습니다</span>
             </div>
-            <button onClick={() => dismissOne(e.id)} title="이 항목 확인(닫기)"
+            <button onClick={() => dismissOne(e.id, e.postTitle)} title="이 항목 확인(닫기)"
               className="shrink-0 mt-0.5 text-gray-300 hover:text-red-500"><X size={13} /></button>
           </div>
         ))}

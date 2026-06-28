@@ -60,10 +60,12 @@ const bigrams = (s: string): string[] => {
 //    3) ★bigram 겹침 ≥ 67%: 붙여쓴 키워드("대전피부과")가 제목에선 떨어져 있어도("대전 둔산동 피부과")
 //       지역+업종 글자조각이 대부분 제목에 있으면 정상으로 본다(오탐 방지).
 export const linkKeywordMismatch = (entry: {
-  category?: string; keyword?: string; postTitle?: string;
+  category?: string; keyword?: string; postTitle?: string; linkConfirmedTitle?: string;
   rankByTab?: Partial<Record<SearchTab, number | null>>;
 }): boolean => {
   if (!isRankTrackedCategory(entry.category) || !entry.keyword || !entry.postTitle) return false;
+  // 사용자가 '확인 처리'한 제목과 현재 제목이 같으면 경고 숨김(제목/링크가 바뀌면 자동으로 다시 경고)
+  if (entry.linkConfirmedTitle && entry.linkConfirmedTitle === entry.postTitle) return false;
   // 한 탭이라도 순위 잡혔으면 정상으로 본다
   const anyRank = entry.rankByTab && Object.values(entry.rankByTab).some(v => typeof v === 'number');
   if (anyRank) return false;
