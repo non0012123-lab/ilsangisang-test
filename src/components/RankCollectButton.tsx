@@ -13,6 +13,16 @@ import { useRankCollect, type RankMode } from '../hooks/useRankCollect';
 
 type Scope = 'mine' | 'manager' | 'all';
 
+// 모드 기준으로 '실제 수집할 탭 수'를 센다 (서버 rank_job_targets 의 탭 필터와 동일 기준).
+//  all=전탭 / uncollected=rankByTab 에 키 없는 탭 / unexposed=키 있고 숫자 아닌(null) 탭.
+function matchTabs(tabs: string[] | undefined, rbt: Record<string, number | null | undefined> | undefined, mode: RankMode): number {
+  const list = tabs ?? [];
+  if (mode === 'all') return list.length;
+  const r = rbt ?? {};
+  if (mode === 'uncollected') return list.filter(t => !(t in r)).length;
+  return list.filter(t => (t in r) && typeof r[t] !== 'number').length; // unexposed
+}
+
 export default function RankCollectButton({ entries }: { entries: ScheduleEntry[] }) {
   const { members } = useApp();
   const { user } = useAuth();
@@ -25,20 +35,33 @@ export default function RankCollectButton({ entries }: { entries: ScheduleEntry[
 
   const MODE_LABEL: Record<RankMode, string> = { all: '전체수집', uncollected: '미수집', unexposed: '미노출' };
 
-  // 이 화면의 순위추적 대상 → 범위(본인/담당자/전체)로 한 번 더 필터
-  const targets = useMemo(() => {
+  // 이 화면의 순위추적 대상(범위 필터까지) = 모드 무관 '전체 모집단'
+  const scoped = useMemo(() => {
     const rt = entries.filter(e => isRankTrackedCategory(e.category) && (e.searchTabs?.length ?? 0) > 0 && e.keyword);
     if (scope === 'all') return rt;
     const mid = scope === 'manager' ? managerId : (user?.id ?? '');
     return rt.filter(e => e.managerId === mid);
   }, [entries, scope, managerId, user]);
 
+  // 모드 기준 실제 수집량: 메인탭 + 기존 롱테일탭에서 '이 모드 대상 탭'을 센다.
+  //  → 전체/미수집/미노출이 서로 다른 건수·탭수로 표시되게.
+  const stat = useMemo(() => {
+    let ents = 0, tabsN = 0;
+    const ids: string[] = [];
+    for (const e of scoped) {
+      let n = matchTabs(e.searchTabs, e.rankByTab, mode);
+      for (const s of e.subKeywords ?? []) n += matchTabs(e.searchTabs, s.rankByTab, mode);
+      if (n > 0) { ents++; tabsN += n; ids.push(e.id); }
+    }
+    return { ents, tabsN, ids };
+  }, [scoped, mode]);
+
   const scopeLabel = scope === 'all' ? '전체' : scope === 'manager' ? (members.find(m => m.id === managerId)?.name ?? '담당자') : '내 담당';
 
   const run = async () => {
     const modeDesc = mode === 'all' ? '전체수집 + 롱테일 발굴' : mode === 'uncollected' ? '미수집 탭만' : '미노출 탭만';
-    if (!window.confirm(`[${scopeLabel}] 이 화면 순위추적 ${targets.length}건을 수집 요청합니다.\n(${modeDesc})\n계속할까요?`)) return;
-    await collect({ entryIds: targets.map(e => e.id), mode });
+    if (!window.confirm(`[${scopeLabel}] ${MODE_LABEL[mode]} 대상 ${stat.ents}건(${stat.tabsN}탭)을 수집 요청합니다.\n(${modeDesc})\n계속할까요?`)) return;
+    await collect({ entryIds: stat.ids, mode });
     setOpen(false);
     setDone(true);
     setTimeout(() => setDone(false), 2500);
@@ -96,9 +119,10 @@ export default function RankCollectButton({ entries }: { entries: ScheduleEntry[
             </div>
 
             <div className="text-[11px] text-gray-500 text-center">
-              <span className="font-semibold text-gray-700">{scopeLabel}</span> · 이 화면 순위추적 <span className="font-semibold text-blue-600">{targets.length}건</span>
+              <span className="font-semibold text-gray-700">{scopeLabel}</span> · {MODE_LABEL[mode]} 수집 대상 <span className="font-semibold text-blue-600">{stat.ents}건</span> · <span className="font-semibold text-blue-600">{stat.tabsN}탭</span>
+              <div className="text-[10px] text-gray-400">(이 화면 순위추적 {scoped.length}건 중)</div>
             </div>
-            <button onClick={run} disabled={busy || targets.length === 0}
+            <button onClick={run} disabled={busy || stat.ents === 0}
               className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50">
               수집 요청
             </button>
