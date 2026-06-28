@@ -4,7 +4,9 @@ import { useCallback, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 
-export type RankMode = 'pending' | 'all';
+// all=전체 재수집, uncollected=미수집(아예 안 돌린 탭만), unexposed=미노출(돌렸으나 못 찾은 탭만).
+//  ('pending' 은 구버전 합집합 — 서버 호환용으로만 존재, UI 에선 미사용)
+export type RankMode = 'all' | 'uncollected' | 'unexposed';
 
 export function useRankCollect() {
   const { user } = useAuth();

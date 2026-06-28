@@ -1,7 +1,7 @@
 // 스케줄표 헤더의 "순위 수집" 버튼 + 범위·모드 선택.
 //  - 대상 = 이 화면에 보이는 순위추적 일정(부모 페이지가 필터한 entries) 안에서
 //    범위(본인/담당자/전체)로 한 번 더 거른 것. → 페이지 컨텍스트(날짜/필터) + 빠른 범위 단축.
-//  - 모드: 전체 수집(all, 기본) / 미발견만(pending).
+//  - 모드: 전체수집(all, 기본) / 미수집(uncollected, 아직 안 돌린 탭만) / 미노출(unexposed, 돌렸으나 못 찾은 탭만).
 //  - 트리거만 한다. 진행 현황은 전역 RankCollectWidget(어느 탭에서나 보임)이 표시.
 import { useMemo, useState } from 'react';
 import { Radar, Loader2 } from 'lucide-react';
@@ -21,7 +21,9 @@ export default function RankCollectButton({ entries }: { entries: ScheduleEntry[
   const [done, setDone] = useState(false);
   const [scope, setScope] = useState<Scope>('mine');     // 기본=본인
   const [managerId, setManagerId] = useState(user?.id ?? '');
-  const [mode, setMode] = useState<RankMode>('all');     // 기본=전체 수집
+  const [mode, setMode] = useState<RankMode>('all');     // 기본=전체수집
+
+  const MODE_LABEL: Record<RankMode, string> = { all: '전체수집', uncollected: '미수집', unexposed: '미노출' };
 
   // 이 화면의 순위추적 대상 → 범위(본인/담당자/전체)로 한 번 더 필터
   const targets = useMemo(() => {
@@ -34,7 +36,8 @@ export default function RankCollectButton({ entries }: { entries: ScheduleEntry[
   const scopeLabel = scope === 'all' ? '전체' : scope === 'manager' ? (members.find(m => m.id === managerId)?.name ?? '담당자') : '내 담당';
 
   const run = async () => {
-    if (!window.confirm(`[${scopeLabel}] 이 화면 순위추적 ${targets.length}건을 수집 요청합니다.\n(${mode === 'all' ? '전체 수집 + 롱테일 발굴' : '미발견만'})\n계속할까요?`)) return;
+    const modeDesc = mode === 'all' ? '전체수집 + 롱테일 발굴' : mode === 'uncollected' ? '미수집 탭만' : '미노출 탭만';
+    if (!window.confirm(`[${scopeLabel}] 이 화면 순위추적 ${targets.length}건을 수집 요청합니다.\n(${modeDesc})\n계속할까요?`)) return;
     await collect({ entryIds: targets.map(e => e.id), mode });
     setOpen(false);
     setDone(true);
@@ -76,17 +79,19 @@ export default function RankCollectButton({ entries }: { entries: ScheduleEntry[
             <div>
               <p className="text-[11px] font-semibold text-gray-500 mb-1">모드</p>
               <div className="flex gap-1">
-                {([['all', '전체 수집'], ['pending', '미발견만']] as [RankMode, string][]).map(([v, lb]) => (
+                {(['all', 'uncollected', 'unexposed'] as RankMode[]).map(v => (
                   <button key={v} onClick={() => setMode(v)}
                     className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition ${mode === v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
-                    {lb}
+                    {MODE_LABEL[v]}
                   </button>
                 ))}
               </div>
               <p className="mt-1 text-[10px] text-gray-400 leading-snug">
                 {mode === 'all'
                   ? '모든 탭을 다시 수집 + 롱테일 재발굴(순위 변동 확인용). 기본값.'
-                  : '아직 안 잡힌 것만: 미발견 메인/롱테일 탭 재확인, 롱테일이 없던 글은 새로 발굴(프록시 절약).'}
+                  : mode === 'uncollected'
+                  ? '아직 한 번도 안 돌린 탭만 수집(신규 등록·새 탭 채우기). 이미 확인한 탭은 건너뜀(프록시 절약).'
+                  : '수집은 했지만 순위를 못 찾은 탭만 재확인(2주 뒤 잡히는 케이스 추적). 미수집 탭은 건너뜀.'}
               </p>
             </div>
 
