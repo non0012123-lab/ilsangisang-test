@@ -2090,9 +2090,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const sb = supabase;
     let active = true;
     const load = async <T,>(table: string): Promise<T[] | null> => {
-      const { data, error } = await sb.from(table).select('id, data');
-      if (error) { console.error(`[${table}] 로드 실패:`, error.message); return null; }
-      return (data ?? []).map(r => r.data as T);
+      // PostgREST 는 .range 없이 조회하면 프로젝트 "Max rows"(기본 1000)에서 조용히 잘린다.
+      //  → 조회 순서상 최근 삽입분이 뒤에 있어, 1000행을 넘긴 순간부터 새 항목이 먼저 잘려 나간다.
+      //  → mergeMedia 처럼 .range 로 이어받아 전량을 가져온다(오류 시 null 로 캐시 유지 — 부분본으로 덮지 않음).
+      const PAGE = 1000;
+      const all: T[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await sb.from(table).select('id, data').range(from, from + PAGE - 1);
+        if (error) { console.error(`[${table}] 로드 실패:`, error.message); return null; }
+        all.push(...(data ?? []).map(r => r.data as T));
+        if (!data || data.length < PAGE) break;
+      }
+      return all;
     };
     // 도착한 데이터만 반영(언마운트/유저변경 시 무시). 각 쿼리가 끝나는 즉시 화면을 그린다.
     const guard = <T,>(fn: (v: T) => void) => (v: T) => { if (active) fn(v); };
@@ -2120,7 +2129,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 9개 테이블을 병렬로 조회하되, await Promise.all 로 한꺼번에 기다리지 않는다.
     // 각자 도착하는 즉시 state 를 채워, 대시보드 임계 경로(schedule_entries)가 무거운
     // reports/ai_plans 등을 기다리지 않고 곧바로 그려지게 한다(첫 실데이터 표시 지연 최소화).
-    load<ScheduleEntry>('schedule_entries').then(guard(e0 => { if (e0) setEntries(e0); setDataLoading(false); setEntriesLoaded(true); if (e0) void mergeMedia('schedule_entries', setEntries); }));
+    load<ScheduleEntry>('schedule_entries').then(guard(e0 => {
+      // 원격이 실제 데이터를 주면 그것으로 교체(+이미지 병합). 원격이 비었는데(일시 오류·신규 테이블)
+      //  로컬 캐시가 있으면 캐시를 지우지 말고 1회 backfill — 빈 [] 로 덮어써 통째로 날리는 비대칭 방지.
+      if (e0 && e0.length) { setEntries(e0); void mergeMedia('schedule_entries', setEntries); }
+      else if (e0 && e0.length === 0 && entriesRef.current.length) persistMany('schedule_entries', entriesRef.current);
+      setDataLoading(false); setEntriesLoaded(true);
+    }));
     load<Client>('clients').then(guard(c0 => { if (c0) setClients(c0); }));
     load<HandoverDoc>('handover_docs').then(guard(h0 => { if (h0) setHandoverDocs(h0); }));
     load<Vendor>('vendors').then(guard(v => syncLocalFirst('vendors', v, vendorsRef.current, setVendors)));

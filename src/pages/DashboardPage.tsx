@@ -14,10 +14,9 @@ import { useAuth } from '../context/AuthContext';
 import { coversDate, overlapsRange, isMultiDay } from '../utils/dateRange';
 import { todayStr, currentMonthStr, monthStartStr, monthEndStr } from '../utils/today';
 
-const TODAY = todayStr();
-const THIS_MONTH = currentMonthStr();
-const MONTH_START = monthStartStr();
-const MONTH_END = monthEndStr();
+// "오늘/이번 달" 기준은 모듈 스코프에 얼리지 않는다 — 컴포넌트 안에서 렌더마다 계산(맨 아래 참고).
+//  (앱을 며칠씩 켜두는 데스크톱에서 모듈 상수는 켠 날짜에 고정돼, 다음날 등록분이 과거 날짜로
+//   저장(defaultDate)되거나 오늘/이번 달 필터에서 빠져 '사라진 것처럼' 보인다.)
 
 // 로컬 날짜 기준 YYYY-MM-DD 포맷 (toISOString의 UTC 변환 오프바이원 방지)
 function fmtLocal(x: Date) {
@@ -36,6 +35,12 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const { entries: allEntries, internalEvents, patchEntry, saveEntry, removeEntry, dataLoading } = useApp();
   const isAdmin = user?.role === 'admin';
+
+  // 날짜 경계 안전: 렌더 시점의 실제 오늘로 계산(모듈 스코프 고정 금지 — 다음날 소실 방지).
+  const TODAY = todayStr();
+  const THIS_MONTH = currentMonthStr();
+  const MONTH_START = monthStartStr();
+  const MONTH_END = monthEndStr();
 
   // 대시보드에서 바로 일정 추가/수정/삭제 (일일 스케줄 페이지와 동일한 ScheduleModal 재사용)
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
