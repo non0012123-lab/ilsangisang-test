@@ -103,8 +103,9 @@ function ClientIdBadge({ clientId }: { clientId: string }) {
   );
 }
 
-// 전체 인사이트(모달 본문) — 모든 묶음을 풀로, 없는 묶음은 '아직 수집 안 됨' 안내
-function FullInsight({ data, basis }: { data: AdvisorPayload; basis: string }) {
+// 전체 인사이트(모달 본문) — 모든 묶음을 풀로, 없는 묶음은 '아직 수집 안 됨' 안내.
+//  클라이언트 포털 '매체 인사이트' 탭에서도 읽기전용으로 재사용한다.
+export function FullInsight({ data, basis }: { data: AdvisorPayload; basis: string }) {
   const inflow = (data.inflowKeywords ?? []).slice(0, 20);
   const trend = data.viewsTrend?.points ?? [];
   const gender = data.demographics?.gender;

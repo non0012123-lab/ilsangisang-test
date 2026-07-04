@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare, CalendarRange, ChevronLeft, ChevronRight, Search, Eye } from 'lucide-react';
+import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare, CalendarRange, ChevronLeft, ChevronRight, Search, Eye, Layers } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import CategoryBadge from '../components/CategoryBadge';
@@ -8,6 +8,8 @@ import ImageGallery from '../components/ImageGallery';
 import KeywordTool from '../components/KeywordTool';
 import MarketingCharts from '../components/MarketingCharts';
 import InsightCard from '../components/InsightCard';
+import CategoryStatusTab from '../components/CategoryStatusTab';
+import MediaInsightsTab from '../components/MediaInsightsTab';
 import { DEMO_CLIENT_ID, DEMO_CLIENT, DEMO_ENTRIES, DEMO_REPORTS } from '../data/demoData';
 import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
@@ -18,7 +20,7 @@ import { supabase } from '../lib/supabase';
 import type { ScheduleEntry, ClientInsight } from '../types';
 import { CATEGORIES, catHex } from '../data/categories';
 
-type Tab = 'dashboard' | 'timetable' | 'reports' | 'keywords';
+type Tab = 'dashboard' | 'category' | 'media' | 'timetable' | 'reports' | 'keywords';
 
 const CAT_COLOR: Record<string, string> = Object.fromEntries(CATEGORIES.map(c => [c, catHex(c)]));
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -499,6 +501,8 @@ export default function ClientPortalPage() {
         <div className="flex bg-white rounded-2xl shadow-sm border border-gray-100 p-1.5 gap-1">
           {([
             { key: 'dashboard', icon: <TrendingUp size={15} />, label: '마케팅 현황' },
+            { key: 'category', icon: <Layers size={15} />, label: '카테고리별' },
+            { key: 'media', icon: <BarChart3 size={15} />, label: '매체 인사이트' },
             { key: 'timetable', icon: <CalendarRange size={15} />, label: '타임테이블' },
             { key: 'reports', icon: <FileText size={15} />, label: '보고서' },
             { key: 'keywords', icon: <Search size={15} />, label: '키워드 조회' },
@@ -715,6 +719,28 @@ export default function ClientPortalPage() {
             {/* 매체별 첨부 이미지 (시안/인사이트 분리) — 선택 기간 기준 */}
             <ImageGallery entries={rangeEntries} title="첨부 이미지 (시안·인사이트)" />
           </>
+        )}
+
+        {/* Tab: 카테고리별 현황 — 기간 선택 + 카테고리(매체)별 카드 */}
+        {tab === 'category' && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-gray-400 mr-1">기간</span>
+              {([['day', '당일'], ['7d', '지난 7일'], ['30d', '지난 30일']] as [typeof preset, string][]).map(([v, label]) => (
+                <button key={v} onClick={() => setPreset(v)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${preset === v ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{label}</button>
+              ))}
+              <span className="ml-auto text-xs text-gray-400">{rangeLabel} · {rangeEntries.length}건</span>
+            </div>
+            <CategoryStatusTab entries={rangeEntries} />
+          </div>
+        )}
+
+        {/* Tab: 매체 인사이트 — 수집기가 가져온 매체만(현재 네이버 블로그). 데모는 미지원 */}
+        {tab === 'media' && (
+          isDemo
+            ? <p className="text-center text-gray-400 py-10 text-sm bg-white border border-gray-100 rounded-2xl">데모 계정은 매체 인사이트를 제공하지 않습니다.</p>
+            : <MediaInsightsTab clientId={clientId} clientName={client.name} />
         )}
 
         {/* Tab: Timetable */}
