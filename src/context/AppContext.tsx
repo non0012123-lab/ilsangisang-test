@@ -1075,9 +1075,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const winLo = shiftDay(-180), winHi = shiftDay(60);
     // ★ 이번 메시지에서 언급한 업체는 "전량"(기간·상한 무관) 포함한다 — 특정 업체 조회/일괄수정에서 누락 0.
     //  업체명 전체가 메시지에 있거나(정식명), 앞 4글자('위편장쾌한의원'→'위편장쾌')가 있으면 매칭(줄임말 대응).
-    const namedClients = clientsRef.current
-      .map(c => (c.name ?? '').trim())
-      .filter(n => n.length >= 2 && (message.includes(n) || (n.length >= 4 && message.includes(n.slice(0, 4)))));
+    //  후보 업체명: 등록 업체 + 실제 일정의 clientName(등록 안 된 업체도 매칭되게) 둘 다에서 모은다.
+    const nameCandidates = new Set<string>();
+    clientsRef.current.forEach(c => { const n = (c.name ?? '').trim(); if (n.length >= 2) nameCandidates.add(n); });
+    allEntries.forEach(e => { const n = (e.clientName ?? '').trim(); if (n.length >= 2) nameCandidates.add(n); });
+    const namedClients = [...nameCandidates]
+      .filter(n => message.includes(n) || (n.length >= 4 && message.includes(n.slice(0, 4))));
     const isNamedEntry = (e: ScheduleEntry) =>
       namedClients.some(n => !!e.clientName && (e.clientName === n || e.clientName.includes(n) || n.includes(e.clientName)));
     // 나머지 업체는 "최근 ~180일 + 예정 60일" 윈도우에서 최근 2000건.
@@ -1291,8 +1294,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
       // 🔧 진단(임시): 언급 업체 관련 일정이 실제로 어시스턴트에 몇 건 전달됐는지 화면에 표시.
       //  · "관련 0건"인데 스케줄엔 있다 → 데이터 미도달(로드 안 됨/업체명 불일치). · 관련 N건인데 '없다'고 답 → 모델 문제.
+      const inScoped = scoped.filter(isNamedEntry).length;   // 실제 전달된 페이로드 안의 언급-업체 건수
+      const inApp = allEntries.filter(isNamedEntry).length;  // 앱에 로드된 전체 중 언급-업체 건수
       const asstDiag = namedClients.length
-        ? `\n\n🔧 진단: ${namedClients.join(', ')} 관련 ${namedSet.length}건 어시스턴트에 전달 · 이번 수신 일정 ${scoped.length}건 · 앱 전체 로드 ${allEntries.length}건`
+        ? `\n\n🔧 진단: ${namedClients.join(', ')} — 어시스턴트에 ${inScoped}건 전달(앱 로드 ${inApp}건) · 이번 수신 일정 총 ${scoped.length}건 · 앱 전체 ${allEntries.length}건`
         : '';
       mutateMessages(convId, prev => [...prev, {
         role: 'assistant',
