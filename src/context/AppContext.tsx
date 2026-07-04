@@ -1576,6 +1576,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (mid) { patch.managerId = mid; patch.managerName = mem.find(m => m.id === mid)?.name ?? cur.managerName; }
       }
       if (up.status && ['pending', 'in-progress', 'completed'].includes(up.status)) patch.status = up.status as ScheduleStatus;
+      // 카테고리 변경("○○ 키워드 카테고리 블로그 상위노출로 바꿔줘"). 유효한 카테고리만.
+      //  순위추적 카테고리로 바꾸면 기본 수집 탭도 세팅해 순위표에 바로 잡히게 한다.
+      if (up.category && up.category !== 'null' && (ASSISTANT_CATEGORIES as string[]).includes(up.category) && up.category !== cur.category) {
+        patch.category = up.category as Category;
+        if (isRankTrackedCategory(up.category) && (!cur.searchTabs || cur.searchTabs.length === 0)) {
+          patch.searchTabs = defaultSearchTabs(up.category);
+        }
+      }
       // 스케줄 링크: 문자열이면 추가/수정, 빈 문자열("")이면 삭제, null/생략이면 변경 안 함
       if (up.link !== undefined && up.link !== null && up.link !== 'null') patch.link = up.link ? up.link : undefined;
       // 순위 변경. 순위추적(블로그/카페) 카테고리는 탭별(rankByTab)로 반영해야 표에 보인다.
@@ -1617,6 +1625,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (patch.date) ch.push(`날짜 ${patch.date}`);
         if (patch.managerName) ch.push(`담당 ${patch.managerName}`);
         if (patch.status) ch.push(patch.status === 'completed' ? '완료' : patch.status === 'in-progress' ? '진행중' : '대기');
+        if (patch.category) ch.push(`카테고리 ${patch.category}`);
         if (ch.length) appliedUpdates.push(`${who} ${ch.join('·')}`);
       }
     });
@@ -2424,6 +2433,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'site_entries' }, sync<SiteEntry>(setSiteEntries))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'vendors' }, sync<Vendor>(setVendors))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'handover_docs' }, sync<HandoverDoc>(setHandoverDocs))
+      // 보고서 — 담당자가 발행/수정하면 클라이언트 포털·미리보기·다른 창에 실시간 반영(0041 publication+REPLICA IDENTITY FULL 필요)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, sync<Report>(setReports))
       .subscribe();
     return () => { sb.removeChannel(channel); };
   }, [uid]);

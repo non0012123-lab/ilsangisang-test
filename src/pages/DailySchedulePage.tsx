@@ -10,7 +10,7 @@ import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
 import { entryImages } from '../utils/entryImages';
-import InlineLink from '../components/InlineLink';
+import EntryLinkCell from '../components/EntryLinkCell';
 import ScheduleModal from '../components/ScheduleModal';
 import RankCollectButton from '../components/RankCollectButton';
 import RankTabsBadge from '../components/RankTabsBadge';
@@ -230,8 +230,8 @@ export default function DailySchedulePage() {
                         {entry.category === '네이버 여론작업' && entry.opinionContent && (
                           <span className="text-xs text-gray-500 line-clamp-1 mb-1 block">{entry.opinionContent.slice(0, 50)}…</span>
                         )}
-                        <InlineLink
-                          link={entry.link}
+                        <EntryLinkCell
+                          entry={entry}
                           onChange={v => updateEntry(entry.id, { link: v })}
                           onCopied={notify}
                         />

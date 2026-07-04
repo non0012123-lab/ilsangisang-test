@@ -7,7 +7,7 @@ import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
 import { entryImages } from '../utils/entryImages';
-import InlineLink from '../components/InlineLink';
+import EntryLinkCell from '../components/EntryLinkCell';
 import ScheduleModal from '../components/ScheduleModal';
 import ScheduleCardList from '../components/ScheduleCardList';
 import type { ScheduleEntry } from '../types';
@@ -170,7 +170,7 @@ export default function ClientSchedulePage() {
                         <span className="truncate block" title={entry.opinionTitle ?? entry.keyword}>{entry.opinionTitle ?? entry.keyword ?? '-'}</span>
                       </td>
                       <td className="px-4 py-3 max-w-[220px]">
-                        <InlineLink link={entry.link} onChange={v => updateEntry(entry.id, { link: v })} onCopied={notify} />
+                        <EntryLinkCell entry={entry} onChange={v => updateEntry(entry.id, { link: v })} onCopied={notify} />
                       </td>
                       <td className="px-4 py-3">
                         {entry.rank ? <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-50 text-blue-700 font-bold text-xs">{entry.rank}</span> : <span className="text-gray-300">-</span>}

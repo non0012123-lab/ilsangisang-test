@@ -2,7 +2,7 @@ import { Pencil, Trash2, CalendarRange } from 'lucide-react';
 import CategoryBadge from './CategoryBadge';
 import InlineStatus from './InlineStatus';
 import InlineScreenshot from './InlineScreenshot';
-import InlineLink from './InlineLink';
+import EntryLinkCell from './EntryLinkCell';
 import RankTabsBadge from './RankTabsBadge';
 import { isMultiDay } from '../utils/dateRange';
 import { entryImages } from '../utils/entryImages';
@@ -48,7 +48,7 @@ export default function ScheduleCardList({ entries, onPatch, onPreview, onEdit, 
           <p className="font-semibold text-gray-900 text-sm mb-0.5 break-words">{entry.opinionTitle ?? entry.keyword ?? '-'}</p>
           <p className="text-xs text-gray-500 mb-2">{entry.managerName} · {entry.clientName}</p>
           <div className="flex items-center gap-3 flex-wrap">
-            <InlineLink link={entry.link} onChange={v => onPatch(entry.id, { link: v })} onCopied={onCopied} />
+            <EntryLinkCell entry={entry} onChange={v => onPatch(entry.id, { link: v })} onCopied={onCopied} />
             <InlineScreenshot images={entryImages(entry)} onImagesChange={imgs => onPatch(entry.id, { images: imgs, screenshot: undefined })} onPreview={onPreview} />
           </div>
         </div>

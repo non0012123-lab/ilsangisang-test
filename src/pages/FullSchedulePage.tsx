@@ -10,7 +10,7 @@ import CategoryBadge from '../components/CategoryBadge';
 import InlineStatus from '../components/InlineStatus';
 import InlineScreenshot from '../components/InlineScreenshot';
 import { entryImages } from '../utils/entryImages';
-import InlineLink from '../components/InlineLink';
+import EntryLinkCell from '../components/EntryLinkCell';
 import ScheduleModal from '../components/ScheduleModal';
 import RankCollectButton from '../components/RankCollectButton';
 import RankTabsBadge from '../components/RankTabsBadge';
@@ -189,7 +189,7 @@ export default function FullSchedulePage() {
                         {entry.category === '네이버 여론작업' && entry.opinionContent && (
                           <span className="text-xs text-gray-500 line-clamp-1 mb-1 block">{entry.opinionContent.slice(0, 45)}…</span>
                         )}
-                        <InlineLink link={entry.link} onChange={v => updateEntry(entry.id, { link: v })} onCopied={notify} />
+                        <EntryLinkCell entry={entry} onChange={v => updateEntry(entry.id, { link: v })} onCopied={notify} />
                       </td>
                       <td className="px-4 py-3">
                         {entry.category === '네이버 여론작업' ? (
@@ -249,7 +249,7 @@ export default function FullSchedulePage() {
               <p className="font-semibold text-gray-900 text-sm mb-0.5 break-words">{entry.opinionTitle ?? entry.keyword ?? '-'}</p>
               <p className="text-xs text-gray-500 mb-2">{entry.managerName} · {entry.clientName}</p>
               <div className="flex items-center gap-3 flex-wrap">
-                <InlineLink link={entry.link} onChange={v => updateEntry(entry.id, { link: v })} onCopied={notify} />
+                <EntryLinkCell entry={entry} onChange={v => updateEntry(entry.id, { link: v })} onCopied={notify} />
                 <InlineScreenshot images={entryImages(entry)} onImagesChange={imgs => updateEntry(entry.id, { images: imgs, screenshot: undefined })} onPreview={setPreviewImg} />
               </div>
             </div>
