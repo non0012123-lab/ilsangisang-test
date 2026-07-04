@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare, CalendarRange, ChevronLeft, ChevronRight, Search, Eye } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -30,6 +30,13 @@ const tabRankLabel = (e: ScheduleEntry): string => {
   if (fr.length) return fr.map(f => `${SEARCH_TAB_SHORT[f.tab]} ${f.rank}위`).join(' · ');
   return e.rank ? `${e.rank}위` : '';
 };
+
+// 현황 표에서 항목별로 순위 잡힌 서브(롱테일)키워드 — 키워드명 + 탭별 순위 라벨.
+const rankedSubs = (e: ScheduleEntry): { keyword: string; label: string }[] =>
+  (e.subKeywords ?? [])
+    .map(s => ({ keyword: s.keyword, found: foundRanks(s.rankByTab) }))
+    .filter(s => s.found.length > 0)
+    .map(s => ({ keyword: s.keyword, label: s.found.map(f => `${SEARCH_TAB_SHORT[f.tab]} ${f.rank}위`).join(' · ') }));
 
 function getCalDays(year: number, month: number) {
   const first = new Date(year, month, 1).getDay();
@@ -613,7 +620,8 @@ export default function ClientPortalPage() {
                       <tr><td colSpan={6} className="text-center py-8 text-gray-400 text-sm">작업 내역이 없습니다.</td></tr>
                     ) : (
                       recentEntries.map(entry => (
-                        <tr key={entry.id} className="hover:bg-gray-50/50 transition-colors">
+                        <Fragment key={entry.id}>
+                        <tr className="hover:bg-gray-50/50 transition-colors">
                           <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{entry.date}</td>
                           <td className="px-4 py-3"><CategoryBadge category={entry.category} /></td>
                           <td className="px-4 py-3 text-gray-800 max-w-[100px]">
@@ -643,6 +651,22 @@ export default function ClientPortalPage() {
                             </span>
                           </td>
                         </tr>
+                        {/* 순위 잡힌 서브(롱테일)키워드 — 항목 아래에 이어서 표시 */}
+                        {rankedSubs(entry).map((s, i) => (
+                          <tr key={entry.id + '-sub-' + i} className="bg-indigo-50/20">
+                            <td></td>
+                            <td></td>
+                            <td className="px-4 py-1.5 text-gray-500 max-w-[100px]">
+                              <span className="truncate block text-[11px]" title={s.keyword}>↳ {s.keyword}</span>
+                            </td>
+                            <td></td>
+                            <td className="px-4 py-1.5 text-center whitespace-nowrap">
+                              <span className="text-indigo-600 font-semibold text-[11px]">{s.label}</span>
+                            </td>
+                            <td className="px-4 py-1.5"><span className="text-[10px] text-gray-400">세부</span></td>
+                          </tr>
+                        ))}
+                        </Fragment>
                       ))
                     )}
                   </tbody>
@@ -671,6 +695,10 @@ export default function ClientPortalPage() {
                       {entry.keyword || '-'}
                       {tabRankLabel(entry) && <span className="ml-1.5 text-blue-700 font-bold text-xs">{tabRankLabel(entry)}</span>}
                     </p>
+                    {/* 순위 잡힌 서브(롱테일)키워드 */}
+                    {rankedSubs(entry).map((s, i) => (
+                      <p key={i} className="text-xs text-gray-500 mt-0.5 break-keep">↳ {s.keyword} <span className="text-indigo-600 font-semibold">{s.label}</span></p>
+                    ))}
                     {entry.link && (
                       <a href={entry.link} target="_blank" rel="noopener noreferrer"
                         className="mt-1 inline-flex items-center gap-1 text-xs text-blue-500 hover:underline max-w-full">

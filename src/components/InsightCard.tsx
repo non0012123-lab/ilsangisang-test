@@ -7,9 +7,9 @@ import type { InsightBreakdown, RankedTab } from '../utils/clientInsight';
 import { CATEGORY_ICON, catLabel } from '../data/categories';
 import { SEARCH_TAB_SHORT } from '../utils/searchTabs';
 
-// 탭별 순위를 "통합 4위 · 블로그 2위" 로. 탭이 하나면 "N위" 만.
+// 탭별 순위를 "통합 4위 · 블로그 2위" 로. 탭이 하나여도 어느 탭인지 항상 표기("통합 4위").
 const tabText = (tabs: RankedTab[]): string =>
-  tabs.length === 1 ? `${tabs[0].rank}위` : tabs.map(t => `${SEARCH_TAB_SHORT[t.tab]} ${t.rank}위`).join(' · ');
+  tabs.map(t => `${SEARCH_TAB_SHORT[t.tab]} ${t.rank}위`).join(' · ');
 
 interface Props {
   breakdown: InsightBreakdown;
@@ -65,7 +65,7 @@ export default function InsightCard({ breakdown, dateLabel, narrative, aiGenerat
               <ul className="space-y-1">
                 {mains.map((r, i) => (
                   <li key={i} className="flex items-center gap-2 text-xs text-gray-700">
-                    <span className={`font-bold tabular-nums shrink-0 ${(r.rank ?? 99) <= 5 ? 'text-green-600' : 'text-gray-500'}`}>{tabText(r.tabs.length ? r.tabs : [{ tab: 'integrated', rank: r.rank! }])}</span>
+                    <span className={`font-bold tabular-nums shrink-0 ${(r.rank ?? 99) <= 5 ? 'text-green-600' : 'text-gray-500'}`}>{r.tabs.length ? tabText(r.tabs) : `${r.rank}위`}</span>
                     <span className="text-gray-400">·</span>
                     <span className="font-medium shrink-0">{catLabel(r.category as Category)}</span>
                     <span className="truncate">‘{r.keyword}’</span>

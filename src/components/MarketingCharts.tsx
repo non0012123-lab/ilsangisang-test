@@ -122,9 +122,13 @@ export default function MarketingCharts({ entries }: { entries: ScheduleEntry[] 
     const channelCount = Object.entries(countByCh).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
     const channelPv = Object.entries(pvByCh).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
 
-    // 순위 — 메인 + 서브(롱테일)키워드 통합, 좋은 순위(작은 값) 상위 8. 서브는 '↳' 로 구분.
-    const rankItems = collectRanks(entries)
-      .slice(0, 8)
+    // 순위 — 메인 + 서브(롱테일)키워드. 메인이 상위를 독식해 서브가 밀리지 않도록, 서브가 있으면
+    //  롱테일 상위 3칸을 따로 확보한 뒤 나머지를 메인으로 채워 최대 8개(순위순). 서브는 '↳' 로 구분.
+    const ranks = collectRanks(entries);
+    const subRanks = ranks.filter(r => r.isSub).slice(0, 3);
+    const mainRanks = ranks.filter(r => !r.isSub).slice(0, 8 - subRanks.length);
+    const rankItems = [...mainRanks, ...subRanks]
+      .sort((a, b) => a.rank - b.rank)
       .map(r => ({ label: `${r.isSub ? '↳ ' : ''}${r.keyword || r.category}`, rank: r.rank, channel: r.category }));
 
     const totalPv = entries.reduce((s, e) => s + pvOf(e), 0);
