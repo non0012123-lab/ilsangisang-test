@@ -17,7 +17,7 @@ interface Props {
 export default function InlineScreenshot({ images, onImagesChange, onPreview }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const add = (url: string) => { if (images.length < MAX_IMAGES) onImagesChange([...images, { url, kind: 'design' }]); };
+  const addMany = (urls: string[]) => { onImagesChange([...images, ...urls.map(url => ({ url, kind: 'design' as const }))].slice(0, MAX_IMAGES)); };
   const removeAt = (i: number) => onImagesChange(images.filter((_, idx) => idx !== i));
   const toggleKind = (i: number) => onImagesChange(images.map((im, idx) => idx === i ? { ...im, kind: im.kind === 'insight' ? 'design' : 'insight' } : im));
 
@@ -37,7 +37,7 @@ export default function InlineScreenshot({ images, onImagesChange, onPreview }: 
           </div>
         )}
         {images.length < MAX_IMAGES
-          ? <ImageDropzone className="w-full h-36" onImage={add} />
+          ? <ImageDropzone className="w-full h-36" onImages={addMany} />
           : <p className="text-xs text-amber-600 text-center py-2">최대 {MAX_IMAGES}장까지 첨부할 수 있습니다.</p>}
       </div>
     </div>

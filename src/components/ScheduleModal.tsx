@@ -118,7 +118,7 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
   // 이미지(시안/인사이트) — 레거시 screenshot/문자열 호환 + 신규 {url,kind} 배열, 최대 MAX_IMAGES 장
   const images = entryImages(form);
   const setImages = (imgs: typeof images) => setForm(prev => ({ ...prev, images: imgs, screenshot: undefined }));
-  const addImage = (url: string) => { setImages([...images, { url, kind: 'design' as const }].slice(0, MAX_IMAGES)); setShowMetrics(true); };
+  const addImages = (urls: string[]) => { setImages([...images, ...urls.map(url => ({ url, kind: 'design' as const }))].slice(0, MAX_IMAGES)); setShowMetrics(true); };
   const removeImage = (i: number) => setImages(images.filter((_, idx) => idx !== i));
   const toggleKind = (i: number) => setImages(images.map((im, idx) => idx === i ? { ...im, kind: im.kind === 'insight' ? 'design' : 'insight' } : im));
 
@@ -438,7 +438,7 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
               </div>
             )}
             {images.length < MAX_IMAGES
-              ? <ImageDropzone className="w-full h-32" onImage={addImage} />
+              ? <ImageDropzone className="w-full h-32" onImages={addImages} />
               : <p className="text-xs text-amber-600 py-1">최대 {MAX_IMAGES}장까지 첨부할 수 있습니다.</p>}
           </div>
 
