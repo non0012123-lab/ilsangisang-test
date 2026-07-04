@@ -350,7 +350,10 @@ export interface Report {
   // ── 자동 월간 보고서용 ──
   periodStart?: string;    // 집계 시작일 YYYY-MM-DD (있으면 PDF/집계가 이 기간을 사용)
   periodEnd?: string;      // 집계 종료일 YYYY-MM-DD
-  releaseDate?: string;    // 공개일 — 오늘 ≥ releaseDate 면 클라이언트 포털에 노출
+  releaseDate?: string;    // 공개(예정)일. 표시·정렬용 (노출 여부는 status 로 판정)
+  // 담당자 검토형 워크플로우: 담당자가 기간 선택→초안 생성→검토→발행. 'published' 만 클라이언트 포털에 노출.
+  //  (status 미지정 레거시 보고서는 published 로 간주 — 하위호환)
+  status?: 'draft' | 'published';
   aiGenerated?: boolean;   // AI 요약 성공 여부 (false면 규칙기반 폴백)
   createdAt?: number;
 }

@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare, CalendarRange, ChevronLeft, ChevronRight, Search, Eye } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
-import { duePeriods, reportIdFor, aggregateForPeriod, periodLabel, fallbackSummary, fallbackHighlights } from '../utils/monthlyReports';
 import CategoryBadge from '../components/CategoryBadge';
 import ImageGallery from '../components/ImageGallery';
 import KeywordTool from '../components/KeywordTool';
@@ -14,7 +13,7 @@ import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
 import { todayStr } from '../utils/today';
 import { ruleBasedInsight, insightBreakdown } from '../utils/clientInsight';
-import { bestRank, foundRanks, SEARCH_TAB_SHORT } from '../utils/searchTabs';
+import { foundRanks, SEARCH_TAB_SHORT } from '../utils/searchTabs';
 import { supabase } from '../lib/supabase';
 import type { ScheduleEntry, ClientInsight } from '../types';
 import { CATEGORIES, catHex } from '../data/categories';
@@ -263,7 +262,7 @@ function ClientCalendar({ entries, hiddenCategories = [] }: { entries: ScheduleE
 
 export default function ClientPortalPage() {
   const { user, logout } = useAuth();
-  const { entries: allEntries, clients, reports: allReports, saveReport, entriesLoaded } = useApp();
+  const { entries: allEntries, clients, reports: allReports, entriesLoaded } = useApp();
   const [tab, setTab] = useState<Tab>('dashboard');
   const navigate = useNavigate();
 
@@ -281,56 +280,13 @@ export default function ClientPortalPage() {
   const entries = isDemo ? DEMO_ENTRIES : allEntries.filter(e => e.clientId === clientId);
   const TODAY = todayStr();
 
-  // 전송일이 지난 월간 보고서를 자동 생성(+AI 요약, 1회 후 저장)하고, 클라이언트에게 노출
+  // 발행된(published) 보고서만 노출한다. 생성·발행은 담당자가 '클라이언트 관리 → 보고서' 탭에서 검토 후 처리.
+  //  (status 없는 레거시 보고서는 발행 간주 — 하위호환)
   const clientReports = isDemo
     ? DEMO_REPORTS
     : allReports
-        .filter(r => r.clientId === clientId && (r.releaseDate ?? r.date) <= TODAY)
+        .filter(r => r.clientId === clientId && r.status !== 'draft')
         .sort((a, b) => (b.periodEnd ?? b.date).localeCompare(a.periodEnd ?? a.date));
-  const genRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!client || isDemo || isPreview) return; // 데모·내부 미리보기는 DB 저장(saveReport)을 하지 않는다
-    duePeriods(client, TODAY).forEach(p => {
-      const id = reportIdFor(client.id, p.start);
-      if (allReports.some(r => r.id === id) || genRef.current.has(id)) return;
-      genRef.current.add(id);
-      (async () => {
-        const agg = aggregateForPeriod(allEntries, client.id, p.start, p.end);
-        const label = periodLabel(p.start, p.end);
-        let summary = '', highlights: string[] = [], aiGenerated = false;
-        try {
-          const res = await fetch('/api/ai-monthly-summary', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              clientName: client.name, industry: client.industry, period: label,
-              total: agg.total, completed: agg.completed, totalViews: agg.totalViews, totalLikes: agg.totalLikes, totalSaves: agg.totalSaves,
-              byCategory: agg.byCategory,
-              entries: agg.entries.map(e => ({
-                date: e.date, category: e.category, title: e.opinionTitle ?? e.keyword ?? '', status: e.status, rank: e.rank, views: e.metrics?.views,
-                // 순위 잡힌 서브(롱테일)키워드도 함께 보내 월간 요약이 롱테일 성과를 반영하게 한다
-                subs: (e.subKeywords ?? []).map(s => ({ keyword: s.keyword, rank: bestRank(s.rankByTab) })).filter(s => s.rank != null),
-              })),
-            }),
-          });
-          if ((res.headers.get('content-type') ?? '').includes('application/json')) {
-            const data = await res.json();
-            if (res.ok && !data.error && data.summary) {
-              summary = data.summary;
-              highlights = Array.isArray(data.highlights) ? data.highlights : [];
-              aiGenerated = true;
-            }
-          }
-        } catch { /* AI 실패 → 규칙기반 폴백 */ }
-        if (!summary) { summary = fallbackSummary(label, agg); highlights = fallbackHighlights(agg); }
-        saveReport({
-          id, clientId: client.id, clientName: client.name,
-          title: `${client.name} ${label} 보고서`, date: p.releaseDate, period: label, type: 'monthly',
-          summary, highlights, periodStart: p.start, periodEnd: p.end, releaseDate: p.releaseDate,
-          aiGenerated, createdAt: Date.now(),
-        });
-      })();
-    });
-  }, [client, isDemo, isPreview, allReports, allEntries, TODAY, saveReport]);
 
   // 마케팅 현황 기간 — 기본은 '지난 30일'(한 달 성과를 한눈에), 당일/7일/기간 지정으로 전환 가능
   const [preset, setPreset] = useState<'day' | '7d' | '30d' | 'custom'>('30d');

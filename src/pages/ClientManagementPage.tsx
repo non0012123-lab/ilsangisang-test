@@ -10,6 +10,7 @@ import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
 import AdvisorInsightCard from '../components/AdvisorInsightCard';
+import ClientReportsTab from '../components/ClientReportsTab';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { openAiPlanPrint } from '../utils/aiPlanPdf';
@@ -41,11 +42,12 @@ interface AiHandoverResult {
   client?: { name: string; industry: string; contactPerson: string; email: string; phone: string; categories: Category[]; reportAnchorDate?: string };
 }
 
-type DetailTab = 'overview' | 'schedule' | 'budget' | 'contacts' | 'guidelines' | 'memo' | 'ai' | 'prompt';
+type DetailTab = 'overview' | 'schedule' | 'report' | 'budget' | 'contacts' | 'guidelines' | 'memo' | 'ai' | 'prompt';
 
 const TAB_CONFIG = [
   { key: 'overview',   icon: <BookOpen size={14} />,      label: '개요' },
   { key: 'schedule',   icon: <Calendar size={14} />,      label: '스케줄' },
+  { key: 'report',     icon: <FileText size={14} />,      label: '보고서' },
   { key: 'budget',     icon: <Wallet size={14} />,        label: '예산' },
   { key: 'contacts',   icon: <Users size={14} />,         label: '연락처' },
   { key: 'guidelines', icon: <AlertTriangle size={14} />, label: '가이드라인' },
@@ -663,6 +665,9 @@ export default function ClientManagementPage() {
                 )}
               </div>
             )}
+
+            {/* === 보고서 === */}
+            {tab === 'report' && <ClientReportsTab client={selected} />}
 
             {/* === 예산 === */}
             {tab === 'budget' && (

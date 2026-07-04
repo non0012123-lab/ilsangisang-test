@@ -1,6 +1,7 @@
-import type { Client, ScheduleEntry } from '../types';
+import type { Client, Report, ScheduleEntry } from '../types';
 import { overlapsRange } from './dateRange';
-import { localDateStr } from './today';
+import { localDateStr, todayStr } from './today';
+import { bestRank } from './searchTabs';
 
 // 한 보고 구간: 집계 기간 [start,end] + 공개일(release)
 export interface DuePeriod { start: string; end: string; releaseDate: string; }
@@ -102,4 +103,57 @@ export function fallbackHighlights(agg: PeriodAgg): string[] {
   if (agg.totalSaves) h.push(`저장수 합계 ${num(agg.totalSaves)}건`);
   agg.byCategory.slice(0, 3).forEach(c => h.push(`${c.category} ${c.count}건 수행`));
   return h.slice(0, 5);
+}
+
+// 특정 기간의 보고서(요약·하이라이트)를 생성한다 — AI(/api/ai-monthly-summary) 우선, 실패 시 규칙기반 폴백.
+//  담당자 보고서 탭과 어시스턴트가 공통으로 사용. 기본 status='draft'(검토 후 발행).
+//  id 는 reportIdFor(clientId, start) — 같은 시작일 재생성 시 덮어씀(초안 갱신).
+export async function generateReportForPeriod(params: {
+  client: Client;
+  allEntries: ScheduleEntry[];
+  start: string;
+  end: string;
+  releaseDate?: string;
+  status?: 'draft' | 'published';
+}): Promise<Report> {
+  const { client, allEntries, start, end, releaseDate } = params;
+  const status = params.status ?? 'draft';
+  const label = periodLabel(start, end);
+  const agg = aggregateForPeriod(allEntries, client.id, start, end);
+
+  let summary = '', highlights: string[] = [], aiGenerated = false;
+  try {
+    const res = await fetch('/api/ai-monthly-summary', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientName: client.name, industry: client.industry, period: label,
+        total: agg.total, completed: agg.completed, totalViews: agg.totalViews, totalLikes: agg.totalLikes, totalSaves: agg.totalSaves,
+        byCategory: agg.byCategory,
+        entries: agg.entries.map(e => ({
+          date: e.date, category: e.category, title: e.opinionTitle ?? e.keyword ?? '', status: e.status, rank: e.rank, views: e.metrics?.views,
+          subs: (e.subKeywords ?? []).map(s => ({ keyword: s.keyword, rank: bestRank(s.rankByTab) })).filter(s => s.rank != null),
+        })),
+      }),
+    });
+    if ((res.headers.get('content-type') ?? '').includes('application/json')) {
+      const data = await res.json();
+      if (res.ok && !data.error && data.summary) {
+        summary = data.summary;
+        highlights = Array.isArray(data.highlights) ? data.highlights : [];
+        aiGenerated = true;
+      }
+    }
+  } catch { /* AI 실패 → 규칙기반 폴백 */ }
+  if (!summary) { summary = fallbackSummary(label, agg); highlights = fallbackHighlights(agg); }
+
+  return {
+    id: reportIdFor(client.id, start),
+    clientId: client.id, clientName: client.name,
+    title: `${client.name} ${label} 보고서`,
+    date: releaseDate ?? todayStr(),
+    period: label, type: 'monthly',
+    summary, highlights,
+    periodStart: start, periodEnd: end, releaseDate,
+    status, aiGenerated, createdAt: Date.now(),
+  };
 }
