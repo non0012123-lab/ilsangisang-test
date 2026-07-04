@@ -15,7 +15,7 @@ import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
 import { todayStr } from '../utils/today';
 import { ruleBasedInsight, insightBreakdown } from '../utils/clientInsight';
-import { foundRanks, SEARCH_TAB_SHORT } from '../utils/searchTabs';
+import { foundRanks, SEARCH_TAB_SHORT, entryLinks } from '../utils/searchTabs';
 import { supabase } from '../lib/supabase';
 import type { ScheduleEntry, ClientInsight } from '../types';
 import { CATEGORIES, catHex } from '../data/categories';
@@ -679,39 +679,41 @@ export default function ClientPortalPage() {
                   <span className="ml-auto text-xs text-gray-400">{opinionEntries.length}건</span>
                 </div>
                 <div className="p-4 space-y-3">
-                  {opinionEntries.map(entry => (
+                  {opinionEntries.map(entry => {
+                    const links = entryLinks(entry);
+                    return (
                     <div key={entry.id} className="border border-sky-100 rounded-xl p-4 bg-sky-50/50">
-                      <div className="flex items-start justify-between mb-2">
-                        <div>
-                          <h4 className="text-sm font-bold text-gray-900">{entry.opinionTitle}</h4>
+                      <div className="flex items-start justify-between mb-2 gap-2">
+                        <div className="min-w-0">
+                          <h4 className="text-sm font-bold text-gray-900 break-keep">
+                            {entry.keyword || entry.opinionTitle || '-'}
+                            {links.length > 0 && <span className="ml-1.5 text-sky-600">{links.length}건</span>}
+                          </h4>
                           <p className="text-xs text-gray-400 mt-0.5">{entry.date} · {entry.managerName}</p>
                         </div>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                        <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${
                           entry.status === 'completed' ? 'bg-green-50 text-green-700' :
                           entry.status === 'in-progress' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
                         }`}>
                           {entry.status === 'completed' ? '완료' : entry.status === 'in-progress' ? '진행중' : '대기중'}
                         </span>
                       </div>
+                      {/* 레거시 내용(있으면) */}
                       {entry.opinionContent && <p className="text-sm text-gray-700 leading-relaxed mb-2">{entry.opinionContent}</p>}
-                      {entry.opinionComments && (
-                        <div className="bg-white rounded-lg px-3 py-2 border border-sky-100">
-                          <p className="text-xs font-semibold text-gray-500 mb-1">주요 반응</p>
-                          <p className="text-xs text-gray-600 italic">"{entry.opinionComments}"</p>
+                      {/* 링크 목록(각 링크 = 1건) */}
+                      {links.length > 0 && (
+                        <div className="flex flex-col gap-1 mt-1">
+                          {links.map((l, i) => (
+                            <a key={i} href={l} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline max-w-full">
+                              <ExternalLink size={11} className="shrink-0" /><span className="truncate">{l}</span>
+                            </a>
+                          ))}
                         </div>
                       )}
-                      <div className="flex items-center gap-3 mt-2 flex-wrap">
-                        {entry.metrics?.views && <span className="text-xs text-gray-500">👁 {entry.metrics.views.toLocaleString()} 조회</span>}
-                        {entry.metrics?.comments && <span className="text-xs text-gray-500">💬 {entry.metrics.comments.toLocaleString()} 댓글</span>}
-                        {entry.link && (
-                          <a href={entry.link} target="_blank" rel="noopener noreferrer"
-                            className="text-xs text-blue-600 hover:underline flex items-center gap-1 font-medium">
-                            <ExternalLink size={11} /> 링크 바로가기
-                          </a>
-                        )}
-                      </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

@@ -252,6 +252,7 @@ export interface ScheduleEntry {
   category: Category;
   keyword?: string;
   link?: string;
+  links?: string[];                                    // 다건 작업(여론작업·배포성)에서 링크 여러 개. 건수=links.length. link 는 첫 링크(하위호환)
   rank?: number;                                       // 대표 순위 = 선택 탭 중 최고(min). 수집기/수동 입력.
   searchTabs?: SearchTab[];                            // 순위 수집 대상 탭(다중). 비어있으면 수집 안 함
   rankByTab?: Partial<Record<SearchTab, number | null>>; // 수집기가 채우는 탭별 순위(null=미노출)

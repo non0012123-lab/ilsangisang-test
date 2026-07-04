@@ -3,7 +3,7 @@ import { overlapsRange, isMultiDay, entryEnd } from './dateRange';
 import { entryImages } from './entryImages';
 import { buildGalleryGroups } from './galleryGroups';
 import { catHex as categoryColor, catLabel, CATEGORY_ICON, NAVER_FAMILY } from '../data/categories';
-import { isRankTrackedCategory, foundRanks, SEARCH_TAB_SHORT } from './searchTabs';
+import { isRankTrackedCategory, foundRanks, SEARCH_TAB_SHORT, entryLinks } from './searchTabs';
 import { printHtml } from './printDoc';
 
 // rankByTab → "통합 4위 · 블로그 2위"(잡힌 탭만). 없으면 빈 문자열.
@@ -111,24 +111,25 @@ export function buildReportHtml(report: Report, client: Client, allEntries: Sche
   `;
   }).join('');
 
-  const opinionRows = opinionEntries.map(e => `
+  const opinionRows = opinionEntries.map(e => {
+    const links = entryLinks(e);
+    return `
     <div style="border:1px solid #e0f2fe;border-radius:10px;padding:14px 16px;margin-bottom:10px;background:#f0f9ff;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
-        <p style="font-size:13px;font-weight:700;color:#0369a1;margin:0;">${e.opinionTitle ?? ''}</p>
+        <p style="font-size:13px;font-weight:700;color:#0369a1;margin:0;">${e.keyword ?? e.opinionTitle ?? ''}${links.length ? ` <span style="color:#0284c7;">${links.length}건</span>` : ''}</p>
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="background:${statusColor(e.status)}22;color:${statusColor(e.status)};font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;">${statusLabel(e.status)}</span>
           <span style="font-size:11px;color:#64748b;">${e.date}</span>
         </div>
       </div>
-      <p style="font-size:12px;color:#374151;margin:0 0 8px;line-height:1.6;">${e.opinionContent ?? ''}</p>
-      ${e.opinionComments ? `<p style="font-size:11px;color:#64748b;margin:0 0 8px;font-style:italic;background:white;padding:6px 10px;border-radius:6px;border-left:3px solid #bae6fd;">"${e.opinionComments}"</p>` : ''}
+      ${e.opinionContent ? `<p style="font-size:12px;color:#374151;margin:0 0 8px;line-height:1.6;">${e.opinionContent}</p>` : ''}
+      ${links.length ? `<div style="margin:0 0 8px;">${links.map(l => `<a href="${l}" style="display:block;font-size:11px;color:#2563eb;line-height:1.7;word-break:break-all;">${l}</a>`).join('')}</div>` : ''}
       <div style="display:flex;align-items:flex-start;gap:12px;">
-        ${e.metrics?.views ? `<span style="font-size:11px;color:#0369a1;">👁 ${num(e.metrics.views)} 조회</span>` : ''}
-        ${e.metrics?.comments ? `<span style="font-size:11px;color:#0369a1;">💬 ${num(e.metrics.comments)} 댓글</span>` : ''}
         ${entryImages(e).length ? `<span style="font-size:11px;color:#0369a1;margin-left:auto;">🖼 이미지 ${entryImages(e).length}장 (첨부 이미지 페이지 참고)</span>` : ''}
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   // 첨부 이미지 갤러리 — 매체(카테고리)별로 묶고, 각 매체 안에서 시안/인사이트를 분리해 보여준다.
   // 인사이트(글씨·숫자·그래프)는 한 장씩 크게·잘림 없이(contain), 시안은 그리드로.

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight, ExternalLink, CornerDownRight } from 'lucide-react';
 import type { ScheduleEntry, Category } from '../types';
 import CategoryBadge from './CategoryBadge';
-import { foundRanks, SEARCH_TAB_SHORT } from '../utils/searchTabs';
+import { foundRanks, SEARCH_TAB_SHORT, isMultiLinkCategory, entryLinks } from '../utils/searchTabs';
 
 // 어느 탭에서 몇 위인지 "통합 3위 · 블로그 5위". rankByTab 없으면 대표순위(레거시).
 const tabRankText = (e: ScheduleEntry): string => {
@@ -29,15 +29,17 @@ function EntryItem({ e }: { e: ScheduleEntry }) {
   const st = STATUS[e.status] ?? STATUS.pending;
   const rank = tabRankText(e);
   const subs = rankedSubs(e);
-  const isOpinion = e.category === '네이버 여론작업';
-  const title = isOpinion ? (e.opinionTitle ?? '-') : (e.keyword || '-');
+  const isMulti = isMultiLinkCategory(e.category);
+  const links = entryLinks(e);
+  const title = e.keyword || e.opinionTitle || '-';
   return (
     <div className="py-2 border-t border-gray-50 first:border-t-0">
       <div className="flex items-center gap-2 flex-wrap text-xs">
         <span className="text-gray-400 whitespace-nowrap shrink-0">{e.date}</span>
         <span className="font-medium text-gray-800 break-keep">{title}</span>
+        {isMulti && links.length > 0 && <span className="text-sky-600 font-bold whitespace-nowrap">{links.length}건</span>}
         {rank && <span className="text-blue-700 font-bold whitespace-nowrap">{rank}</span>}
-        {e.link && (
+        {!isMulti && e.link && (
           <a href={e.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-blue-500 hover:underline shrink-0">
             <ExternalLink size={11} /> 링크
           </a>
@@ -52,9 +54,16 @@ function EntryItem({ e }: { e: ScheduleEntry }) {
           <span className="truncate">{s.keyword}</span>
         </div>
       ))}
-      {/* 여론작업 내용 */}
-      {isOpinion && e.opinionContent && (
-        <p className="text-[11px] text-gray-500 mt-1 leading-relaxed break-keep">{e.opinionContent}</p>
+      {/* 다건 링크 목록(여론작업·배포) */}
+      {isMulti && links.length > 0 && (
+        <div className="mt-1 flex flex-col gap-0.5 pl-1">
+          {links.map((l, i) => (
+            <a key={i} href={l} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:underline max-w-full">
+              <ExternalLink size={10} className="shrink-0" /><span className="truncate">{l}</span>
+            </a>
+          ))}
+        </div>
       )}
     </div>
   );

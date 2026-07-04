@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { X, Sparkles, ChevronDown, ChevronUp, Repeat } from 'lucide-react';
+import { X, Sparkles, ChevronDown, ChevronUp, Repeat, Plus } from 'lucide-react';
 import type { ScheduleEntry, Category, ScheduleStatus, AIMetrics, Recurrence, SearchTab } from '../types';
 import { useApp } from '../context/AppContext';
 import ImageDropzone from './ImageDropzone';
@@ -8,7 +8,7 @@ import { MAX_IMAGES, entryImages } from '../utils/entryImages';
 import { openExternal } from '../utils/openExternal';
 import { recurrenceOccurrences } from '../utils/recurrence';
 import { CATEGORY_GROUPS, CATEGORY_METRICS, catLabel } from '../data/categories';
-import { SEARCH_TAB_ORDER, SEARCH_TAB_LABEL, SEARCH_TAB_SHORT, isRankTrackedCategory, defaultSearchTabs, foundRanks } from '../utils/searchTabs';
+import { SEARCH_TAB_ORDER, SEARCH_TAB_LABEL, SEARCH_TAB_SHORT, isRankTrackedCategory, isMultiLinkCategory, defaultSearchTabs, foundRanks } from '../utils/searchTabs';
 
 // 반복 옵션(UI) → Recurrence 규칙 매핑. 'none' 이면 반복 없음(단건).
 type RecurOpt = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
@@ -58,8 +58,17 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
   const defaultClient = activeClients.find(c => c.id === defaultClientId) ?? activeClients[0];
   const isEdit = !!entry; // 반복은 신규 등록에서만 (수정은 단건)
 
-  const [form, setForm] = useState<Partial<ScheduleEntry>>(
-    entry ?? {
+  const [form, setForm] = useState<Partial<ScheduleEntry>>(() => {
+    if (entry) {
+      // 다건(여론작업·배포성) 편집 시 레거시 호환: links 없으면 단일 link 에서, 주제는 keyword(없으면 옛 opinionTitle)로.
+      const e: Partial<ScheduleEntry> = { ...entry };
+      if (isMultiLinkCategory(e.category)) {
+        if (!e.links || e.links.length === 0) e.links = e.link ? [e.link] : [];
+        if (!e.keyword && e.opinionTitle) e.keyword = e.opinionTitle;
+      }
+      return e;
+    }
+    return {
       date: defaultDate ?? new Date().toISOString().split('T')[0],
       status: 'pending',
       category: 'SNS',
@@ -68,8 +77,8 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
       managerId: members[0]?.id ?? '',
       managerName: members[0]?.name ?? '',
       ...prefill,   // 요청함 등에서 추론한 값으로 기본값 덮어쓰기(값 있는 키만)
-    }
-  );
+    };
+  });
   const [metrics, setMetrics] = useState<AIMetrics>(entry?.metrics ?? {});
   const [showMetrics, setShowMetrics] = useState(!!entry?.metrics);
   const [aiLoading, setAiLoading] = useState(false);
@@ -89,6 +98,13 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
 
   const set = (key: keyof ScheduleEntry, value: unknown) =>
     setForm(prev => ({ ...prev, [key]: value }));
+
+  // 다건(여론작업·배포성) — 링크 여러 개(=건수). 주제는 keyword.
+  const isMulti = isMultiLinkCategory(form.category);
+  const links = form.links ?? [];
+  const addLink = () => set('links', [...links, '']);
+  const updateLink = (i: number, v: string) => set('links', links.map((l, idx) => idx === i ? v : l));
+  const removeLink = (i: number) => set('links', links.filter((_, idx) => idx !== i));
 
   // 순위 수집 탭(다중). 미설정이면 카테고리 기본값을 보여주고, 토글하면 명시 저장.
   const searchTabs = form.searchTabs ?? defaultSearchTabs(form.category);
@@ -131,10 +147,10 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
   };
 
   const handleSubmit = () => {
-    const opinion = IS_OPINION(form.category as Category);
     if (!form.date || !form.clientId || !form.managerId) { alert('필수 항목을 입력해주세요.'); return; }
-    if (opinion && !form.opinionTitle) { alert('제목을 입력해주세요.'); return; }
-    if (!opinion && !form.keyword) { alert('키워드를 입력해주세요.'); return; }
+    if (!form.keyword) { alert(isMulti ? '주제(키워드)를 입력해주세요.' : '키워드를 입력해주세요.'); return; }
+    // 다건: 빈 링크 제거. link 는 첫 링크로(단일 링크만 읽는 화면 호환).
+    const cleanLinks = isMulti ? links.map(l => l.trim()).filter(Boolean) : [];
     // 마감일이 시작일보다 앞서면 무효 처리
     const endDate = form.endDate && form.endDate > form.date! ? form.endDate : undefined;
 
@@ -147,9 +163,13 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
       managerId: form.managerId!, managerName: form.managerName!,
       category: form.category!, clientId: form.clientId!, clientName: form.clientName!,
       status: form.status!,
-      keyword: form.keyword, link: form.link, rank: form.rank,
+      keyword: form.keyword,
+      link: isMulti ? (cleanLinks[0] ?? undefined) : form.link,
+      links: isMulti && cleanLinks.length ? cleanLinks : undefined,
+      rank: form.rank,
       searchTabs: tabsForSave, rankByTab: form.rankByTab, rankCheckedAt: form.rankCheckedAt,
       postTitle: form.postTitle, subKeywords: form.subKeywords,
+      // 레거시 여론작업 필드는 신규 입력에서 제거(기존 데이터가 있으면 편집 시 그대로 보존)
       opinionTitle: form.opinionTitle, opinionContent: form.opinionContent, opinionComments: form.opinionComments,
       images: images.length ? images : undefined, screenshot: undefined,
       metrics: hasMetrics ? { ...metrics, aiAnalyzed: false } : undefined,
@@ -290,7 +310,7 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
                 ))}
               </select>
             </div>
-            {!isOpinion && (
+            {!isMulti && (
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">순위</label>
                 <input type="number" min={1} value={form.rank ?? ''} onChange={e => set('rank', e.target.value ? Number(e.target.value) : undefined)}
@@ -362,53 +382,47 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
             </div>
           )}
 
-          {/* Dynamic fields */}
-          {isOpinion ? (
-            <>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">제목 *</label>
-                <input type="text" value={form.opinionTitle ?? ''} onChange={e => set('opinionTitle', e.target.value)}
-                  placeholder="여론 분석 제목"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">내용</label>
-                <textarea value={form.opinionContent ?? ''} onChange={e => set('opinionContent', e.target.value)} rows={3}
-                  placeholder="분석 내용 및 여론 요약"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">댓글</label>
-                <textarea value={form.opinionComments ?? ''} onChange={e => set('opinionComments', e.target.value)} rows={2}
-                  placeholder="주요 댓글 내용 (예: &quot;좋아요~&quot; / &quot;별로에요&quot;)"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">
-                  링크 <span className="text-gray-400 font-normal">(선택 · 해당 게시물/검색결과 바로가기)</span>
+          {/* Dynamic fields — 모든 카테고리 공통: 키워드(주제). 다건(여론작업·배포성)은 링크 여러 개(=건수). */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">{isMulti ? '주제 (키워드) *' : '키워드 *'}</label>
+            <input type="text" value={form.keyword ?? ''} onChange={e => set('keyword', e.target.value)}
+              placeholder={isMulti ? '예: 탈모이식' : '검색 키워드 입력'}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+
+          {isMulti ? (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-gray-600">
+                  링크 <span className="text-gray-400 font-normal">· 한 건당 링크 하나 (링크 수 = 건수)</span>
                 </label>
-                <input type="url" value={form.link ?? ''} onChange={e => set('link', e.target.value)}
-                  placeholder="https://cafe.naver.com/..."
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <span className="text-[11px] font-semibold text-sky-600">{links.filter(l => l.trim()).length}건</span>
               </div>
-            </>
+              <div className="space-y-2">
+                {links.map((l, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-[11px] text-gray-400 w-5 text-right shrink-0">{i + 1}</span>
+                    <input type="url" value={l} onChange={e => updateLink(i, e.target.value)}
+                      placeholder="https://cafe.naver.com/..."
+                      className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <button type="button" onClick={() => removeLink(i)} className="p-1.5 text-gray-400 hover:text-red-500 shrink-0"><X size={14} /></button>
+                  </div>
+                ))}
+                <button type="button" onClick={addLink}
+                  className="flex items-center justify-center gap-1.5 w-full py-2 border border-dashed border-gray-300 rounded-lg text-xs text-gray-500 hover:border-sky-300 hover:text-sky-500 transition-colors">
+                  <Plus size={13} /> 링크 추가
+                </button>
+              </div>
+            </div>
           ) : (
-            <>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">키워드 *</label>
-                <input type="text" value={form.keyword ?? ''} onChange={e => set('keyword', e.target.value)}
-                  placeholder="검색 키워드 입력"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">
-                  링크 <span className="text-gray-400 font-normal">(선택 · 작업 후 입력 가능)</span>
-                </label>
-                <input type="url" value={form.link ?? ''} onChange={e => set('link', e.target.value)}
-                  placeholder="https://example.com (나중에 표에서 바로 추가 가능)"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-            </>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">
+                링크 <span className="text-gray-400 font-normal">(선택 · 작업 후 입력 가능)</span>
+              </label>
+              <input type="url" value={form.link ?? ''} onChange={e => set('link', e.target.value)}
+                placeholder="https://example.com (나중에 표에서 바로 추가 가능)"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
           )}
 
           {/* 이미지 (시안/결과물) — 최대 MAX_IMAGES 장, 드래그앤드롭 */}

@@ -27,6 +27,15 @@ export const foundRanks = (rankByTab?: Partial<Record<SearchTab, number | null>>
 export const isRankTrackedCategory = (c?: Category | string): boolean =>
   c === '블로그 상위노출' || c === '블로그관리' || c === '카페 상위노출';
 
+// 다건 작업(한 건에 링크 여러 개 = 건수) 카테고리 — 여론작업 + 배포성.
+//  주제 키워드 + 링크 N개(=N건) + 이미지로 관리한다(제목/내용/댓글 없음).
+export const isMultiLinkCategory = (c?: Category | string): boolean =>
+  c === '네이버 여론작업' || c === '블로그 배포' || c === '카페 배포';
+
+// entry 의 링크 목록(다건). links 우선, 없으면 단일 link 를 1개로 취급.
+export const entryLinks = (e: { links?: string[]; link?: string }): string[] =>
+  (e.links && e.links.length ? e.links : (e.link ? [e.link] : [])).filter(Boolean);
+
 // 카테고리별 기본 선택 탭. 블로그(상위노출/관리)는 통합/블로그 어디든 잡히면 되므로 둘 다 기본.
 export const defaultSearchTabs = (c?: Category | string): SearchTab[] => {
   if (c === '카페 상위노출') return ['cafe'];
