@@ -1063,7 +1063,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     //    "작업 스케줄 없음"이라 답하던 문제(특히 담당자가 잘못 배정된 일정까지 누락).
     //  • 각 일정에 managerName 이 있어 "내 일정만"도 AI 가 구분해 답할 수 있으므로 전체로 맞춘다.
     const allEntries = entriesRef.current;
-    const scoped = allEntries;
+    // ★ 어시스턴트에 전달하는 일정은 "최근 ~180일 + 예정 60일"로 제한한다.
+    //  전체 이력을 통째로 넣으면 목록이 너무 커져 모델이 일부 행을 놓쳐(있는 일정을 '없다'고 오답) 버린다.
+    //  기간작업(date~endDate)은 종료일로도 걸치면 포함. 최신순 정렬 + 안전 상한(2000건).
+    const asstToday = todayStr();
+    const shiftDay = (n: number) => {
+      const d = new Date(asstToday + 'T00:00:00'); d.setDate(d.getDate() + n);
+      const p = (k: number) => String(k).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    };
+    const winLo = shiftDay(-180), winHi = shiftDay(60);
+    const scoped = allEntries
+      .filter(e => e.date <= winHi && (e.endDate && e.endDate > e.date ? e.endDate : e.date) >= winLo)
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+      .slice(0, 2000);
     const activeClients = clientsRef.current.filter(c => c.status !== 'inactive');
     // 가이드라인 질문에 답하기 위해 인수인계 문서·AI 기획 결과를 함께 전달
     const clientNameOf = (id: string, fallback: string) => clientsRef.current.find(c => c.id === id)?.name ?? fallback;

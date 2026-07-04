@@ -451,6 +451,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     `내부 일정 종류(internalEvents 용 — 없으면 새로 만들어도 됨): ${internalCategories.join(', ') || '회의실, 미팅, 면접, 촬영, 휴가'}`,
     '',
     '현재 등록된 일정(팀 전체 클라이언트 업무 일정 · JSON, id 포함 — updates 에 이 id 사용. "내 일정"은 managerName 이 본인인 것):',
+    '  · ★ 이 목록은 성능상 "최근 약 180일 + 예정 60일" 범위로 제한돼 있다(전체 이력이 아님). 따라서 어떤 업체/키워드가 목록에 안 보여도 "일정이 없다"고 단정하지 말 것 — "이 범위(최근 6개월)에는 안 보인다. 더 과거 건이면 날짜를 알려달라"고 안내한다. 범위 안(최근 몇 주~몇 달) 일정은 빠짐없이 들어 있으니, 최근 건에 대해선 목록을 근거로 정확히 답한다.',
     '  · 순위추적(블로그/카페) 일정은 rankByTab(탭별 순위)·rankCheckedAt(탭별 수집시각)를 포함한다. rankByTab 값: 숫자=노출(순위), null=미노출, 키 없음=미수집. 탭: integrated(통합)/blog(블로그탭)/cafe(카페탭).',
     JSON.stringify(entries),
     '',
