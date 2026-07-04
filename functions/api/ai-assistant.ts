@@ -88,6 +88,12 @@ interface AssistantRequest {
   salesEnabled?: boolean;   // 영업관리 권한 여부 — true 일 때만 상담 기록을 다룬다
   sales?: CtxSales[];       // 기존 상담 목록(조회/수정 대상 식별용)
   rankGuarantees?: CtxRankG[]; // 순위 보장 캠페인(조회/수정/삭제 대상 식별용)
+  reports?: CtxReport[];       // 기존 월간 보고서(초안/발행 상태 — 발행·중복 판단용)
+}
+
+// 월간 보고서 컨텍스트 — "○○ 지난달 보고서 발행해줘", 기존 초안 식별용
+interface CtxReport {
+  id?: string; clientName?: string; period?: string; status?: string; periodStart?: string; periodEnd?: string;
 }
 
 // 순위 보장 캠페인 컨텍스트 — "○○ 보장 몇 건 찼어?", "△△ 보장 종료" 등 조회/수정 근거
@@ -287,6 +293,12 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     .map(g => `■ id=${g.id ?? '?'} | ${g.clientName ?? '-'} · ${g.title ?? '-'} | 달성:${g.achievedCount ?? 0}/${g.guaranteedCount ?? '?'}건 | ${g.cycle ? `${g.cycle}회차 | ` : ''}상태:${RANKG_STATUS_LABEL[g.status ?? ''] ?? g.status ?? '-'}${g.closed ? '(종료)' : ''}`)
     .join('\n');
 
+  // 월간 보고서 컨텍스트 — 기존 초안/발행 상태(발행·중복 판단)
+  const reportList = (Array.isArray(req.reports) ? req.reports : []).slice(0, 80);
+  const reportContext = reportList
+    .map(r => `■ id=${r.id ?? '?'} | ${r.clientName ?? '-'} · ${r.period ?? '-'} | ${r.periodStart ?? '?'}~${r.periodEnd ?? '?'} | 상태:${r.status === 'draft' ? '초안' : '발행됨'}`)
+    .join('\n');
+
   // 요청함(업무 요청) 컨텍스트 — 받은/보낸 방향과 상태·날짜를 표기
   const REQ_STATUS_LABEL: Record<string, string> = { pending: '대기(미확인)', confirmed: '확인함(진행)', done: '완료', returned: '반려' };
   const requestList = (Array.isArray(req.existingRequests) ? req.existingRequests : []).slice(0, 80);
@@ -320,7 +332,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  "accountLookups": [ "조회 질문일 때 답으로 보여줄 아이디 목록 id" ],',
     '  "siteLookups": [ "조회 질문일 때 답으로 보여줄 홈페이지 id" ],',
     '  "rankGuarantees": [ { "op":"add|update|delete", "id":"수정/삭제 시 기존 순위보장 id", "clientName":"대상 업체명", "title":"상품/캠페인명(예: 네이버 자동완성 보장)", "guaranteedCount":"보장 목표 건수(정수, 기본 20)", "alertOffset":"목표 몇 건 전 알림(정수, 기본 2)", "closed":"종료면 true" } ],',
-    '  "keywords": [ "조회수를 조회할 키워드" ]',
+    '  "keywords": [ "조회수를 조회할 키워드" ],',
+    '  "reports": [ { "op":"draft|publish", "clientName":"대상 업체명", "periodStart":"YYYY-MM-DD", "periodEnd":"YYYY-MM-DD" } ]',
     '}',
     '',
     '판단 규칙:',
@@ -385,6 +398,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 순위 보장 캠페인(rankGuarantees): "○○ 자동완성 보장 20건으로 만들어줘/등록해줘"면 op:"add" + clientName·title·guaranteedCount(언급 없으면 20)·alertOffset(언급 없으면 2). "△△ 보장 목표 30건으로 바꿔줘", "알림 3건 전으로"면 op:"update" + 아래 "순위 보장" 목록의 그 캠페인 id + 바꿀 필드. "□□ 보장 종료해줘/마감"이면 op:"update" + id + closed:true(연장이면 closed:false). "○○ 보장 삭제해줘"면 op:"delete" + id. ★ 개별 항목·순위는 일정에 순위를 넣으면 자동 편입되므로 여기서 다루지 않는다(캠페인 자체의 생성/목표/종료/삭제만). 삭제·종료는 reply 에 무엇을 할지 적고 "적용"을 안내한다.',
     '- ★ 순위 보장 조회("○○ 보장 몇 건 찼어?", "임박한 보장 있어?", "△△ 순위보장 현황", "도달한 보장 보여줘"): 아래 "순위 보장" 목록(달성/목표·상태)을 근거로 reply 로만 답하고 rankGuarantees 배열은 비운다 — 새로 만들거나 바꾸지 않는다.',
     '- 키워드 조회수 질문("○○ 키워드 조회수 알려줘", "△△ 검색량 얼마야?", "□□ 모바일/PC 조회수"): 실제 수치는 네이버 키워드도구로 따로 조회하므로, 너는 절대 숫자를 지어내지 말고 조회할 키워드만 keywords 배열에 담는다(여러 개면 모두). reply 에는 "조회수를 조회해 아래에 표시할게요" 정도로 짧게 답하고 다른 액션 배열은 비운다.',
+    `- ★ 월간 보고서(reports): "○○ 7/1~7/31 보고서 만들어줘", "△△ 지난달 보고서 뽑아줘"처럼 기간과 업체를 주면 reports 에 op:"draft"(초안) + clientName + periodStart/periodEnd(YYYY-MM-DD)로 담는다. "○○ 보고서 발행해줘/보내줘/클라이언트한테 넘겨줘"면 op:"publish"(생성 후 클라이언트 페이지에 발행). 상대·축약 기간("지난달","이번달","저번 주")은 오늘(${today}) 기준 절대 날짜로 변환한다("지난달"=지난달 1일~말일). 업체가 불명확하거나 기간을 특정할 수 없으면 reports 를 비우고 reply 에서 되묻는다. 발행(publish)은 클라이언트에게 바로 노출되므로, reply 에 무엇을(어느 업체·기간) 초안/발행할지 요약하고 "적용"을 눌러야 반영된다고 안내한다. 초안(draft)은 담당자 검토용이라 클라이언트에 보이지 않는다. 단순히 "○○ 보고서 있어?/뭐 있어?" 같은 조회는 아래 "월간 보고서" 목록을 근거로 reply 로만 답하고 reports 배열은 비운다.`,
     '- 아이디 목록 조회("○○ 아이디/비번 뭐야?", "△△ 계정 정보 알려줘"): 비밀번호는 컨텍스트에 없고 화면에서 직접 보여주므로, 매칭되는 항목의 id 를 accountLookups 에 담는다(여러 개면 모두). reply 에는 "아래에서 아이디·비번·아이피를 복사하세요" 정도로 짧게 답하고, 비번 값을 지어내지 말 것. 일치 항목이 없으면 빈 배열 + reply 에서 되묻기.',
     '- 홈페이지 목록 조회("문자발송 사이트 비번?", "○○ 홈페이지 계정"): 매칭 항목 id 를 siteLookups 에 담고 reply 는 짧게. 비번은 화면에서 보여준다.',
     '- 추가/수정/삭제 요청이면 accounts/sites 에 op(add/update/delete)로 담는다(수정·삭제는 id 사용). 조회만 할 때는 lookups 만 채우고 op 배열은 비운다.',
@@ -466,6 +480,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     noticeContext || '(올라온 공지 없음)',
     '순위 보장(캠페인별 달성/목표·상태 — 조회/수정/삭제 시 위 id 사용):',
     rankGContext || '(등록된 순위 보장 없음)',
+    '월간 보고서(업체별 초안/발행 상태 — 발행·중복 판단 근거):',
+    reportContext || '(등록된 보고서 없음)',
     ...(salesEnabled ? [
       '',
       '상담 목록(영업관리 — 상담 수정/조회 시 위 id 사용):',
@@ -519,7 +535,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const data = await aiRes.json();
   const content = extractText(data);
-  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; notices?: unknown; internalEvents?: unknown; sales?: unknown; rankGuarantees?: unknown; accountLookups?: unknown; siteLookups?: unknown };
+  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; notices?: unknown; internalEvents?: unknown; sales?: unknown; rankGuarantees?: unknown; reports?: unknown; accountLookups?: unknown; siteLookups?: unknown };
   try {
     parsed = JSON.parse(content);
   } catch {
@@ -539,6 +555,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     notices: Array.isArray(parsed?.notices) ? parsed.notices : [],
     internalEvents: Array.isArray(parsed?.internalEvents) ? parsed.internalEvents : [],
     rankGuarantees: Array.isArray(parsed?.rankGuarantees) ? parsed.rankGuarantees : [],
+    reports: Array.isArray(parsed?.reports) ? parsed.reports : [],
     sales: salesEnabled && Array.isArray(parsed?.sales) ? parsed.sales : [],
     accountLookups: Array.isArray(parsed?.accountLookups) ? parsed.accountLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
     siteLookups: Array.isArray(parsed?.siteLookups) ? parsed.siteLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],

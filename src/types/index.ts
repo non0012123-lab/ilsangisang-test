@@ -113,6 +113,8 @@ export interface AssistantProposalVendor { op?: 'add' | 'update' | 'delete'; id?
 // 아이디 목록/홈페이지 목록은 추가·수정·삭제를 op 로 구분
 export interface AssistantAccountOp { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; platform?: string; grade?: string; ownership?: 'client' | 'inhouse'; username?: string; password?: string; category?: string; ip?: string }
 export interface AssistantSiteOp { op?: 'add' | 'update' | 'delete'; id?: string; name?: string; url?: string; username?: string; password?: string; description?: string }
+// 월간 보고서: 'draft'=초안 생성(검토용), 'publish'=생성 후 클라이언트 페이지에 발행
+export interface AssistantProposalReport { op?: 'draft' | 'publish'; clientId?: string; clientName?: string; periodStart?: string; periodEnd?: string }
 // 키워드 조회수(대시보드 어시스턴트가 네이버 키워드도구로 조회한 결과 — 모바일/PC/총)
 export interface KeywordStat { keyword: string; mobile: number | string; pc: number | string; total: number; found: boolean }
 // 적용을 되돌리기 위해 저장하는 스냅샷(생성된 레코드 id + 삭제/수정 전 원본)
@@ -168,6 +170,7 @@ export interface AssistantMessage {
   internalEvents?: AssistantProposalInternal[]; // 사내 내부 일정
   sales?: AssistantProposalSales[]; // 영업관리 상담 기록 추가/수정
   rankGuarantees?: AssistantProposalRankGuarantee[]; // 순위 보장 캠페인 추가/수정/삭제
+  reports?: AssistantProposalReport[]; // 월간 보고서 초안 생성/발행
   accountLookups?: string[];        // 조회 답변에 복사 카드로 표시할 아이디 목록 id
   siteLookups?: string[];           // 조회 답변에 복사 카드로 표시할 홈페이지 id
   deletes?: string[];         // 삭제할 기존 일정 id

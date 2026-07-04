@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall, CornerDownRight, Megaphone, Target } from 'lucide-react';
+import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall, CornerDownRight, Megaphone, Target, FileText } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { AssistantMessage, AssistantProposalEntry, Category } from '../types';
@@ -154,7 +154,7 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
   };
 
   const proposalCount = (m: AssistantMessage) =>
-    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0) + (m.notices?.length ?? 0) + (m.internalEvents?.length ?? 0) + (m.sales?.length ?? 0) + (m.rankGuarantees?.length ?? 0);
+    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0) + (m.notices?.length ?? 0) + (m.internalEvents?.length ?? 0) + (m.sales?.length ?? 0) + (m.rankGuarantees?.length ?? 0) + (m.reports?.length ?? 0);
 
   const opLabel = (op?: string) => op === 'delete' ? '삭제' : op === 'update' ? '수정' : '추가';
 
@@ -317,6 +317,12 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                         </div>
                       );
                     })}
+                    {(m.reports ?? []).map((r, i) => (
+                      <div key={`rp${i}`} className="flex items-start gap-2 text-xs text-gray-700">
+                        <FileText size={13} className={`shrink-0 mt-0.5 ${r.op === 'publish' ? 'text-green-600' : 'text-amber-500'}`} />
+                        <span><strong>보고서 {r.op === 'publish' ? '발행' : '초안'}</strong> {r.clientName || '업체?'}{r.periodStart ? ` · ${r.periodStart}~${r.periodEnd ?? '?'}` : ''}</span>
+                      </div>
+                    ))}
                     {(m.internalEvents ?? []).map((iv, i) => {
                       const op = iv.op ?? (iv.id ? 'update' : 'add');
                       const isUpdate = op === 'update', isDelete = op === 'delete';

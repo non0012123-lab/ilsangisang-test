@@ -8,6 +8,7 @@ import type { ReminderOption } from '../types';
 import { supabase } from '../lib/supabase';
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { todayStr, normDateTime } from '../utils/today';
+import { generateReportForPeriod } from '../utils/monthlyReports';
 import { recurrenceOccurrences } from '../utils/recurrence';
 import { defaultSearchTabs, isRankTrackedCategory, bestRank, effectiveSearchTabs, SEARCH_TAB_ORDER } from '../utils/searchTabs';
 import type { SearchTab } from '../types';
@@ -1228,6 +1229,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             guaranteedCount: g.guaranteedCount, achievedCount: countAchieved(g),
             alertOffset: g.alertOffset, cycle: g.cycle, closed: g.closed, status: g.status,
           })),
+          // 월간 보고서(기존 초안/발행 상태) — "○○ 보고서 발행해줘", 중복/발행 판단용
+          reports: reportsRef.current.slice(0, 80).map(r => ({
+            id: r.id, clientName: r.clientName, period: r.period,
+            status: r.status ?? 'published', periodStart: r.periodStart, periodEnd: r.periodEnd,
+          })),
           entries: scoped.map(e => ({
             id: e.id, date: e.date, endDate: e.endDate ?? null,
             managerName: e.managerName, clientName: e.clientName,
@@ -1268,6 +1274,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         notices: Array.isArray(data.notices) ? data.notices : [],
         internalEvents: Array.isArray(data.internalEvents) ? data.internalEvents : [],
         rankGuarantees: Array.isArray(data.rankGuarantees) ? data.rankGuarantees : [],
+        reports: Array.isArray(data.reports) ? data.reports : [],
         sales: salesEnabled && Array.isArray(data.sales) ? data.sales : [], // 권한 없으면 무시
         accountLookups: Array.isArray(data.accountLookups) ? data.accountLookups.filter((x: unknown) => typeof x === 'string') : [],
         siteLookups: Array.isArray(data.siteLookups) ? data.siteLookups.filter((x: unknown) => typeof x === 'string') : [],
@@ -1969,6 +1976,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
       undo.rankGuaranteeIds!.push(rgId);
       count += 1;
+    });
+
+    // N) 월간 보고서 초안 생성/발행 — AI 요약이 비동기라 fire-and-forget(완료되면 saveReport).
+    //  draft=담당자 검토용(클라 비노출), publish=클라이언트 페이지에 발행(status='published').
+    (msg.reports ?? []).forEach(r => {
+      const cid = resolveClient(r.clientName) || (r.clientId ?? '');
+      const client = clientsRef.current.find(c => c.id === cid);
+      if (!client || !r.periodStart || !r.periodEnd) {
+        skipped.push(`보고서 ${r.clientName || ''} — ${!client ? '업체 미지정' : '기간 미지정'}`);
+        return;
+      }
+      const publish = r.op === 'publish';
+      count += 1;
+      void (async () => {
+        try {
+          saveReport(await generateReportForPeriod({
+            client, allEntries: entriesRef.current, start: r.periodStart!, end: r.periodEnd!,
+            status: publish ? 'published' : 'draft', releaseDate: publish ? todayStr() : undefined,
+          }));
+        } catch { /* 생성 실패 — 보고서 탭에서 재시도 가능 */ }
+      })();
     });
 
     mutateMessages(convId, prev => prev.map((m, i) => i === index ? { ...m, applied: count, skipped: skipped.length ? skipped : undefined, undo } : m));
