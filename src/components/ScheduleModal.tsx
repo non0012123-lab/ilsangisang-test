@@ -8,7 +8,7 @@ import { MAX_IMAGES, entryImages } from '../utils/entryImages';
 import { openExternal } from '../utils/openExternal';
 import { recurrenceOccurrences } from '../utils/recurrence';
 import { CATEGORY_GROUPS, CATEGORY_METRICS, catLabel } from '../data/categories';
-import { SEARCH_TAB_ORDER, SEARCH_TAB_LABEL, SEARCH_TAB_SHORT, isRankTrackedCategory, isMultiLinkCategory, defaultSearchTabs, foundRanks } from '../utils/searchTabs';
+import { SEARCH_TAB_ORDER, SEARCH_TAB_LABEL, SEARCH_TAB_SHORT, isRankTrackedCategory, isMultiLinkCategory, entryLinks, defaultSearchTabs, foundRanks } from '../utils/searchTabs';
 
 // 반복 옵션(UI) → Recurrence 규칙 매핑. 'none' 이면 반복 없음(단건).
 type RecurOpt = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
@@ -63,7 +63,7 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
       // 다건(여론작업·배포성) 편집 시 레거시 호환: links 없으면 단일 link 에서, 주제는 keyword(없으면 옛 opinionTitle)로.
       const e: Partial<ScheduleEntry> = { ...entry };
       if (isMultiLinkCategory(e.category)) {
-        if (!e.links || e.links.length === 0) e.links = e.link ? [e.link] : [];
+        e.links = entryLinks(e); // 붙어있던 레거시 링크도 URL 단위로 분리해 편집
         if (!e.keyword && e.opinionTitle) e.keyword = e.opinionTitle;
       }
       return e;

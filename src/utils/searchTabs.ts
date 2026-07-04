@@ -32,9 +32,19 @@ export const isRankTrackedCategory = (c?: Category | string): boolean =>
 export const isMultiLinkCategory = (c?: Category | string): boolean =>
   c === '네이버 여론작업' || c === '블로그 배포' || c === '카페 배포';
 
-// entry 의 링크 목록(다건). links 우선, 없으면 단일 link 를 1개로 취급.
-export const entryLinks = (e: { links?: string[]; link?: string }): string[] =>
-  (e.links && e.links.length ? e.links : (e.link ? [e.link] : [])).filter(Boolean);
+// 한 문자열에 붙어있거나(구분자 없음) 공백/줄바꿈으로 나열된 여러 URL을 각각으로 분리.
+//  예: "https://a.com/1https://b.com/2" → ["https://a.com/1","https://b.com/2"] (레거시 여론작업 데이터 보정)
+export const splitUrls = (s?: string): string[] =>
+  (s ?? '')
+    .split(/\s+|(?=https?:\/\/)/i)      // 공백 또는 http(s):// 앞에서 분리(구분자 유지)
+    .map(x => x.trim())
+    .filter(x => /^https?:\/\//i.test(x));
+
+// entry 의 링크 목록(다건). links 우선, 없으면 단일 link 를 URL 단위로 분리. 붙어있던 레거시도 각각으로.
+export const entryLinks = (e: { links?: string[]; link?: string }): string[] => {
+  const arr = e.links && e.links.length ? e.links : (e.link ? [e.link] : []);
+  return arr.flatMap(splitUrls);
+};
 
 // 카테고리별 기본 선택 탭. 블로그(상위노출/관리)는 통합/블로그 어디든 잡히면 되므로 둘 다 기본.
 export const defaultSearchTabs = (c?: Category | string): SearchTab[] => {

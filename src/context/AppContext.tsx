@@ -10,7 +10,7 @@ import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { todayStr, normDateTime } from '../utils/today';
 import { generateReportForPeriod } from '../utils/monthlyReports';
 import { recurrenceOccurrences } from '../utils/recurrence';
-import { defaultSearchTabs, isRankTrackedCategory, bestRank, effectiveSearchTabs, SEARCH_TAB_ORDER } from '../utils/searchTabs';
+import { defaultSearchTabs, isRankTrackedCategory, isMultiLinkCategory, splitUrls, bestRank, effectiveSearchTabs, SEARCH_TAB_ORDER } from '../utils/searchTabs';
 import type { SearchTab } from '../types';
 import { fireDesktop, requestNotifyPermission, isNotifySupported } from '../utils/notifications';
 import { useAuth } from './AuthContext';
@@ -1520,10 +1520,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ? e.category
         : ([...ASSISTANT_CATEGORIES].sort((a, b) => b.length - a.length).find(c => e.category?.includes(c)) ?? '기타')) as Category;
       const endDate = e.endDate && e.endDate !== 'null' && e.endDate > e.date ? e.endDate : undefined;
+      // 다건(여론작업·배포): links 배열 + link(문자열)에서 URL을 각각 분리 → links[](건수). link 은 첫 링크.
+      const mlinks = isMultiLinkCategory(category)
+        ? Array.from(new Set([...(Array.isArray(e.links) ? e.links : []), ...(e.link ? [e.link] : [])].flatMap(splitUrls)))
+        : [];
       const base = {
         managerId, managerName,
         category, keyword: e.keyword || undefined, clientId, clientName: clientNameOf(clientId),
-        link: e.link || undefined,
+        link: mlinks.length ? mlinks[0] : (e.link || undefined),
+        ...(mlinks.length ? { links: mlinks } : {}),
         rank: parseRank(e.rank), // "키워드 N위로 등록" → 순위 N ("3위"/"3등" 등 비정형 표기도 허용)
         status: (['pending', 'in-progress', 'completed'].includes(e.status ?? '') ? e.status : 'pending') as ScheduleStatus,
         // 순위추적 카테고리면 수집 대상 탭을 기본값으로 채워 등록 → '수정' 한 번 안 눌러도 바로 수집 대상.
@@ -1598,7 +1603,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       // 스케줄 링크: 문자열이면 추가/수정, 빈 문자열("")이면 삭제, null/생략이면 변경 안 함
-      if (up.link !== undefined && up.link !== null && up.link !== 'null') patch.link = up.link ? up.link : undefined;
+      //  다건(여론작업·배포)이면 붙어있는/여러 URL을 각각으로 분리해 links[]로(건수 반영).
+      if (up.link !== undefined && up.link !== null && up.link !== 'null') {
+        if (isMultiLinkCategory(cur.category)) {
+          const ls = splitUrls(up.link);
+          patch.links = ls.length ? ls : undefined;
+          patch.link = ls[0];
+        } else {
+          patch.link = up.link ? up.link : undefined;
+        }
+      }
       // 순위 변경. 순위추적(블로그/카페) 카테고리는 탭별(rankByTab)로 반영해야 표에 보인다.
       //  → 수집기 안 돌리고 한 키워드만 직접 고칠 때. 손댄 탭은 수집시각=현재로 기록.
       const r = parseRank(up.rank);

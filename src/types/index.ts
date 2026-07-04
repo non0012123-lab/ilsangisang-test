@@ -87,7 +87,7 @@ export interface AiPlanResult {
 // 있으면 제안 카드에서 클릭해 고르게 하고, 고른 값이 category 로 확정된다.
 // categorySignal: 키워드에서 떼어낸 업무 신호어(예: "관리"). 후보 중 '기타'를 고르면(=카테고리가 업무를
 //   못 담으므로) 이 신호어를 키워드에 되돌려 붙인다(예: "홈페이지" → "홈페이지 관리").
-export interface AssistantProposalEntry { date?: string; endDate?: string | null; managerName?: string; clientName?: string; category?: string; categoryOptions?: string[]; categorySignal?: string; keyword?: string; status?: string; link?: string; rank?: number | string; recurrence?: Recurrence }
+export interface AssistantProposalEntry { date?: string; endDate?: string | null; managerName?: string; clientName?: string; category?: string; categoryOptions?: string[]; categorySignal?: string; keyword?: string; status?: string; link?: string; links?: string[]; rank?: number | string; recurrence?: Recurrence }
 // 변경 대상 식별: id 가 1순위지만, AI 가 긴 내부 id 를 틀리게 옮기는 경우가 많아
 // clientName·keyword·matchDate(=대상 일정의 날짜) 로도 기존 일정을 찾을 수 있게 한다.
 export interface AssistantProposalUpdate { id?: string; clientName?: string; keyword?: string; matchDate?: string | null; date?: string | null; endDate?: string | null; managerName?: string | null; status?: string | null; category?: string | null; link?: string | null; rank?: number | string | null; rankByTab?: Partial<Record<SearchTab, number | string | null>> }
