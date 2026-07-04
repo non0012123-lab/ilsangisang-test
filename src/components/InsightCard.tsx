@@ -23,6 +23,12 @@ export default function InsightCard({ breakdown, dateLabel, narrative, aiGenerat
   const { total, completed, byCategory, ranked } = breakdown;
   const empty = total === 0;
 
+  // 핵심(메인) 키워드와 롱테일(세부) 키워드를 분리 — 한 카드 안에서 각각 별도 섹션으로 보여준다.
+  const mains = ranked.filter(r => r.rank != null && r.keyword);
+  const longtail = ranked
+    .flatMap(r => r.subs.map(s => ({ keyword: s.keyword, rank: s.rank, tabs: s.tabs, parent: r.keyword, category: r.category, link: r.link })))
+    .sort((a, b) => a.rank - b.rank);
+
   return (
     <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-blue-50 p-5 shadow-sm">
       <div className="flex items-center gap-2 mb-3">
@@ -52,35 +58,47 @@ export default function InsightCard({ breakdown, dateLabel, narrative, aiGenerat
             ))}
           </div>
 
-          {/* 순위 잡힌 항목 — 메인키워드 + 서브(롱테일)키워드·순위·링크 */}
-          {ranked.length > 0 && (
+          {/* 핵심(메인) 키워드 순위 — 탭별(통합/블로그/카페) 순위로 표시 */}
+          {mains.length > 0 && (
             <div className="bg-white/70 rounded-xl border border-white p-3 mb-3">
-              <p className="flex items-center gap-1 text-[11px] font-bold text-gray-500 mb-1.5"><Trophy size={12} className="text-amber-500" /> 순위 현황</p>
-              <ul className="space-y-1.5">
-                {ranked.map((r, i) => (
-                  <li key={i} className="text-xs text-gray-700">
-                    {/* 메인키워드 줄 */}
-                    <div className="flex items-center gap-2">
-                      {r.rank != null
-                        ? <span className={`font-bold tabular-nums shrink-0 ${r.rank <= 5 ? 'text-green-600' : 'text-gray-500'}`}>{tabText(r.tabs.length ? r.tabs : [{ tab: 'integrated', rank: r.rank }])}</span>
-                        : <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 rounded px-1.5 py-0.5 shrink-0">세부 노출</span>}
-                      <span className="text-gray-400">·</span>
-                      <span className="font-medium shrink-0">{catLabel(r.category as Category)}</span>
-                      {r.keyword && <span className="truncate">‘{r.keyword}’</span>}
-                      {r.link && (
-                        <a href={r.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-blue-600 hover:underline shrink-0 ml-auto">
-                          <ExternalLink size={12} /> 링크
-                        </a>
-                      )}
-                    </div>
-                    {/* 서브(롱테일)키워드 줄 — 순위 잡힌 것만 */}
-                    {r.subs.map((s, j) => (
-                      <div key={j} className="flex items-center gap-1.5 pl-1 mt-0.5 text-[11px] text-gray-500">
-                        <CornerDownRight size={11} className="text-gray-300 shrink-0" />
-                        <span className={`font-semibold tabular-nums shrink-0 ${s.rank <= 5 ? 'text-green-600' : 'text-gray-400'}`}>{tabText(s.tabs)}</span>
-                        <span className="truncate">‘{s.keyword}’</span>
-                      </div>
-                    ))}
+              <p className="flex items-center gap-1 text-[11px] font-bold text-gray-500 mb-1.5"><Trophy size={12} className="text-amber-500" /> 핵심 키워드 순위</p>
+              <ul className="space-y-1">
+                {mains.map((r, i) => (
+                  <li key={i} className="flex items-center gap-2 text-xs text-gray-700">
+                    <span className={`font-bold tabular-nums shrink-0 ${(r.rank ?? 99) <= 5 ? 'text-green-600' : 'text-gray-500'}`}>{tabText(r.tabs.length ? r.tabs : [{ tab: 'integrated', rank: r.rank! }])}</span>
+                    <span className="text-gray-400">·</span>
+                    <span className="font-medium shrink-0">{catLabel(r.category as Category)}</span>
+                    <span className="truncate">‘{r.keyword}’</span>
+                    {r.link && (
+                      <a href={r.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-blue-600 hover:underline shrink-0 ml-auto">
+                        <ExternalLink size={12} /> 링크
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* 롱테일(세부) 키워드 순위 — 별도 섹션. 어떤 세부 키워드가 어느 탭 몇 위인지 명시 */}
+          {longtail.length > 0 && (
+            <div className="bg-white/60 rounded-xl border border-indigo-100/60 p-3 mb-3">
+              <p className="flex items-center gap-1 text-[11px] font-bold text-gray-500 mb-1.5">
+                <CornerDownRight size={12} className="text-indigo-400" /> 롱테일(세부) 키워드 순위
+                <span className="text-gray-400 font-medium">· {longtail.length}건</span>
+              </p>
+              <ul className="space-y-1">
+                {longtail.map((s, i) => (
+                  <li key={i} className="flex items-center gap-2 text-xs text-gray-700">
+                    <span className={`font-semibold tabular-nums shrink-0 ${s.rank <= 5 ? 'text-green-600' : 'text-gray-500'}`}>{tabText(s.tabs)}</span>
+                    <span className="text-gray-400">·</span>
+                    <span className="truncate">‘{s.keyword}’</span>
+                    {s.parent && <span className="text-[10px] text-gray-400 shrink-0 hidden sm:inline">메인 ‘{s.parent}’</span>}
+                    {s.link && (
+                      <a href={s.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-blue-600 hover:underline shrink-0 ml-auto">
+                        <ExternalLink size={12} /> 링크
+                      </a>
+                    )}
                   </li>
                 ))}
               </ul>

@@ -14,7 +14,7 @@ import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
 import { todayStr } from '../utils/today';
 import { ruleBasedInsight, insightBreakdown } from '../utils/clientInsight';
-import { bestRank, foundRanks } from '../utils/searchTabs';
+import { bestRank, foundRanks, SEARCH_TAB_SHORT } from '../utils/searchTabs';
 import { supabase } from '../lib/supabase';
 import type { ScheduleEntry, ClientInsight } from '../types';
 import { CATEGORIES, catHex } from '../data/categories';
@@ -24,8 +24,12 @@ type Tab = 'dashboard' | 'timetable' | 'reports' | 'keywords';
 const CAT_COLOR: Record<string, string> = Object.fromEntries(CATEGORIES.map(c => [c, catHex(c)]));
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
-// 순위 잡힌 서브(롱테일)키워드 수 — 현황 표에 "+세부 N" 표시용
-const rankedSubCount = (e: ScheduleEntry) => (e.subKeywords ?? []).filter(s => foundRanks(s.rankByTab).length > 0).length;
+// 현황 표 순위칸 — 어느 탭에서 몇 위인지 "통합 3위 · 블로그 5위" 형태로. rankByTab 없으면 대표순위(레거시).
+const tabRankLabel = (e: ScheduleEntry): string => {
+  const fr = foundRanks(e.rankByTab);
+  if (fr.length) return fr.map(f => `${SEARCH_TAB_SHORT[f.tab]} ${f.rank}위`).join(' · ');
+  return e.rank ? `${e.rank}위` : '';
+};
 
 function getCalDays(year: number, month: number) {
   const first = new Date(year, month, 1).getDay();
@@ -599,7 +603,7 @@ export default function ClientPortalPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
-                      {['날짜', '카테고리', '키워드', '링크', '순위', '상태'].map(h => (
+                      {['날짜', '카테고리', '키워드', '링크', '순위(영역)', '상태'].map(h => (
                         <th key={h} className="text-left text-xs font-semibold text-gray-500 px-4 py-3 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -626,10 +630,9 @@ export default function ClientPortalPage() {
                             ) : <span className="text-gray-300 text-xs">-</span>}
                           </td>
                           <td className="px-4 py-3 text-center whitespace-nowrap">
-                            {entry.rank ? <span className="text-blue-700 font-bold text-xs">{entry.rank}위</span> : <span className="text-gray-300 text-xs">-</span>}
-                            {rankedSubCount(entry) > 0 && (
-                              <span className="ml-1 text-[10px] font-semibold text-amber-600" title="순위 잡힌 세부(롱테일) 키워드">+세부 {rankedSubCount(entry)}</span>
-                            )}
+                            {tabRankLabel(entry)
+                              ? <span className="text-blue-700 font-bold text-xs">{tabRankLabel(entry)}</span>
+                              : <span className="text-gray-300 text-xs">-</span>}
                           </td>
                           <td className="px-4 py-3">
                             <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -666,8 +669,7 @@ export default function ClientPortalPage() {
                     </div>
                     <p className="text-sm font-semibold text-gray-900 break-keep">
                       {entry.keyword || '-'}
-                      {entry.rank ? <span className="ml-1.5 text-blue-700 font-bold text-xs">{entry.rank}위</span> : null}
-                      {rankedSubCount(entry) > 0 && <span className="ml-1.5 text-[10px] font-semibold text-amber-600">+세부 {rankedSubCount(entry)}</span>}
+                      {tabRankLabel(entry) && <span className="ml-1.5 text-blue-700 font-bold text-xs">{tabRankLabel(entry)}</span>}
                     </p>
                     {entry.link && (
                       <a href={entry.link} target="_blank" rel="noopener noreferrer"
