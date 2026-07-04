@@ -1086,7 +1086,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 나머지 업체는 "최근 ~180일 + 예정 60일" 윈도우.
     //  ★ 특정 업체를 "언급"하면 그 업체(전량)에 집중하도록 나머지는 소량(250)만 — 목록이 커야 1000+ 이면
     //    모델이 25건짜리 대상 업체를 못 찾고 '없다'고 오답한다(수신 1159건 실측 확인). 미언급 시엔 2000.
-    const othersCap = namedClients.length ? 250 : 2000;
+    const othersCap = namedClients.length ? 250 : 700;
     const windowSet = allEntries
       .filter(e => e.date <= winHi && (e.endDate && e.endDate > e.date ? e.endDate : e.date) >= winLo)
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
@@ -1295,16 +1295,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (Object.keys(n).length === 0) return e; // 네이버 신호 없음/비네이버 → 그대로
         return { ...e, category: n.category ?? e.category, categoryOptions: n.categoryOptions, categorySignal: n.categorySignal, keyword: n.keyword };
       });
-      // 🔧 진단(임시): 언급 업체 관련 일정이 실제로 어시스턴트에 몇 건 전달됐는지 화면에 표시.
-      //  · "관련 0건"인데 스케줄엔 있다 → 데이터 미도달(로드 안 됨/업체명 불일치). · 관련 N건인데 '없다'고 답 → 모델 문제.
-      const inScoped = scoped.filter(isNamedEntry).length;   // 실제 전달된 페이로드 안의 언급-업체 건수
-      const inApp = allEntries.filter(isNamedEntry).length;  // 앱에 로드된 전체 중 언급-업체 건수
-      const asstDiag = namedClients.length
-        ? `\n\n🔧 진단: ${namedClients.join(', ')} — 어시스턴트에 ${inScoped}건 전달(앱 로드 ${inApp}건) · 이번 수신 일정 총 ${scoped.length}건 · 앱 전체 ${allEntries.length}건`
-        : '';
       mutateMessages(convId, prev => [...prev, {
         role: 'assistant',
-        text: (data.reply || '(응답이 비어 있습니다)') + asstDiag,
+        text: data.reply || '(응답이 비어 있습니다)',
         entries: normEntries,
         updates: Array.isArray(data.updates) ? data.updates : [],
         clients: Array.isArray(data.clients) ? data.clients : [],

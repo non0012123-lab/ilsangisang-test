@@ -499,6 +499,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     `사용자: ${req.message}`,
   ].join('\n');
 
+  // ★ 요청이 늘어지면 Cloudflare 가 함수를 죽여 HTML 502 를 내므로, 우리가 먼저 끊고(JSON) 우아하게 안내한다.
+  //   (프롬프트가 크면 OpenAI 응답이 느려져 502 가 났다 — ai-insight 와 동일한 가드.)
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000); // 25s 안에 못 받으면 중단
   let aiRes: Response;
   try {
     aiRes = await fetch('https://api.openai.com/v1/responses', {
@@ -517,10 +521,17 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
         reasoning: { effort: 'low' },
         store: false,
       }),
+      signal: controller.signal,
     });
   } catch (e) {
-    return json({ error: `OpenAI 요청 실패: ${e instanceof Error ? e.message : '네트워크 오류'}` }, 502);
+    clearTimeout(timer);
+    const aborted = (e as Error)?.name === 'AbortError';
+    // ★ 에러도 200(JSON)으로 — Cloudflare 가 5xx 를 자기 HTML 에러페이지(502)로 바꿔 클라이언트가 "연결 불가"로 오인하는 것 방지.
+    return json({ error: aborted
+      ? 'AI 응답이 지연되어 중단됐어요(25초 초과). 잠시 후 다시 시도하거나, 특정 업체·기간을 콕 집어 물어보시면 빨라집니다.'
+      : `OpenAI 요청 실패: ${e instanceof Error ? e.message : '네트워크 오류'}` });
   }
+  clearTimeout(timer);
 
   if (!aiRes.ok) {
     const detail = await aiRes.text();
@@ -534,7 +545,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
         msg = '요청이 일시적으로 한도를 초과했습니다(분당 토큰/요청 제한). 잠시 후 다시 시도해 주세요.';
       }
     }
-    return json({ error: msg, detail: detail.slice(0, 500) }, 502);
+    return json({ error: msg, detail: detail.slice(0, 500) }); // 200 JSON (CF 5xx→HTML 방지)
   }
 
   const data = await aiRes.json();
@@ -543,7 +554,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   try {
     parsed = JSON.parse(content);
   } catch {
-    return json({ error: 'AI 응답을 JSON 으로 해석하지 못했습니다.' }, 502);
+    return json({ error: 'AI 응답을 JSON 으로 해석하지 못했습니다.' }); // 200 JSON (CF 5xx→HTML 방지)
   }
 
   return json({
