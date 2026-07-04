@@ -110,6 +110,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         // 네이티브 알림(웹뷰 웹알림 대신 OS 알림) — 원격 웹 페이지가 IPC 로 호출
         .plugin(tauri_plugin_notification::init())
+        // 외부 링크 열기 — 원격 웹의 openExternal() 이 IPC 로 호출해 OS 기본 브라우저로 연다.
+        //  (웹뷰는 target="_blank"/window.open 으로 새 창·브라우저를 못 열기 때문)
+        .plugin(tauri_plugin_opener::init())
         // 창 위치/크기 기억 — 어시스턴트 퀵바를 듀얼모니터 원하는 자리에 두면 다음에도 그 자리.
         //  VISIBLE 은 저장하지 않음(퀵바는 항상 숨김 상태로 시작 → 단축키로 소환).
         .plugin(
