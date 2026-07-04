@@ -1083,11 +1083,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .filter(n => message.includes(n) || (n.length >= 4 && message.includes(n.slice(0, 4))));
     const isNamedEntry = (e: ScheduleEntry) =>
       namedClients.some(n => !!e.clientName && (e.clientName === n || e.clientName.includes(n) || n.includes(e.clientName)));
-    // 나머지 업체는 "최근 ~180일 + 예정 60일" 윈도우에서 최근 2000건.
+    // 나머지 업체는 "최근 ~180일 + 예정 60일" 윈도우.
+    //  ★ 특정 업체를 "언급"하면 그 업체(전량)에 집중하도록 나머지는 소량(250)만 — 목록이 커야 1000+ 이면
+    //    모델이 25건짜리 대상 업체를 못 찾고 '없다'고 오답한다(수신 1159건 실측 확인). 미언급 시엔 2000.
+    const othersCap = namedClients.length ? 250 : 2000;
     const windowSet = allEntries
       .filter(e => e.date <= winHi && (e.endDate && e.endDate > e.date ? e.endDate : e.date) >= winLo)
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
-      .slice(0, 2000);
+      .slice(0, othersCap);
     const namedSet = namedClients.length ? allEntries.filter(isNamedEntry) : [];
     // 언급 업체 전량 + 윈도우를 합쳐 중복 제거 → "업체별로 묶고(연속) 업체 내 최신순" 정렬.
     //  ★ 업체별 연속 블록이 핵심: 날짜순으로 흩어놓으면 모델이 특정 업체 일정을 끝까지 못 훑고 최근분만 답한다.
