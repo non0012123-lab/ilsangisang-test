@@ -1197,7 +1197,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     mutateMessages(convId, prev => [...prev, { role: 'user', text: message }]);
     setAssistantLoading(true);
     try {
-      const res = await fetch('/api/ai-assistant', {
+      const reqInit: RequestInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1281,13 +1281,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
               : {}),
           })),
         }),
-      });
-      const contentType = res.headers.get('content-type') ?? '';
-      if (!contentType.includes('application/json')) {
-        throw new Error('AI 서버(/api/ai-assistant)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
+      };
+      // OpenAI 지역차단(403)은 함수가 미지원 colo(예: 홍콩)에서 실행될 때 난다. 각 요청은 새 함수 호출이라
+      //  Cloudflare 가 다른 colo(미국 등)에 배치할 수 있으므로, 지역차단이면 잠깐 뒤 한 번 재시도한다.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let data: any = {};
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const res = await fetch('/api/ai-assistant', reqInit);
+        const contentType = res.headers.get('content-type') ?? '';
+        if (!contentType.includes('application/json')) {
+          throw new Error('AI 서버(/api/ai-assistant)에 연결할 수 없습니다. Cloudflare Pages 배포 환경에서 동작합니다.');
+        }
+        data = await res.json();
+        const regionBlocked = typeof data?.error === 'string' && /region_block|unsupported_country|territory|지역/i.test(data.error);
+        if (regionBlocked && attempt < 2) { await new Promise(r => setTimeout(r, 800)); continue; }
+        break;
       }
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error ?? `요청 실패 (${res.status})`);
+      if (data?.error) throw new Error(String(data.error));
       const keywords: string[] = Array.isArray(data.keywords) ? data.keywords.filter((k: unknown) => typeof k === 'string' && k.trim()) : [];
       // 네이버 줄임말 보정: "관리"→블로그관리, "상노"→상위노출(블로그/카페 후보), 키워드에 섞인 신호어 제거
       const normEntries: AssistantProposalEntry[] = (Array.isArray(data.entries) ? data.entries : []).map((e: AssistantProposalEntry) => {

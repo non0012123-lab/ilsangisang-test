@@ -544,6 +544,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       } else if (/rate.?limit|tokens per min|requests per min|TPM|RPM/i.test(detail)) {
         msg = '요청이 일시적으로 한도를 초과했습니다(분당 토큰/요청 제한). 잠시 후 다시 시도해 주세요.';
       }
+    } else if (aiRes.status === 403 && /unsupported_country|country|region|territory/i.test(detail)) {
+      // Cloudflare 함수가 OpenAI 미지원 지역(예: 홍콩 colo)에서 실행될 때. 프론트가 재시도하면 다른 colo에 배치될 수 있음.
+      msg = '서버 위치(지역) 문제로 일시적으로 막혔어요. 잠시 후 다시 시도해 주세요.';
     }
     return json({ error: msg, detail: detail.slice(0, 500) }); // 200 JSON (CF 5xx→HTML 방지)
   }
