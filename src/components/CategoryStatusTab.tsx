@@ -1,11 +1,64 @@
-// 클라이언트 포털 '카테고리별 현황' 탭 — 선택 기간 작업을 카테고리(매체)별로 묶어 카드로.
-//  건수·완료/진행/예정 + (순위추적이면) 최고순위·5위내 수 + 입력된 지표 합계.
-import type { ScheduleEntry, Category, AIMetrics } from '../types';
+// 클라이언트 포털 '카테고리별' 탭 — 카테고리(매체)별로 작업 내역을 아코디언으로 열람.
+//  • 헤더: 카테고리 + 건수 + 완료/진행/예정 요약. 클릭하면 그 카테고리 작업 내역이 펼쳐진다.
+//  • 항목: 날짜·키워드(+링크)·순위(탭 영역)·상태 + 순위추적이면 롱테일 서브키워드, 여론작업이면 내용.
+import { useState } from 'react';
+import { ChevronDown, ChevronRight, ExternalLink, CornerDownRight } from 'lucide-react';
+import type { ScheduleEntry, Category } from '../types';
 import CategoryBadge from './CategoryBadge';
-import { CATEGORY_METRICS } from '../data/categories';
-import { foundRanks } from '../utils/searchTabs';
+import { foundRanks, SEARCH_TAB_SHORT } from '../utils/searchTabs';
 
-const nf = (n: number) => n.toLocaleString('ko-KR');
+// 어느 탭에서 몇 위인지 "통합 3위 · 블로그 5위". rankByTab 없으면 대표순위(레거시).
+const tabRankText = (e: ScheduleEntry): string => {
+  const fr = foundRanks(e.rankByTab);
+  if (fr.length) return fr.map(f => `${SEARCH_TAB_SHORT[f.tab]} ${f.rank}위`).join(' · ');
+  return e.rank ? `${e.rank}위` : '';
+};
+const rankedSubs = (e: ScheduleEntry): { keyword: string; label: string }[] =>
+  (e.subKeywords ?? [])
+    .map(s => ({ keyword: s.keyword, found: foundRanks(s.rankByTab) }))
+    .filter(s => s.found.length > 0)
+    .map(s => ({ keyword: s.keyword, label: s.found.map(f => `${SEARCH_TAB_SHORT[f.tab]} ${f.rank}위`).join(' · ') }));
+
+const STATUS = {
+  completed: { label: '완료', cls: 'bg-green-50 text-green-700' },
+  'in-progress': { label: '진행중', cls: 'bg-blue-50 text-blue-700' },
+  pending: { label: '대기중', cls: 'bg-amber-50 text-amber-700' },
+} as const;
+
+function EntryItem({ e }: { e: ScheduleEntry }) {
+  const st = STATUS[e.status] ?? STATUS.pending;
+  const rank = tabRankText(e);
+  const subs = rankedSubs(e);
+  const isOpinion = e.category === '네이버 여론작업';
+  const title = isOpinion ? (e.opinionTitle ?? '-') : (e.keyword || '-');
+  return (
+    <div className="py-2 border-t border-gray-50 first:border-t-0">
+      <div className="flex items-center gap-2 flex-wrap text-xs">
+        <span className="text-gray-400 whitespace-nowrap shrink-0">{e.date}</span>
+        <span className="font-medium text-gray-800 break-keep">{title}</span>
+        {rank && <span className="text-blue-700 font-bold whitespace-nowrap">{rank}</span>}
+        {e.link && (
+          <a href={e.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-blue-500 hover:underline shrink-0">
+            <ExternalLink size={11} /> 링크
+          </a>
+        )}
+        <span className={`ml-auto shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+      </div>
+      {/* 롱테일(세부) 키워드 */}
+      {subs.map((s, i) => (
+        <div key={i} className="flex items-center gap-1.5 pl-1 mt-0.5 text-[11px] text-gray-500">
+          <CornerDownRight size={11} className="text-gray-300 shrink-0" />
+          <span className="text-indigo-600 font-semibold whitespace-nowrap">{s.label}</span>
+          <span className="truncate">{s.keyword}</span>
+        </div>
+      ))}
+      {/* 여론작업 내용 */}
+      {isOpinion && e.opinionContent && (
+        <p className="text-[11px] text-gray-500 mt-1 leading-relaxed break-keep">{e.opinionContent}</p>
+      )}
+    </div>
+  );
+}
 
 export default function CategoryStatusTab({ entries }: { entries: ScheduleEntry[] }) {
   const byCat = new Map<Category, ScheduleEntry[]>();
@@ -15,46 +68,39 @@ export default function CategoryStatusTab({ entries }: { entries: ScheduleEntry[
     byCat.set(e.category, arr);
   }
   const cats = [...byCat.entries()].sort((a, b) => b[1].length - a[1].length);
+  // 각 카테고리 항목은 최신순 정렬
+  cats.forEach(([, es]) => es.sort((a, b) => b.date.localeCompare(a.date)));
+
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const toggle = (c: string) => setOpen(p => ({ ...p, [c]: !p[c] }));
 
   if (cats.length === 0) {
     return <p className="text-center text-gray-400 py-10 text-sm bg-white border border-gray-100 rounded-2xl">이 기간에 진행된 작업이 없습니다.</p>;
   }
 
   return (
-    <div className="grid sm:grid-cols-2 gap-3">
-      {cats.map(([cat, es]) => {
+    <div className="space-y-2.5">
+      {cats.map(([cat, es], idx) => {
+        const isOpen = open[cat] ?? idx === 0; // 기본: 건수 많은 첫 카테고리만 펼침
         const done = es.filter(e => e.status === 'completed').length;
         const prog = es.filter(e => e.status === 'in-progress').length;
         const pend = es.filter(e => e.status === 'pending').length;
-        // 순위(탭별 잡힌 순위) 요약
-        const ranks = es.flatMap(e => foundRanks(e.rankByTab).map(f => f.rank));
-        const best = ranks.length ? Math.min(...ranks) : null;
-        const top5 = ranks.filter(r => r <= 5).length;
-        // 입력된 지표 합계(값이 있는 것만)
-        const metricVals = (CATEGORY_METRICS[cat] ?? [])
-          .map(m => ({ label: m.label, sum: es.reduce((s, e) => s + (Number(e.metrics?.[m.key as keyof AIMetrics]) || 0), 0) }))
-          .filter(m => m.sum > 0);
-
         return (
-          <div key={cat} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-2 mb-2.5">
+          <div key={cat} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <button onClick={() => toggle(cat)}
+              className="w-full flex items-center gap-2 px-4 py-3 hover:bg-gray-50/70 transition-colors text-left">
+              {isOpen ? <ChevronDown size={16} className="text-gray-400 shrink-0" /> : <ChevronRight size={16} className="text-gray-400 shrink-0" />}
               <CategoryBadge category={cat} />
               <span className="text-xs text-gray-400">{es.length}건</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-              <span className="text-green-600 font-semibold">완료 {done}</span>
-              <span className="text-blue-600 font-semibold">진행 {prog}</span>
-              <span className="text-amber-600 font-semibold">예정 {pend}</span>
-              {best != null && <span className="text-indigo-600 font-semibold ml-auto">최고 {best}위 · 5위내 {top5}건</span>}
-            </div>
-            {metricVals.length > 0 && (
-              <div className="grid grid-cols-3 gap-2 mt-3">
-                {metricVals.slice(0, 6).map(m => (
-                  <div key={m.label} className="bg-gray-50 rounded-lg px-2 py-1.5">
-                    <p className="text-[10px] text-gray-400 truncate">{m.label}</p>
-                    <p className="text-sm font-bold text-gray-900">{nf(m.sum)}</p>
-                  </div>
-                ))}
+              <span className="ml-auto flex items-center gap-2 text-[11px] font-semibold shrink-0">
+                {done > 0 && <span className="text-green-600">완료 {done}</span>}
+                {prog > 0 && <span className="text-blue-600">진행 {prog}</span>}
+                {pend > 0 && <span className="text-amber-600">예정 {pend}</span>}
+              </span>
+            </button>
+            {isOpen && (
+              <div className="px-4 pb-3">
+                {es.map(e => <EntryItem key={e.id} e={e} />)}
               </div>
             )}
           </div>
