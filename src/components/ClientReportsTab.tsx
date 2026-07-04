@@ -1,10 +1,10 @@
 // 담당자용 클라이언트 보고서 관리 탭 — 기간 선택 → 초안 생성 → 검토·수정 → 발행.
-//  • 보고 기준일(30일 주기) 도래 구간은 탭 진입 시 '초안'이 자동 준비된다(발행 전까지 클라이언트에 안 보임).
+//  • 보고 기준일(30일 주기) 도래 구간은 '초안 생성 대기'로 표시되고, 버튼을 눌러야 초안이 생성된다.
 //  • '발행' 해야 클라이언트 페이지(status='published')에 노출된다.
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { Pencil, Save, X, Send, EyeOff, Trash2, RotateCw, Download, Loader2, Plus } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { duePeriods, reportIdFor, generateReportForPeriod } from '../utils/monthlyReports';
+import { duePeriods, reportIdFor, generateReportForPeriod, periodLabel } from '../utils/monthlyReports';
 import { downloadReportPdf } from '../utils/reportPdf';
 import { todayStr } from '../utils/today';
 import type { Client, Report } from '../types';
@@ -28,21 +28,17 @@ export default function ClientReportsTab({ client }: { client: Client }) {
   const mark = (id: string, on: boolean) =>
     setGenerating(s => { const n = new Set(s); on ? n.add(id) : n.delete(id); return n; });
 
-  // 탭 진입 시: 공개일이 지난(스케줄 도래) 구간 중 보고서가 아직 없는 것에 '초안'을 자동 생성한다.
-  const genRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    duePeriods(client, todayStr()).forEach(p => {
-      const id = reportIdFor(client.id, p.start);
-      if (reports.some(r => r.id === id) || genRef.current.has(id)) return;
-      genRef.current.add(id);
-      mark(id, true);
-      generateReportForPeriod({ client, allEntries: entries, start: p.start, end: p.end, releaseDate: p.releaseDate, status: 'draft' })
-        .then(saveReport)
-        .finally(() => mark(id, false));
-    });
-    // client 변경 시에만 재판단(중복 생성은 genRef + reports.some 로 차단)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client.id]);
+  // 보고 기준일(30일 주기)이 도래했으나 아직 보고서가 없는 구간 — 버튼을 눌러야 초안이 생성된다(자동 생성 안 함).
+  const pendingPeriods = duePeriods(client, todayStr())
+    .filter(p => !reports.some(r => r.id === reportIdFor(client.id, p.start)));
+
+  const generatePeriod = async (p: { start: string; end: string; releaseDate: string }) => {
+    const id = reportIdFor(client.id, p.start);
+    mark(id, true);
+    try {
+      saveReport(await generateReportForPeriod({ client, allEntries: entries, start: p.start, end: p.end, releaseDate: p.releaseDate, status: 'draft' }));
+    } finally { mark(id, false); }
+  };
 
   const startEdit = (r: Report) => { setEditId(r.id); setDraftSummary(r.summary); setDraftHighlights((r.highlights ?? []).join('\n')); };
   const saveEdit = (r: Report) => {
@@ -76,9 +72,32 @@ export default function ClientReportsTab({ client }: { client: Client }) {
       <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
         <p className="text-xs font-bold text-blue-700 mb-1">📄 클라이언트 보고서</p>
         <p className="text-xs text-blue-600 leading-relaxed">
-          보고 기준일(30일 주기)이 도래한 구간은 <b>초안</b>이 자동 준비됩니다. 내용을 검토·수정한 뒤 <b>발행</b>하면 클라이언트 페이지에 표시됩니다. 원하는 기간으로 직접 만들 수도 있어요.
+          보고 기준일(30일 주기)이 도래한 구간은 아래 <b>‘초안 생성 대기’</b>에 표시됩니다. 버튼을 눌러 초안을 만들고, 내용을 검토·수정한 뒤 <b>발행</b>하면 클라이언트 페이지에 표시됩니다. 원하는 기간으로 직접 만들 수도 있어요.
         </p>
       </div>
+
+      {/* 초안 생성 대기 구간 — 버튼을 눌러야 생성됨 */}
+      {pendingPeriods.length > 0 && (
+        <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+          <p className="text-xs font-bold text-amber-700 mb-2">초안 생성 대기 ({pendingPeriods.length})</p>
+          <div className="space-y-2">
+            {pendingPeriods.map(p => {
+              const busy = generating.has(reportIdFor(client.id, p.start));
+              return (
+                <div key={p.start} className="flex items-center justify-between gap-2 bg-white rounded-xl px-3 py-2">
+                  <span className="text-xs text-gray-700 min-w-0">
+                    <b>{periodLabel(p.start, p.end)}</b> <span className="text-gray-400">{p.start} ~ {p.end}</span>
+                  </span>
+                  <button onClick={() => generatePeriod(p)} disabled={busy}
+                    className={`${btn} bg-amber-600 text-white hover:bg-amber-700 shrink-0`}>
+                    {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} 초안 생성
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 기간 지정 생성 */}
       <div className="bg-white border border-gray-100 rounded-2xl p-4">
@@ -99,7 +118,7 @@ export default function ClientReportsTab({ client }: { client: Client }) {
       {/* 목록 */}
       {clientReports.length === 0 && generating.size === 0 ? (
         <p className="text-center text-gray-400 py-10 text-sm bg-white border border-gray-100 rounded-2xl">
-          보고서가 없습니다. 위에서 기간을 지정하거나, 보고 기준일이 도래하면 초안이 자동 생성됩니다.
+          보고서가 없습니다. 위에서 기간을 지정하거나, ‘초안 생성 대기’ 구간의 버튼으로 초안을 만들어 보세요.
         </p>
       ) : (
         <div className="space-y-3">
