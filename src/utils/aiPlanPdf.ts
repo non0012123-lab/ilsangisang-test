@@ -1,4 +1,5 @@
 import type { AiPlanResult } from '../types';
+import { printHtml } from './printDoc';
 
 // HTML 이스케이프
 function esc(s: string): string {
@@ -75,8 +76,6 @@ export function openAiPlanPrint(plan: AiPlanResult) {
   </div>
 </body></html>`;
 
-  const win = window.open('', '_blank', 'width=960,height=900');
-  if (!win) { alert('팝업이 차단되었습니다. 브라우저에서 팝업을 허용해주세요.'); return; }
-  win.document.write(html);
-  win.document.close();
+  // 팝업(window.open) 대신 숨은 iframe 로 인쇄 → 데스크톱 앱/팝업차단 환경에서도 동작.
+  printHtml(html);
 }

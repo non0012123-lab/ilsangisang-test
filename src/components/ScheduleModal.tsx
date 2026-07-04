@@ -5,6 +5,7 @@ import { useApp } from '../context/AppContext';
 import ImageDropzone from './ImageDropzone';
 import ImageThumb from './ImageThumb';
 import { MAX_IMAGES, entryImages } from '../utils/entryImages';
+import { openExternal } from '../utils/openExternal';
 import { recurrenceOccurrences } from '../utils/recurrence';
 import { CATEGORY_GROUPS, CATEGORY_METRICS, catLabel } from '../data/categories';
 import { SEARCH_TAB_ORDER, SEARCH_TAB_LABEL, SEARCH_TAB_SHORT, isRankTrackedCategory, defaultSearchTabs, foundRanks } from '../utils/searchTabs';
@@ -418,7 +419,7 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
             {images.length > 0 && (
               <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 mb-2">
                 {images.map((img, i) => (
-                  <ImageThumb key={i} img={img} onClick={() => window.open(img.url, '_blank')} onToggleKind={() => toggleKind(i)} onRemove={() => removeImage(i)} />
+                  <ImageThumb key={i} img={img} onClick={() => openExternal(img.url)} onToggleKind={() => toggleKind(i)} onRemove={() => removeImage(i)} />
                 ))}
               </div>
             )}

@@ -4,7 +4,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import { runSilentUpdate } from './utils/tauriUpdate';
 import { startVersionWatch } from './utils/versionCheck';
-import { getWindowLabel, onNotificationActivated, focusCurrentWindow } from './utils/tauriWindow';
+import { getWindowLabel, onNotificationActivated, focusCurrentWindow, isTauri } from './utils/tauriWindow';
+import { openExternal } from './utils/openExternal';
 import { todayStr } from './utils/today';
 import type { AuthUser } from './types';
 
@@ -126,6 +127,26 @@ function DayBoundaryHome() {
   return null;
 }
 
+// 데스크톱 앱(Tauri) 외부 링크 처리 — 웹뷰는 target="_blank"/새 창을 못 여므로,
+//  http(s) 링크 클릭을 가로채(capture) OS 기본 브라우저에서 연다. 웹에서는 아무것도 하지 않는다(기존 동작 유지).
+//  내부 라우팅(/...)·앵커(#)·blob 다운로드 링크는 건드리지 않는다.
+function ExternalLinkInterceptor() {
+  useEffect(() => {
+    if (!isTauri()) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0) return;
+      const a = (e.target as HTMLElement | null)?.closest?.('a');
+      const href = a?.getAttribute('href') ?? '';
+      if (!/^https?:\/\//i.test(href)) return; // 외부 http(s) 링크만
+      e.preventDefault();
+      void openExternal(href);
+    };
+    document.addEventListener('click', onClick, true); // capture: React onClick 보다 먼저
+    return () => document.removeEventListener('click', onClick, true);
+  }, []);
+  return null;
+}
+
 function FullScreenLoader() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -229,6 +250,7 @@ export default function App() {
       <AuthProvider>
         <AppProvider>
           <AssistantWindowGuard />
+          <ExternalLinkInterceptor />
           <TauriNotificationRouter />
           <DayBoundaryHome />
           <AppRoutes />

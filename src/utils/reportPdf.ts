@@ -4,6 +4,7 @@ import { entryImages } from './entryImages';
 import { buildGalleryGroups } from './galleryGroups';
 import { catHex as categoryColor, catLabel, CATEGORY_ICON, NAVER_FAMILY } from '../data/categories';
 import { isRankTrackedCategory, foundRanks, SEARCH_TAB_SHORT } from './searchTabs';
+import { printHtml } from './printDoc';
 
 // rankByTab → "통합 4위 · 블로그 2위"(잡힌 탭만). 없으면 빈 문자열.
 function tabRankText(rbt?: Partial<Record<'integrated' | 'blog' | 'cafe', number | null>>): string {
@@ -334,9 +335,6 @@ ${galleryHtml ? `
 }
 
 export function downloadReportPdf(report: Report, client: Client, allEntries: ScheduleEntry[]) {
-  const html = buildReportHtml(report, client, allEntries);
-  const win = window.open('', '_blank', 'width=960,height=900');
-  if (!win) { alert('팝업이 차단되었습니다. 브라우저에서 팝업을 허용해주세요.'); return; }
-  win.document.write(html);
-  win.document.close();
+  // 팝업(window.open) 대신 숨은 iframe 로 인쇄 → 데스크톱 앱/팝업차단 환경에서도 동작.
+  printHtml(buildReportHtml(report, client, allEntries));
 }
