@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSessionState } from '../hooks/usePersisted';
 import {
   Plus, Mail, Calendar, X, Pencil, Users, Phone, Save, Check, Copy, Sparkles,
   Link2, FileText, AlertTriangle, MessageSquare, BookOpen, ChevronDown, ChevronUp,
-  Trash2, ImageIcon, Download, Wallet, Wand2, Loader2, Search,
+  Trash2, ImageIcon, Download, Wallet, Wand2, Loader2, Search, Eye,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
@@ -163,6 +164,7 @@ function StatusDot({ status }: { status: Client['status'] }) {
 export default function ClientManagementPage() {
   const { entries, clients, saveClient, removeClient, handoverDocs, saveHandover, aiHistory } = useApp();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
 
   const [selected, setSelected] = useState<Client | null>(null);
@@ -484,6 +486,10 @@ export default function ClientManagementPage() {
                     <option value="pending">대기</option>
                     <option value="inactive">비활성</option>
                   </select>
+                  <button onClick={() => navigate(`/client-portal/preview/${selected.id}`)}
+                    className="flex items-center gap-2 px-4 py-2 border border-blue-200 text-blue-600 rounded-xl text-sm hover:bg-blue-50 transition-colors">
+                    <Eye size={14} /> 클라이언트 화면 보기
+                  </button>
                   <button onClick={() => openEdit(selected)}
                     className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition-colors">
                     <Pencil size={14} /> 정보 수정

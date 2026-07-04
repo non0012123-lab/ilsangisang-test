@@ -187,6 +187,8 @@ function AppRoutes() {
       <Route path="/client" element={<ProtectedRoute><ClientSchedulePage /></ProtectedRoute>} />
       <Route path="/client/:clientId" element={<ProtectedRoute><ClientSchedulePage /></ProtectedRoute>} />
       <Route path="/clients" element={<ProtectedRoute><ClientManagementPage /></ProtectedRoute>} />
+      {/* 클라이언트 화면 내부 미리보기 — 직원 전용(클라이언트 계정 없이 각 업체 대시보드 열람, 읽기 전용) */}
+      <Route path="/client-portal/preview/:clientId" element={<ProtectedRoute><ClientPortalPage /></ProtectedRoute>} />
       <Route path="/vendors" element={<ProtectedRoute><VendorManagementPage /></ProtectedRoute>} />
       <Route path="/approvals" element={<ProtectedRoute adminOnly><ApprovalsPage /></ProtectedRoute>} />
       <Route path="/timetable" element={<ProtectedRoute><TimetablePage /></ProtectedRoute>} />

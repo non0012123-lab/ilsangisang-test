@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare, CalendarRange, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Download, FileText, TrendingUp, CheckCircle2, Clock, Calendar, LogOut, BarChart3, ExternalLink, MessageSquare, CalendarRange, ChevronLeft, ChevronRight, Search, Eye } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { duePeriods, reportIdFor, aggregateForPeriod, periodLabel, fallbackSummary, fallbackHighlights } from '../utils/monthlyReports';
@@ -249,8 +250,15 @@ export default function ClientPortalPage() {
   const { user, logout } = useAuth();
   const { entries: allEntries, clients, reports: allReports, saveReport, entriesLoaded } = useApp();
   const [tab, setTab] = useState<Tab>('dashboard');
+  const navigate = useNavigate();
 
-  const clientId = user?.clientId ?? '';
+  // 내부 미리보기 모드 — 직원이 /client-portal/preview/:clientId 로 진입하면 URL 의 업체를 열람한다.
+  //  로그인한 클라이언트 계정 없이도 각 클라이언트가 보는 화면을 그대로 확인(읽기 전용). 아래 isPreview 로
+  //  DB 쓰기(보고서 자동생성·인사이트 캐시 저장)와 로그아웃을 모두 막는다.
+  const { clientId: previewClientId } = useParams<{ clientId: string }>();
+  const isPreview = !!previewClientId;
+
+  const clientId = previewClientId ?? user?.clientId ?? '';
   // 데모(쇼케이스) 계정 — Supabase 공유 데이터 대신 코드 내장 정적 데이터를 주입한다.
   // DB 에 아무것도 쓰지 않으므로 내부 시스템(관리/대시보드/보고서)에 절대 노출되지 않는다.
   const isDemo = clientId === DEMO_CLIENT_ID;
@@ -266,7 +274,7 @@ export default function ClientPortalPage() {
         .sort((a, b) => (b.periodEnd ?? b.date).localeCompare(a.periodEnd ?? a.date));
   const genRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!client || isDemo) return; // 데모는 DB 저장(saveReport)을 하지 않는다
+    if (!client || isDemo || isPreview) return; // 데모·내부 미리보기는 DB 저장(saveReport)을 하지 않는다
     duePeriods(client, TODAY).forEach(p => {
       const id = reportIdFor(client.id, p.start);
       if (allReports.some(r => r.id === id) || genRef.current.has(id)) return;
@@ -303,7 +311,7 @@ export default function ClientPortalPage() {
         });
       })();
     });
-  }, [client, isDemo, allReports, allEntries, TODAY, saveReport]);
+  }, [client, isDemo, isPreview, allReports, allEntries, TODAY, saveReport]);
 
   // 마케팅 현황 기간 — 기본은 '당일'(오늘 작업 기준), 지난 7일/30일/기간 지정으로 전환 가능
   const [preset, setPreset] = useState<'day' | '7d' | '30d' | 'custom'>('day');
@@ -370,8 +378,8 @@ export default function ClientPortalPage() {
       return { id, clientId, preset: p, showDate: TODAY, rangeFrom: from, rangeTo: to, narrative: c.narrative, aiGenerated: false, createdAt: Date.now() };
     };
 
-    // 데모·기간지정(custom): AI/캐시 없이 규칙기반 코멘트 즉시
-    if (isDemo || !aiPreset) { setInsight(makeFallback(`${clientId}-${preset}-${TODAY}`, aiPreset ?? 'day')); return; }
+    // 데모·내부 미리보기·기간지정(custom): AI/캐시(DB 쓰기) 없이 규칙기반 코멘트 즉시
+    if (isDemo || isPreview || !aiPreset) { setInsight(makeFallback(`${clientId}-${preset}-${TODAY}`, aiPreset ?? 'day')); return; }
 
     const key = `${clientId}-${aiPreset}-${TODAY}`;
     const mem = insightCacheRef.current.get(key);
@@ -425,14 +433,18 @@ export default function ClientPortalPage() {
     return () => { cancelled = true; };
     // entries 는 ref 로 읽음. 범위(preset·from·to)·로그인·로드완료 변화에만 재실행.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client?.id, client?.name, isDemo, tab, preset, entriesLoaded, TODAY, insightScope.from, insightScope.to]);
+  }, [client?.id, client?.name, isDemo, isPreview, tab, preset, entriesLoaded, TODAY, insightScope.from, insightScope.to]);
 
   if (!client) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <p className="text-gray-500">클라이언트 정보를 찾을 수 없습니다.</p>
-          <button onClick={logout} className="mt-4 text-blue-600 hover:underline text-sm">로그아웃</button>
+          {isPreview ? (
+            <button onClick={() => navigate('/clients')} className="mt-4 text-blue-600 hover:underline text-sm">클라이언트 관리로 돌아가기</button>
+          ) : (
+            <button onClick={logout} className="mt-4 text-blue-600 hover:underline text-sm">로그아웃</button>
+          )}
         </div>
       </div>
     );
@@ -440,8 +452,24 @@ export default function ClientPortalPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 overflow-x-clip">
+      {/* 내부 미리보기 배너 — 직원이 클라이언트 화면을 열람 중임을 명확히 표시(읽기 전용) */}
+      {isPreview && (
+        <div className="bg-amber-500 text-white text-sm sticky top-0 z-40">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-2 flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2 font-medium min-w-0">
+              <Eye size={15} className="shrink-0" />
+              <span className="truncate">내부 미리보기 · <b>{client.name}</b> 님이 보는 화면 (읽기 전용)</span>
+            </span>
+            <button onClick={() => navigate('/clients')}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-1 bg-white/20 hover:bg-white/30 rounded-lg font-medium transition-colors">
+              ← 관리로 돌아가기
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 sticky top-0 z-30">
+      <header className={`bg-white border-b border-gray-100 sticky z-30 ${isPreview ? 'top-[41px]' : 'top-0'}`}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
@@ -454,10 +482,16 @@ export default function ClientPortalPage() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-500 hidden md:block">{user?.name} 님</span>
-            <button onClick={logout} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-red-500 transition-colors">
-              <LogOut size={14} /> 로그아웃
-            </button>
+            {isPreview ? (
+              <span className="text-sm text-amber-600 font-medium hidden md:block">미리보기 모드</span>
+            ) : (
+              <>
+                <span className="text-sm text-gray-500 hidden md:block">{user?.name} 님</span>
+                <button onClick={logout} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-red-500 transition-colors">
+                  <LogOut size={14} /> 로그아웃
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
