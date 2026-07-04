@@ -1073,10 +1073,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
     };
     const winLo = shiftDay(-180), winHi = shiftDay(60);
+    // 1) 윈도우 필터 → 2) 최근 2000건 유지(오래된 것부터 잘림) → 3) "업체별로 묶고(연속) 업체 내 최신순" 재정렬.
+    //  ★ 업체별 연속 블록이 핵심: 날짜순으로 흩어놓으면 모델이 특정 업체 일정을 끝까지 못 훑고 최근분만 답한다.
     const scoped = allEntries
       .filter(e => e.date <= winHi && (e.endDate && e.endDate > e.date ? e.endDate : e.date) >= winLo)
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
-      .slice(0, 2000);
+      .slice(0, 2000)
+      .sort((a, b) =>
+        a.clientName < b.clientName ? -1 : a.clientName > b.clientName ? 1
+        : (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
     const activeClients = clientsRef.current.filter(c => c.status !== 'inactive');
     // 가이드라인 질문에 답하기 위해 인수인계 문서·AI 기획 결과를 함께 전달
     const clientNameOf = (id: string, fallback: string) => clientsRef.current.find(c => c.id === id)?.name ?? fallback;
