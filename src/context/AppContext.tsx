@@ -1073,15 +1073,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
     };
     const winLo = shiftDay(-180), winHi = shiftDay(60);
-    // 1) 윈도우 필터 → 2) 최근 2000건 유지(오래된 것부터 잘림) → 3) "업체별로 묶고(연속) 업체 내 최신순" 재정렬.
-    //  ★ 업체별 연속 블록이 핵심: 날짜순으로 흩어놓으면 모델이 특정 업체 일정을 끝까지 못 훑고 최근분만 답한다.
-    const scoped = allEntries
+    // ★ 이번 메시지에서 언급한 업체는 "전량"(기간·상한 무관) 포함한다 — 특정 업체 조회/일괄수정에서 누락 0.
+    //  업체명 전체가 메시지에 있거나(정식명), 앞 4글자('위편장쾌한의원'→'위편장쾌')가 있으면 매칭(줄임말 대응).
+    const namedClients = clientsRef.current
+      .map(c => (c.name ?? '').trim())
+      .filter(n => n.length >= 2 && (message.includes(n) || (n.length >= 4 && message.includes(n.slice(0, 4)))));
+    const isNamedEntry = (e: ScheduleEntry) =>
+      namedClients.some(n => !!e.clientName && (e.clientName === n || e.clientName.includes(n) || n.includes(e.clientName)));
+    // 나머지 업체는 "최근 ~180일 + 예정 60일" 윈도우에서 최근 2000건.
+    const windowSet = allEntries
       .filter(e => e.date <= winHi && (e.endDate && e.endDate > e.date ? e.endDate : e.date) >= winLo)
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
-      .slice(0, 2000)
-      .sort((a, b) =>
-        a.clientName < b.clientName ? -1 : a.clientName > b.clientName ? 1
-        : (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+      .slice(0, 2000);
+    const namedSet = namedClients.length ? allEntries.filter(isNamedEntry) : [];
+    // 언급 업체 전량 + 윈도우를 합쳐 중복 제거 → "업체별로 묶고(연속) 업체 내 최신순" 정렬.
+    //  ★ 업체별 연속 블록이 핵심: 날짜순으로 흩어놓으면 모델이 특정 업체 일정을 끝까지 못 훑고 최근분만 답한다.
+    const scopedMap = new Map<string, ScheduleEntry>();
+    [...namedSet, ...windowSet].forEach(e => scopedMap.set(e.id, e));
+    const scoped = [...scopedMap.values()].sort((a, b) =>
+      a.clientName < b.clientName ? -1 : a.clientName > b.clientName ? 1
+      : (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
     const activeClients = clientsRef.current.filter(c => c.status !== 'inactive');
     // 가이드라인 질문에 답하기 위해 인수인계 문서·AI 기획 결과를 함께 전달
     const clientNameOf = (id: string, fallback: string) => clientsRef.current.find(c => c.id === id)?.name ?? fallback;
