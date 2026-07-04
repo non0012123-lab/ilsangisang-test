@@ -13,7 +13,8 @@ interface Env {
 }
 
 interface CatRow { category?: string; total?: number; completed?: number }
-interface RankRow { category?: string; keyword?: string; rank?: number }
+interface SubRow { keyword?: string; rank?: number }
+interface RankRow { category?: string; keyword?: string; rank?: number; subs?: SubRow[] }
 interface InsightRequest {
   clientName?: string;
   dateLabel?: string;
@@ -45,7 +46,15 @@ const fmtCats = (rows: CatRow[]) => rows.length
   ? rows.map(r => `- ${r.category ?? '-'}: ${r.total ?? 0}건(완료 ${r.completed ?? 0})`).join('\n')
   : '(없음)';
 const fmtRanks = (rows: RankRow[]) => rows.length
-  ? rows.map(r => `- ${[r.category, r.keyword].filter(Boolean).join(' / ')}: ${r.rank}위`).join('\n')
+  ? rows.map(r => {
+      const head = r.rank != null
+        ? `- ${[r.category, r.keyword].filter(Boolean).join(' / ')}: ${r.rank}위`
+        : `- ${[r.category, r.keyword].filter(Boolean).join(' / ')}: (메인 미노출)`;
+      const subs = (r.subs ?? []).filter(s => s.rank != null);
+      return subs.length
+        ? `${head}\n${subs.map(s => `    ↳ 세부 '${s.keyword}': ${s.rank}위`).join('\n')}`
+        : head;
+    }).join('\n')
   : '(순위 잡힌 항목 없음)';
 
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
@@ -63,7 +72,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const developer = [
     '너는 마케팅 대행사가 광고주에게 보여주는 성과 인사이트의 "해석 코멘트"를 쓰는 도우미다. 카테고리별 건수·순위 표는 화면에 따로 보여주므로, 너는 그 수치를 단순 나열하지 말고 의미를 해석하고 다음 액션을 제안한다.',
     '아래 JSON 으로만 응답해(코드펜스 금지): { "narrative": "2~3문장" }',
-    '규칙: 주어진 데이터만 근거로(수치 지어내기 금지). ① 어떤 채널/카테고리가 성과를 견인했는지, ② 순위 성과(상위권 진입 등)의 의미, ③ 구체적인 다음 단계 제안 1가지를 담는다. 표에 이미 있는 숫자를 그대로 반복하기보다 "왜 중요한지/다음에 무엇을"에 집중한다. 데이터가 없으면 "해당 기간 집행된 활동이 없다"고 차분히 안내한다.',
+    '규칙: 주어진 데이터만 근거로(수치 지어내기 금지). ① 어떤 채널/카테고리가 성과를 견인했는지, ② 순위 성과(상위권 진입 등)의 의미 — 메인 키워드뿐 아니라 "↳ 세부"로 표시된 롱테일(서브)키워드 상위노출이 있으면 유입 경로 다변화 관점에서 함께 해석, ③ 구체적인 다음 단계 제안 1가지를 담는다. 표에 이미 있는 숫자를 그대로 반복하기보다 "왜 중요한지/다음에 무엇을"에 집중한다. 데이터가 없으면 "해당 기간 집행된 활동이 없다"고 차분히 안내한다.',
   ].join('\n');
 
   const userInput = [

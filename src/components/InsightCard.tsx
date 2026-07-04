@@ -1,10 +1,15 @@
 // 광고주 포털 "AI 마케팅 인사이트" 카드.
 //  • 구조표(카테고리별 건수·순위·링크)는 부모가 실제 데이터에서 계산(insightBreakdown)해 넘긴다 → 항상 정확.
 //  • narrative 는 그 수치를 해석한 AI 코멘트(없으면 생성 중/규칙기반). 링크는 읽기전용 외부 링크.
-import { Sparkles, ExternalLink, Trophy, Loader2 } from 'lucide-react';
+import { Sparkles, ExternalLink, Trophy, Loader2, CornerDownRight } from 'lucide-react';
 import type { Category } from '../types';
-import type { InsightBreakdown } from '../utils/clientInsight';
+import type { InsightBreakdown, RankedTab } from '../utils/clientInsight';
 import { CATEGORY_ICON, catLabel } from '../data/categories';
+import { SEARCH_TAB_SHORT } from '../utils/searchTabs';
+
+// 탭별 순위를 "통합 4위 · 블로그 2위" 로. 탭이 하나면 "N위" 만.
+const tabText = (tabs: RankedTab[]): string =>
+  tabs.length === 1 ? `${tabs[0].rank}위` : tabs.map(t => `${SEARCH_TAB_SHORT[t.tab]} ${t.rank}위`).join(' · ');
 
 interface Props {
   breakdown: InsightBreakdown;
@@ -47,22 +52,35 @@ export default function InsightCard({ breakdown, dateLabel, narrative, aiGenerat
             ))}
           </div>
 
-          {/* 순위 잡힌 항목 — 키워드·순위·링크 */}
+          {/* 순위 잡힌 항목 — 메인키워드 + 서브(롱테일)키워드·순위·링크 */}
           {ranked.length > 0 && (
             <div className="bg-white/70 rounded-xl border border-white p-3 mb-3">
               <p className="flex items-center gap-1 text-[11px] font-bold text-gray-500 mb-1.5"><Trophy size={12} className="text-amber-500" /> 순위 현황</p>
-              <ul className="space-y-1">
+              <ul className="space-y-1.5">
                 {ranked.map((r, i) => (
-                  <li key={i} className="flex items-center gap-2 text-xs text-gray-700">
-                    <span className={`font-bold tabular-nums ${r.rank <= 5 ? 'text-green-600' : 'text-gray-500'}`}>{r.rank}위</span>
-                    <span className="text-gray-400">·</span>
-                    <span className="font-medium">{catLabel(r.category as Category)}</span>
-                    <span className="truncate">‘{r.keyword}’</span>
-                    {r.link && (
-                      <a href={r.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-blue-600 hover:underline shrink-0 ml-auto">
-                        <ExternalLink size={12} /> 링크
-                      </a>
-                    )}
+                  <li key={i} className="text-xs text-gray-700">
+                    {/* 메인키워드 줄 */}
+                    <div className="flex items-center gap-2">
+                      {r.rank != null
+                        ? <span className={`font-bold tabular-nums shrink-0 ${r.rank <= 5 ? 'text-green-600' : 'text-gray-500'}`}>{tabText(r.tabs.length ? r.tabs : [{ tab: 'integrated', rank: r.rank }])}</span>
+                        : <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 rounded px-1.5 py-0.5 shrink-0">세부 노출</span>}
+                      <span className="text-gray-400">·</span>
+                      <span className="font-medium shrink-0">{catLabel(r.category as Category)}</span>
+                      {r.keyword && <span className="truncate">‘{r.keyword}’</span>}
+                      {r.link && (
+                        <a href={r.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-blue-600 hover:underline shrink-0 ml-auto">
+                          <ExternalLink size={12} /> 링크
+                        </a>
+                      )}
+                    </div>
+                    {/* 서브(롱테일)키워드 줄 — 순위 잡힌 것만 */}
+                    {r.subs.map((s, j) => (
+                      <div key={j} className="flex items-center gap-1.5 pl-1 mt-0.5 text-[11px] text-gray-500">
+                        <CornerDownRight size={11} className="text-gray-300 shrink-0" />
+                        <span className={`font-semibold tabular-nums shrink-0 ${s.rank <= 5 ? 'text-green-600' : 'text-gray-400'}`}>{tabText(s.tabs)}</span>
+                        <span className="truncate">‘{s.keyword}’</span>
+                      </div>
+                    ))}
                   </li>
                 ))}
               </ul>

@@ -4,6 +4,7 @@
 import { useMemo } from 'react';
 import type { ScheduleEntry } from '../types';
 import { catHex as colorOf } from '../data/categories';
+import { collectRanks } from '../utils/clientInsight';
 
 // 업무에서 PV(조회수) 추출 — views 우선, 없으면 블로그/카페 조회 합산
 function pvOf(e: ScheduleEntry): number {
@@ -121,12 +122,10 @@ export default function MarketingCharts({ entries }: { entries: ScheduleEntry[] 
     const channelCount = Object.entries(countByCh).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
     const channelPv = Object.entries(pvByCh).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
 
-    // 순위 — rank 있는 것만, 좋은 순위(작은 값) 상위 8
-    const rankItems = entries
-      .filter(e => e.rank != null)
-      .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
+    // 순위 — 메인 + 서브(롱테일)키워드 통합, 좋은 순위(작은 값) 상위 8. 서브는 '↳' 로 구분.
+    const rankItems = collectRanks(entries)
       .slice(0, 8)
-      .map(e => ({ label: e.keyword ?? e.category, rank: e.rank as number, channel: e.category }));
+      .map(r => ({ label: `${r.isSub ? '↳ ' : ''}${r.keyword || r.category}`, rank: r.rank, channel: r.category }));
 
     const totalPv = entries.reduce((s, e) => s + pvOf(e), 0);
     return { channelCount, channelPv, rankItems, totalPv };

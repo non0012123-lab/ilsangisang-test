@@ -14,6 +14,7 @@ import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
 import { todayStr } from '../utils/today';
 import { ruleBasedInsight, insightBreakdown } from '../utils/clientInsight';
+import { bestRank, foundRanks } from '../utils/searchTabs';
 import { supabase } from '../lib/supabase';
 import type { ScheduleEntry, ClientInsight } from '../types';
 import { CATEGORIES, catHex } from '../data/categories';
@@ -22,6 +23,9 @@ type Tab = 'dashboard' | 'timetable' | 'reports' | 'keywords';
 
 const CAT_COLOR: Record<string, string> = Object.fromEntries(CATEGORIES.map(c => [c, catHex(c)]));
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+// 순위 잡힌 서브(롱테일)키워드 수 — 현황 표에 "+세부 N" 표시용
+const rankedSubCount = (e: ScheduleEntry) => (e.subKeywords ?? []).filter(s => foundRanks(s.rankByTab).length > 0).length;
 
 function getCalDays(year: number, month: number) {
   const first = new Date(year, month, 1).getDay();
@@ -290,7 +294,11 @@ export default function ClientPortalPage() {
               clientName: client.name, industry: client.industry, period: label,
               total: agg.total, completed: agg.completed, totalViews: agg.totalViews, totalLikes: agg.totalLikes, totalSaves: agg.totalSaves,
               byCategory: agg.byCategory,
-              entries: agg.entries.map(e => ({ date: e.date, category: e.category, title: e.opinionTitle ?? e.keyword ?? '', status: e.status, rank: e.rank, views: e.metrics?.views })),
+              entries: agg.entries.map(e => ({
+                date: e.date, category: e.category, title: e.opinionTitle ?? e.keyword ?? '', status: e.status, rank: e.rank, views: e.metrics?.views,
+                // 순위 잡힌 서브(롱테일)키워드도 함께 보내 월간 요약이 롱테일 성과를 반영하게 한다
+                subs: (e.subKeywords ?? []).map(s => ({ keyword: s.keyword, rank: bestRank(s.rankByTab) })).filter(s => s.rank != null),
+              })),
             }),
           });
           if ((res.headers.get('content-type') ?? '').includes('application/json')) {
@@ -313,8 +321,8 @@ export default function ClientPortalPage() {
     });
   }, [client, isDemo, isPreview, allReports, allEntries, TODAY, saveReport]);
 
-  // 마케팅 현황 기간 — 기본은 '당일'(오늘 작업 기준), 지난 7일/30일/기간 지정으로 전환 가능
-  const [preset, setPreset] = useState<'day' | '7d' | '30d' | 'custom'>('day');
+  // 마케팅 현황 기간 — 기본은 '지난 30일'(한 달 성과를 한눈에), 당일/7일/기간 지정으로 전환 가능
+  const [preset, setPreset] = useState<'day' | '7d' | '30d' | 'custom'>('30d');
   const [customFrom, setCustomFrom] = useState(TODAY);
   const [customTo, setCustomTo] = useState(TODAY);
 
@@ -409,7 +417,11 @@ export default function ClientPortalPage() {
             clientName, dateLabel: label, total: bd.total, completed: bd.completed,
             // 인사이트는 집계값만 필요 → 입력을 작게(상위 일부만) 보내 OpenAI 응답을 빠르게(큰 범위 7·30일에서 엣지 타임아웃 502 방지)
             byCategory: bd.byCategory.slice(0, 10),
-            ranked: bd.ranked.slice(0, 12).map(r => ({ category: r.category, keyword: r.keyword, rank: r.rank })),
+            // 메인 순위 + 순위 잡힌 서브(롱테일)키워드를 함께 보내 AI가 롱테일까지 해석하게 한다
+            ranked: bd.ranked.slice(0, 12).map(r => ({
+              category: r.category, keyword: r.keyword, rank: r.rank ?? undefined,
+              subs: r.subs.slice(0, 5).map(s => ({ keyword: s.keyword, rank: s.rank })),
+            })),
           }),
         });
         const ct = res.headers.get('content-type') ?? '';
@@ -613,8 +625,11 @@ export default function ClientPortalPage() {
                               </div>
                             ) : <span className="text-gray-300 text-xs">-</span>}
                           </td>
-                          <td className="px-4 py-3 text-center">
+                          <td className="px-4 py-3 text-center whitespace-nowrap">
                             {entry.rank ? <span className="text-blue-700 font-bold text-xs">{entry.rank}위</span> : <span className="text-gray-300 text-xs">-</span>}
+                            {rankedSubCount(entry) > 0 && (
+                              <span className="ml-1 text-[10px] font-semibold text-amber-600" title="순위 잡힌 세부(롱테일) 키워드">+세부 {rankedSubCount(entry)}</span>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -652,6 +667,7 @@ export default function ClientPortalPage() {
                     <p className="text-sm font-semibold text-gray-900 break-keep">
                       {entry.keyword || '-'}
                       {entry.rank ? <span className="ml-1.5 text-blue-700 font-bold text-xs">{entry.rank}위</span> : null}
+                      {rankedSubCount(entry) > 0 && <span className="ml-1.5 text-[10px] font-semibold text-amber-600">+세부 {rankedSubCount(entry)}</span>}
                     </p>
                     {entry.link && (
                       <a href={entry.link} target="_blank" rel="noopener noreferrer"

@@ -11,7 +11,8 @@ interface Env {
   OPENAI_MODEL?: string;
 }
 
-interface Row { date?: string; category?: string; title?: string; status?: string; rank?: number; views?: number }
+interface SubRow { keyword?: string; rank?: number }
+interface Row { date?: string; category?: string; title?: string; status?: string; rank?: number; views?: number; subs?: SubRow[] }
 interface ReportRequest {
   clientName?: string;
   industry?: string;
@@ -53,13 +54,17 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const entries = Array.isArray(req.entries) ? req.entries.slice(0, 120) : [];
   const cats = (req.byCategory ?? []).map(c => `${c.category} ${c.count}건`).join(', ') || '-';
   const rows = entries.length
-    ? entries.map(r => `- ${[r.date, r.category, r.title, r.status, r.rank ? `${r.rank}위` : '', r.views ? `${r.views}회` : ''].filter(Boolean).join(' / ')}`).join('\n')
+    ? entries.map(r => {
+        const head = `- ${[r.date, r.category, r.title, r.status, r.rank ? `${r.rank}위` : '', r.views ? `${r.views}회` : ''].filter(Boolean).join(' / ')}`;
+        const subs = (r.subs ?? []).filter(s => s.rank != null);
+        return subs.length ? `${head} [세부: ${subs.map(s => `${s.keyword} ${s.rank}위`).join(', ')}]` : head;
+      }).join('\n')
     : '(작업 없음)';
 
   const developer = [
     '너는 마케팅 대행사의 월간 성과 보고서 작성 도우미다. 클라이언트(광고주)에게 보내는 보고서의 요약과 하이라이트를 한국어로 작성한다.',
     '아래 JSON 으로만 응답해(코드펜스 금지): { "summary": "4~6문장 요약", "highlights": ["핵심 성과 3~5개"] }',
-    '규칙: 주어진 수치/작업 내역만 근거로 하고 절대 지어내지 않는다. 광고주가 읽기 좋은 정중하고 자신감 있는 톤. 매체(SNS/유튜브/네이버/디자인제작 등)별 성과와 완료율, 주요 수치를 담는다. 하이라이트는 간결한 명사구.',
+    '규칙: 주어진 수치/작업 내역만 근거로 하고 절대 지어내지 않는다. 광고주가 읽기 좋은 정중하고 자신감 있는 톤. 매체(SNS/유튜브/네이버/디자인제작 등)별 성과와 완료율, 주요 수치를 담는다. 네이버 상위노출은 메인 키워드 순위와 함께, "[세부: …]"로 표시된 롱테일(서브)키워드 상위노출이 있으면 검색 유입 다변화 성과로 함께 언급한다. 하이라이트는 간결한 명사구.',
   ].join('\n');
 
   const userInput = [
