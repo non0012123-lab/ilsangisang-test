@@ -1289,9 +1289,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (Object.keys(n).length === 0) return e; // 네이버 신호 없음/비네이버 → 그대로
         return { ...e, category: n.category ?? e.category, categoryOptions: n.categoryOptions, categorySignal: n.categorySignal, keyword: n.keyword };
       });
+      // 🔧 진단(임시): 언급 업체 관련 일정이 실제로 어시스턴트에 몇 건 전달됐는지 화면에 표시.
+      //  · "관련 0건"인데 스케줄엔 있다 → 데이터 미도달(로드 안 됨/업체명 불일치). · 관련 N건인데 '없다'고 답 → 모델 문제.
+      const asstDiag = namedClients.length
+        ? `\n\n🔧 진단: ${namedClients.join(', ')} 관련 ${namedSet.length}건 어시스턴트에 전달 · 이번 수신 일정 ${scoped.length}건 · 앱 전체 로드 ${allEntries.length}건`
+        : '';
       mutateMessages(convId, prev => [...prev, {
         role: 'assistant',
-        text: data.reply || '(응답이 비어 있습니다)',
+        text: (data.reply || '(응답이 비어 있습니다)') + asstDiag,
         entries: normEntries,
         updates: Array.isArray(data.updates) ? data.updates : [],
         clients: Array.isArray(data.clients) ? data.clients : [],
