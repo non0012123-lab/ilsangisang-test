@@ -1,18 +1,22 @@
 import { useMemo, useState } from 'react';
 import {
   Plus, Search, X, Pencil, Trash2, Target, ListChecks, RotateCw, CheckCircle2, PlayCircle,
-  CalendarPlus, ExternalLink, Link2, Lock, Unlink, FileSpreadsheet,
+  ExternalLink, Link2, Lock, Unlink, FileSpreadsheet, Radar, Loader2,
 } from 'lucide-react';
 import { downloadCsv } from '../utils/exportCsv';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { useRankCollect } from '../hooks/useRankCollect';
 import { todayStr } from '../utils/today';
 import {
-  thresholdOf, isAchieved, STATUS_LABEL, TYPE_LABEL, guaranteeType, progress,
-  appendSample, coveredDays, currentWindow, addDays, DEFAULT_GUARANTEED_DAYS, DEFAULT_WINDOW_DAYS,
+  thresholdOf, isRanked, STATUS_LABEL, TYPE_LABEL, guaranteeType, progress,
+  appendSample, coveredDays, currentWindow, addDays, judgeOf, currentJudged, sampleJudged,
+  JUDGE_PRESETS, judgePresetKey, DEFAULT_GUARANTEED_DAYS, DEFAULT_WINDOW_DAYS, DEFAULT_TARGET_RANK,
+  type Judge,
 } from '../utils/rankGuarantee';
+import { SEARCH_TAB_SHORT, foundRanks, isRankTrackedCategory, effectiveSearchTabs } from '../utils/searchTabs';
 import ClientCombobox from '../components/ClientCombobox';
 import type { RankGuarantee, RankGuaranteeItem, RankGuaranteeStatus, RankGuaranteeType, RankSample, ScheduleEntry } from '../types';
 
@@ -44,12 +48,14 @@ interface FormState {
   guaranteedCount: number;   // count / count_monthly
   guaranteedDays: number;    // keyword_coverage
   windowDays: number;        // keyword_coverage / count_monthly
-  targetRank: number;        // keyword_coverage 신규 항목 기본 목표순위
+  targetRank: number;        // 기본 목표순위 (모든 방식)
+  judgeKey: string;          // 판정탭 프리셋 키 (any/integrated/blog/cafe)
   alertOffset: number;
 }
 const EMPTY_FORM: FormState = {
   clientId: '', title: '', type: 'count_monthly',
-  guaranteedCount: 20, guaranteedDays: DEFAULT_GUARANTEED_DAYS, windowDays: DEFAULT_WINDOW_DAYS, targetRank: 10, alertOffset: 2,
+  guaranteedCount: 20, guaranteedDays: DEFAULT_GUARANTEED_DAYS, windowDays: DEFAULT_WINDOW_DAYS,
+  targetRank: DEFAULT_TARGET_RANK, judgeKey: 'any', alertOffset: 2,
 };
 
 // 방식 선택지(생성 폼). 레거시 count 는 신규 생성에선 노출하지 않는다(기존 데이터만 유지).
@@ -106,7 +112,8 @@ export default function RankGuaranteePage() {
     setForm({
       clientId: rg.clientId, title: rg.title, type: guaranteeType(rg),
       guaranteedCount: rg.guaranteedCount, guaranteedDays: rg.guaranteedDays ?? DEFAULT_GUARANTEED_DAYS,
-      windowDays: rg.windowDays ?? DEFAULT_WINDOW_DAYS, targetRank: 10, alertOffset: rg.alertOffset,
+      windowDays: rg.windowDays ?? DEFAULT_WINDOW_DAYS, targetRank: rg.targetRank ?? DEFAULT_TARGET_RANK,
+      judgeKey: judgePresetKey(rg.judgeTabs), alertOffset: rg.alertOffset,
     });
     setEditId(rg.id);
     setShowForm(true);
@@ -122,21 +129,26 @@ export default function RankGuaranteePage() {
     const windowDays = Math.max(1, Math.floor(form.windowDays) || DEFAULT_WINDOW_DAYS);
     const alertMax = type === 'keyword_coverage' ? guaranteedDays : guaranteedCount;
     const alertOffset = Math.min(alertMax, Math.max(0, Math.floor(form.alertOffset) || 0));
-    const patch = { clientId: client.id, clientName: client.name, title: form.title.trim(), type, guaranteedCount, guaranteedDays, windowDays, alertOffset };
+    const targetRank = Math.max(1, Math.floor(form.targetRank) || DEFAULT_TARGET_RANK);
+    const judgeTabs = JUDGE_PRESETS.find(p => p.key === form.judgeKey)?.tabs ?? JUDGE_PRESETS[0].tabs;
+    const patch = { clientId: client.id, clientName: client.name, title: form.title.trim(), type, guaranteedCount, guaranteedDays, windowDays, targetRank, judgeTabs, alertOffset };
     if (editId) {
       const cur = rankGuarantees.find(r => r.id === editId);
       if (!cur) return;
       // 설정만 바꾼다(items·cycle 보존). saveRankGuarantee 가 status 를 다시 파생한다.
       saveRankGuarantee({ ...cur, ...patch });
     } else {
-      // 건수형만 백필(기존 순위 일정 자동 편입). 키워드 월보장·모니터링은 후보에서 골라 담는다(자동 편입 안 함).
+      // 건수형만 백필: 그 업체의 순위추적 일정을 (순위 없어도) 전량 자동 편입. 키워드 월보장·모니터링은 후보에서 골라 담는다.
       const soleActiveCount = (type === 'count' || type === 'count_monthly')
         && !rankGuarantees.some(r => r.clientId === client.id && !r.closed && (guaranteeType(r) === 'count' || guaranteeType(r) === 'count_monthly'));
       const seed: RankGuaranteeItem[] = soleActiveCount
-        ? entries.filter(e => e.clientId === client.id && e.rank != null).map(e => ({
-            id: genId('rgi'), cycle: 1, entryId: e.id,
-            keyword: e.keyword || '(키워드 없음)', link: e.link, rank: e.rank, rankedAt: todayStr(),
-          }))
+        ? entries.filter(e => e.clientId === client.id && isRankTrackedCategory(e.category) && effectiveSearchTabs(e).length > 0 && !!e.keyword)
+            .map(e => ({
+              id: genId('rgi'), cycle: 1, entryId: e.id,
+              keyword: e.keyword || '(키워드 없음)', link: e.link,
+              rank: e.rank, rankByTab: e.rankByTab, postDate: e.date,
+              rankedAt: e.rank != null ? todayStr() : undefined,
+            }))
         : [];
       saveRankGuarantee({
         id: genId('rg'), ...patch, cycle: 1, closed: false, status: 'active', items: seed,
@@ -286,6 +298,26 @@ export default function RankGuaranteePage() {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
 
+              {/* 목표순위 + 판정탭 — 모든 방식 공통(항목별로 덮어쓰기 가능) */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">목표 순위(이내)</label>
+                  <input type="number" min={1} value={form.targetRank}
+                    onChange={e => setForm(f => ({ ...f, targetRank: Number(e.target.value) }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">판정 기준(노출 탭)</label>
+                  <select value={form.judgeKey} onChange={e => setForm(f => ({ ...f, judgeKey: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {JUDGE_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-400 -mt-1">
+                {form.judgeKey === 'any' ? '통합검색·블로그탭 중 아무데나' : JUDGE_PRESETS.find(p => p.key === form.judgeKey)?.label}에서 <b className="text-gray-500">{form.targetRank || 10}위 이내</b>면 달성으로 봅니다. (항목별 조정 가능)
+              </p>
+
               {(form.type === 'count' || form.type === 'count_monthly') && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
@@ -303,14 +335,14 @@ export default function RankGuaranteePage() {
                     </div>
                   </div>
                   <p className="text-[11px] text-gray-400">
-                    순위가 잡힌 항목만 카운트{form.type === 'count_monthly' ? '(이번 30일 윈도우 기준, 업체 보고 기준일에 정렬)' : ''}됩니다.
+                    등록 시 그 업체의 <b className="text-gray-500">순위추적 작업이 전량 편입</b>됩니다(미수집 포함). 목표순위 이내로 잡힌 건수를{form.type === 'count_monthly' ? ' 이번 30일 윈도우(보고 기준일 정렬) 안에서' : ''} 셉니다.
                   </p>
                 </>
               )}
 
               {form.type === 'keyword_coverage' && (
                 <>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-gray-600 mb-1">보장 일수</label>
                       <input type="number" min={1} value={form.guaranteedDays}
@@ -323,21 +355,15 @@ export default function RankGuaranteePage() {
                         onChange={e => setForm(f => ({ ...f, windowDays: Number(e.target.value) }))}
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-600 mb-1">목표 순위(이내)</label>
-                      <input type="number" min={1} value={form.targetRank}
-                        onChange={e => setForm(f => ({ ...f, targetRank: Number(e.target.value) }))}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    </div>
                   </div>
                   <p className="text-[11px] text-gray-400">
-                    각 키워드가 {form.windowDays || 30}일 중 <b className="text-gray-500">목표 {form.targetRank || 10}위 이내인 날 ≥ {form.guaranteedDays || 25}일</b>이면 충족. 목표 순위는 항목별로 조정할 수 있어요.
+                    각 키워드가 {form.windowDays || 30}일 중 <b className="text-gray-500">{form.guaranteedDays || 25}일 이상</b> 목표순위를 유지하면 충족. 항목 관리에서 키워드를 검색해 담으세요.
                   </p>
                 </>
               )}
 
               {form.type === 'monitor' && (
-                <p className="text-[11px] text-gray-400">목표 없이 주요 키워드의 순위 추이만 추적합니다. 항목 관리에서 일정 불러오기·수동 키워드로 추가하세요.</p>
+                <p className="text-[11px] text-gray-400">목표 없이 주요 키워드의 순위 추이만 추적합니다. 항목 관리에서 키워드를 검색해 담으세요.</p>
               )}
             </div>
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
@@ -371,7 +397,7 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
   const [viewCycle, setViewCycle] = useState(rg.cycle); // 보고 있는 회차(기본=현재). 과거 회차는 읽기전용 이력.
   const isCurrent = viewCycle === rg.cycle;             // 현재 회차만 편집/추가 가능
   const items = rg.items.filter(it => it.cycle === viewCycle);
-  const viewAchieved = items.filter(isAchieved).length; // 보는 회차의 달성 건수(내보내기 라벨/대상)
+  const viewAchieved = items.filter(isRanked).length; // 보는 회차의 순위 잡힌 건수(내보내기 라벨/대상)
   const type = guaranteeType(rg);
   const isCoverage = type === 'keyword_coverage';
   const isMonitor = type === 'monitor';
@@ -380,7 +406,18 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
   const pr = progress(rg, { anchorDate });
   const reached = rg.status === 'reached';
   const linkedEntryIds = new Set(rg.items.filter(it => it.entryId).map(it => it.entryId));
+  const judge = (it: RankGuaranteeItem): Judge => judgeOf(it, rg);
 
+  // 순위 수집 — 현재 회차 연동 항목의 일정을 수집 큐에 넣는다(진행 현황은 좌하단 위젯). 미수집 항목도 포함.
+  const { collect, busy: collecting } = useRankCollect();
+  const collectEntryIds = items.map(it => it.entryId).filter((x): x is string => !!x);
+  const runCollect = async () => {
+    if (!collectEntryIds.length) { flash('수집할 연동 일정이 없습니다. 일정에서 불러온 항목이 있어야 합니다.'); return; }
+    await collect({ entryIds: collectEntryIds, mode: 'all' });
+    flash(`✓ ${collectEntryIds.length}건 순위 수집을 요청했어요 — 진행 현황은 좌하단에 표시됩니다.`);
+  };
+
+  const enterBlur = (e: React.KeyboardEvent) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); };
   const commitItems = (nextItems: RankGuaranteeItem[]) => onChange({ ...rg, items: nextItems });
 
   const addItem = () => {
@@ -394,8 +431,8 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
   const setRank = (it: RankGuaranteeItem, raw: string) => {
     const rank = parseRank(raw);
     const patch: Partial<RankGuaranteeItem> = { rank, rankedAt: rank != null && it.rankedAt == null ? todayStr() : it.rankedAt };
-    // 키워드 월보장·모니터링은 수동 입력도 '오늘 순위' 이력으로 남긴다(수집기 없이 Phase 1 동작 — 오늘 커버리지 반영).
-    if ((isCoverage || isMonitor) && rank != null) patch.samples = appendSample(it.samples, todayStr(), rank);
+    // 이력형(월보장·모니터링) 수동 입력은 '오늘 순위' 단일 샘플로 남긴다(수집기 없이도 동작).
+    if ((isCoverage || isMonitor) && rank != null) patch.samples = appendSample(it.samples, { date: todayStr(), rank });
     else if (rank === it.rank) return; // 건수형: 값 변화 없으면 저장 안 함(불필요한 알림·쓰기 방지)
     patchItem(it.id, patch);
   };
@@ -403,6 +440,11 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
     const t = parseRank(raw);
     if (t === it.targetRank) return;
     patchItem(it.id, { targetRank: t });
+  };
+  const setItemJudge = (it: RankGuaranteeItem, key: string) => {
+    // ''(기본) = 보장 판정탭 따름(undefined). 그 외 프리셋 탭 저장.
+    const tabs = key ? JUDGE_PRESETS.find(p => p.key === key)?.tabs : undefined;
+    patchItem(it.id, { judgeTabs: tabs, targetTab: undefined });
   };
   // 항목 삭제 — 일정 연동 항목이면 그 일정 id 를 제외 목록에 넣어 자동 보정(reconcile)이 되살리지 않게 한다.
   const withExcluded = (entryId: string | undefined) =>
@@ -427,7 +469,8 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
     const created: RankGuaranteeItem[] = picked.map(e => ({
       id: genId('rgi'), cycle: rg.cycle, entryId: e.id,
       keyword: e.keyword || '(키워드 없음)', link: e.link,
-      rank: e.rank, rankedAt: e.rank != null ? todayStr() : undefined,
+      rank: e.rank, rankByTab: e.rankByTab, postDate: e.date,
+      rankedAt: e.rank != null ? todayStr() : undefined,
     }));
     // 수동으로 다시 불러온 일정은 제외 목록에서 해제(이전에 삭제/연동해제했더라도 사용자가 명시적으로 다시 담음).
     const pickedIds = new Set(picked.map(e => e.id));
@@ -465,15 +508,19 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
     setViewCycle(prev);
   };
 
-  // 순위가 잡힌 항목만 엑셀(CSV)로 내보낸다 — 보장 건수 도달 시 전달용. 보고 있는 회차 기준, 순위 오름차순.
+  // 순위가 잡힌 항목만 엑셀(CSV)로 내보낸다 — 보장 건수 도달 시 전달용. 보고 있는 회차 기준, 판정순위 오름차순.
   const exportCsv = async () => {
-    const ranked = items.filter(isAchieved).sort((a, b) => (a.rank! - b.rank!));
+    const ranked = items.filter(isRanked)
+      .map(it => ({ it, jr: currentJudged(it, judge(it)) }))
+      .filter(x => x.jr != null)
+      .sort((a, b) => (a.jr as number) - (b.jr as number));
     if (ranked.length === 0) { alert('이 회차에 순위가 잡힌 항목이 없습니다.'); return; }
-    const rows = ranked.map((it, i) => [i + 1, it.keyword, `${it.rank}위`, it.link ?? '', it.rankedAt ?? '']);
+    const tabStr = (it: RankGuaranteeItem) => foundRanks(it.rankByTab).map(r => `${SEARCH_TAB_SHORT[r.tab]} ${r.rank}위`).join(', ') || (it.rank != null ? `${it.rank}위` : '');
+    const rows = ranked.map((x, i) => [i + 1, x.it.keyword, `${x.jr}위`, tabStr(x.it), x.it.link ?? '', x.it.postDate ?? '']);
     const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '_').trim();
     const cyc = rg.cycle > 1 ? `_${viewCycle}차` : '';
     const res = await downloadCsv(`${safe(rg.clientName)}_${safe(rg.title)}${cyc}_순위보장_${todayStr()}`,
-      ['번호', '키워드', '순위', '링크', '순위기재일'], rows);
+      ['번호', '키워드', '판정순위', '탭별순위', '링크', '포스팅일자'], rows);
     if (res.kind === 'saved') flash(`✓ 다운로드 폴더에 저장했어요 (${ranked.length}건)\n${res.path}`);
     else if (res.kind === 'downloaded') flash(`✓ 다운로드를 시작했어요 — 다운로드 폴더를 확인하세요 (${ranked.length}건)`);
     else if (res.kind === 'shared') flash(`✓ 공유로 내보냈어요 (${ranked.length}건)`);
@@ -547,26 +594,43 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
           </div>
         )}
 
+        {/* 순위 수집 — 이 보장의 연동 일정을 수집 큐에 넣는다(진행은 좌하단 위젯). 항상 노출. */}
+        {isCurrent && (
+          <div className="px-6 pt-4">
+            <div className="flex items-center justify-between gap-2 bg-blue-50/60 border border-blue-100 rounded-xl px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-blue-800">순위 수집</p>
+                <p className="text-[11px] text-blue-500/80 truncate">연동 일정 {collectEntryIds.length}건의 탭별 순위를 지금 수집합니다.</p>
+              </div>
+              <button onClick={runCollect} disabled={collecting || collectEntryIds.length === 0}
+                className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-semibold rounded-lg transition-colors shrink-0">
+                {collecting ? <Loader2 size={14} className="animate-spin" /> : <Radar size={14} />}
+                {collecting ? '요청 중…' : '수집'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* 항목 추가 — 현재 회차에서만(과거 회차는 이력 열람 전용) */}
         {isCurrent ? (
-          <div className="px-6 pt-4 space-y-2">
+          <div className="px-6 pt-3 space-y-2">
             <p className="text-[11px] text-gray-400 leading-relaxed">
               {isCoverage || isMonitor ? (
-                <>이 업체의 <b className="text-gray-500">순위추적 작업(키워드·링크)을 아래에서 불러와</b> 대상으로 담으세요.
-                  순위를 수집하면 그날 이력이 쌓여 {isCoverage ? '커버리지 일수' : '추이'}가 계산됩니다.</>
+                <>{isCoverage ? '보장' : '모니터링'}할 <b className="text-gray-500">키워드를 검색해 그 업체의 작업내역을 담으세요.</b>
+                  수집하면 그날 탭별 순위가 쌓여 {isCoverage ? '커버리지 일수' : '추이'}가 계산됩니다.</>
               ) : (
-                <>이 업체의 일정에 <b className="text-gray-500">순위를 입력하면 자동으로 여기에 편입</b>됩니다(순위는 일정에서 관리).
-                  순위 없는 일정을 미리 담거나 직접 입력하려면 아래에서 추가하세요.</>
+                <>등록 시 이 업체의 <b className="text-gray-500">순위추적 작업이 전량 편입</b>됩니다.
+                  빠진 게 있으면 키워드로 검색해 담거나 수동 추가하세요.</>
               )}
             </p>
             <button onClick={() => setPicking(true)}
               className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
-              <CalendarPlus size={15} /> 일정에서 불러오기 (키워드·링크·순위 연동)
+              <Search size={15} /> 키워드로 작업내역 검색해 담기
             </button>
             <div className="flex gap-2">
               <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') addItem(); }}
-                placeholder="또는 수동 키워드 추가 — 예: 강남 임플란트"
+                placeholder="또는 수동 키워드 추가 — 예: 위편장쾌한의원"
                 className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               <button onClick={addItem} className="flex items-center gap-1 px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
                 <Plus size={15} /> 추가
@@ -587,102 +651,99 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-xs text-gray-400 border-b border-gray-100">
-                  <th className="text-left font-medium py-2 pl-1">키워드</th>
-                  {isCoverage ? (
-                    <>
-                      <th className="text-left font-medium py-2 w-20">목표순위</th>
-                      <th className="text-left font-medium py-2 w-20">오늘순위</th>
-                      <th className="text-left font-medium py-2">커버리지 ({gDays}일)</th>
-                    </>
-                  ) : isMonitor ? (
-                    <>
-                      <th className="text-left font-medium py-2 w-20">최신순위</th>
-                      <th className="text-left font-medium py-2">추이 (30일)</th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="text-left font-medium py-2 w-24">순위</th>
-                      <th className="text-left font-medium py-2 w-28">기재일</th>
-                    </>
-                  )}
+                  <th className="text-left font-medium py-2 pl-1">키워드 · 포스팅일</th>
+                  <th className="text-left font-medium py-2">탭별 순위</th>
+                  {isCurrent && <th className="text-left font-medium py-2 w-24">목표·판정</th>}
+                  {isCoverage ? <th className="text-left font-medium py-2">커버리지 ({gDays}일)</th>
+                    : isMonitor ? <th className="text-left font-medium py-2">추이 (30일)</th>
+                    : <th className="text-left font-medium py-2 w-12">달성</th>}
                   <th className="w-8" />
                 </tr>
               </thead>
               <tbody>
                 {items.map(it => {
                   const linked = !!it.entryId;
-                  const editable = isCurrent && !linked; // 현재 회차의 수동 항목만 키워드 직접 편집
-                  const rankEditable = isCurrent && (isCoverage || isMonitor || !linked); // 이력형은 링크·수동 모두 '오늘 순위' 입력 가능
-                  const cov = isCoverage ? coveredDays(it, win) : 0;
-                  const latest = it.samples?.length ? it.samples[it.samples.length - 1].rank : it.rank;
+                  const editable = isCurrent && !linked;          // 수동 항목만 키워드 직접 편집
+                  const jd = judge(it);
+                  const jr = currentJudged(it, jd);               // 현재 판정순위(판정탭 중 최상위)
+                  const hit = jr != null && jr <= jd.targetRank;  // 목표순위 이내?
+                  const tabs = foundRanks(it.rankByTab);          // 잡힌 탭별 순위
+                  const cov = isCoverage ? coveredDays(it, win, jd) : 0;
+                  const itemJudgeKey = it.judgeTabs ? judgePresetKey(it.judgeTabs) : '';
                   return (
                     <tr key={it.id} className="border-b border-gray-50 align-top">
+                      {/* 키워드 · 포스팅일 */}
                       <td className="py-2 pl-1">
                         <div className="flex items-center gap-1.5">
                           {linked && <Link2 size={13} className="text-blue-500 shrink-0" />}
                           {it.frozen && <Lock size={12} className="text-gray-400 shrink-0" />}
                           {editable ? (
                             <input defaultValue={it.keyword} onBlur={e => { const v = e.target.value.trim(); if (v && v !== it.keyword) patchItem(it.id, { keyword: v }); }}
-                              className="w-full bg-transparent focus:outline-none focus:bg-blue-50/50 rounded px-1 py-0.5" />
+                              className="w-full bg-transparent focus:outline-none focus:bg-blue-50/50 rounded px-1 py-0.5 font-medium" />
                           ) : (
-                            <span className="px-1 py-0.5 text-gray-800">{it.keyword}</span>
+                            <span className="px-1 py-0.5 text-gray-800 font-medium">{it.keyword}</span>
                           )}
                           {it.link && (
                             <a href={it.link} target="_blank" rel="noreferrer" className="text-gray-300 hover:text-blue-600 shrink-0" title={it.link}><ExternalLink size={13} /></a>
                           )}
                         </div>
-                        {it.frozen && <span className="ml-[18px] text-[10px] text-gray-400">원본 일정 삭제됨</span>}
+                        <span className="ml-[18px] text-[10px] text-gray-400">
+                          {it.postDate ? `포스팅 ${it.postDate}` : '포스팅일 미상'}{it.frozen ? ' · 원본 삭제됨' : ''}
+                        </span>
                       </td>
 
+                      {/* 탭별 순위 (+ 이력형 오늘 수동입력) */}
+                      <td className="py-2">
+                        {tabs.length ? (
+                          <div className="flex flex-wrap gap-1">
+                            {tabs.map(r => {
+                              const inJudge = jd.judgeTabs.includes(r.tab);
+                              const cls = inJudge && r.rank <= jd.targetRank ? 'bg-green-100 text-green-700'
+                                : inJudge ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500';
+                              return <span key={r.tab} className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold ${cls}`} title={inJudge ? '판정 대상 탭' : '참고(판정 제외)'}>{SEARCH_TAB_SHORT[r.tab]} {r.rank}</span>;
+                            })}
+                          </div>
+                        ) : it.rank != null ? (
+                          <span className="text-xs text-gray-600">{it.rank}위</span>
+                        ) : <span className="text-[11px] text-gray-300">미수집</span>}
+                        {(isCoverage || isMonitor) && isCurrent && (
+                          <input defaultValue="" onBlur={e => setRank(it, e.target.value)} onKeyDown={enterBlur} placeholder="오늘 수동"
+                            className="mt-1 block w-20 border border-gray-200 rounded px-1.5 py-0.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                        )}
+                      </td>
+
+                      {/* 목표·판정 (항목 덮어쓰기 — 비우면 보장 기본값) */}
+                      {isCurrent && (
+                        <td className="py-2">
+                          <div className="flex items-center gap-1">
+                            <input defaultValue={it.targetRank != null ? String(it.targetRank) : ''} onBlur={e => setTargetRank(it, e.target.value)} onKeyDown={enterBlur}
+                              placeholder={String(jd.targetRank)} title="목표순위(비우면 보장 기본값)"
+                              className="w-11 border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                            <select value={itemJudgeKey} onChange={e => setItemJudge(it, e.target.value)} title="판정탭(기본=보장 설정)"
+                              className="border border-gray-200 rounded px-1 py-1 text-[11px] bg-white focus:outline-none max-w-[74px]">
+                              <option value="">기본</option>
+                              {JUDGE_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+                            </select>
+                          </div>
+                        </td>
+                      )}
+
+                      {/* 타입별 지표 */}
                       {isCoverage ? (
-                        <>
-                          <td className="py-2">
-                            {isCurrent ? (
-                              <input defaultValue={it.targetRank != null ? String(it.targetRank) : ''} onBlur={e => setTargetRank(it, e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="예:10"
-                                className="w-16 border border-gray-200 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                            ) : <span className="text-gray-500">{it.targetRank ?? '—'}위</span>}
-                          </td>
-                          <td className="py-2">
-                            {rankEditable ? (
-                              <input defaultValue={latest != null ? String(latest) : ''} onBlur={e => setRank(it, e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="미노출"
-                                className="w-16 border border-gray-200 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                            ) : <span className="text-gray-500">{latest ?? '—'}</span>}
-                          </td>
-                          <td className="py-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-xs font-semibold ${cov >= gDays ? 'text-green-600' : 'text-gray-500'}`}>{cov}/{gDays}일</span>
-                              <CoverageStrip item={it} win={win} today={todayStr()} />
-                            </div>
-                          </td>
-                        </>
+                        <td className="py-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-semibold shrink-0 ${cov >= gDays ? 'text-green-600' : 'text-gray-500'}`}>{cov}/{gDays}일</span>
+                            <CoverageStrip item={it} win={win} judge={jd} today={todayStr()} />
+                          </div>
+                        </td>
                       ) : isMonitor ? (
-                        <>
-                          <td className="py-2">
-                            {rankEditable ? (
-                              <input defaultValue={latest != null ? String(latest) : ''} onBlur={e => setRank(it, e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="미노출"
-                                className="w-16 border border-gray-200 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                            ) : <span className="text-gray-500">{latest ?? '—'}</span>}
-                          </td>
-                          <td className="py-2"><Sparkline samples={it.samples ?? []} win={win} /></td>
-                        </>
+                        <td className="py-2"><Sparkline samples={it.samples ?? []} win={win} judge={jd} /></td>
                       ) : (
-                        <>
-                          <td className="py-2">
-                            {editable ? (
-                              <input defaultValue={it.rank != null ? String(it.rank) : ''} onBlur={e => setRank(it, e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                                placeholder="미반영"
-                                className={`w-20 border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${isAchieved(it) ? 'border-green-300 bg-green-50 text-green-700 font-semibold' : 'border-gray-200 text-gray-400'}`} />
-                            ) : (
-                              <span className={`inline-block w-20 text-center border rounded-lg px-2 py-1 text-sm ${isAchieved(it) ? 'border-green-200 bg-green-50 text-green-700 font-semibold' : 'border-gray-100 bg-gray-50 text-gray-400'}`}
-                                title={linked ? '순위는 일정에서 수정됩니다' : undefined}>{it.rank != null ? it.rank : '미반영'}</span>
-                            )}
-                          </td>
-                          <td className="py-2 text-xs text-gray-400">{it.rankedAt ?? '—'}</td>
-                        </>
+                        <td className="py-2">
+                          {jr == null ? <span className="text-[11px] text-gray-300">—</span>
+                            : hit ? <CheckCircle2 size={16} className="text-green-600" />
+                            : <span className="text-[11px] text-gray-400">{jr}위</span>}
+                        </td>
                       )}
 
                       <td className="py-2 text-right whitespace-nowrap">
@@ -747,11 +808,15 @@ function EntryPicker({ clientId, entries, excludeIds, onClose, onConfirm }: {
   onClose: () => void; onConfirm: (picked: ScheduleEntry[]) => void;
 }) {
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const [onlyRanked, setOnlyRanked] = useState(false);
+  const [kw, setKw] = useState('');
+  // 키워드 검색으로 그 업체의 순위추적 작업내역을 좁힌다(키워드·카테고리 매칭).
+  const q = kw.trim().toLowerCase();
   const candidates = useMemo(() => entries
-    .filter(e => e.clientId === clientId && !excludeIds.has(e.id) && (!onlyRanked || e.rank != null))
+    .filter(e => e.clientId === clientId && !excludeIds.has(e.id)
+      && isRankTrackedCategory(e.category) && !!e.keyword
+      && (!q || (e.keyword ?? '').toLowerCase().includes(q) || (e.category ?? '').toLowerCase().includes(q)))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
-    [entries, clientId, excludeIds, onlyRanked]);
+    [entries, clientId, excludeIds, q]);
 
   const toggle = (id: string) => setSel(prev => {
     const next = new Set(prev);
@@ -764,20 +829,21 @@ function EntryPicker({ clientId, entries, excludeIds, onClose, onConfirm }: {
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div>
-            <h3 className="text-base font-bold text-gray-900">일정에서 불러오기</h3>
-            <p className="text-xs text-gray-400">선택한 일정의 키워드·링크·순위가 연동됩니다(순위는 일정에서 관리)</p>
+            <h3 className="text-base font-bold text-gray-900">키워드로 작업내역 검색</h3>
+            <p className="text-xs text-gray-400">보장·모니터링할 키워드를 검색해 그 업체의 순위추적 작업을 담습니다(수집 대상 연동)</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18} /></button>
         </div>
         <div className="px-6 py-3 border-b border-gray-50">
-          <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
-            <input type="checkbox" checked={onlyRanked} onChange={e => setOnlyRanked(e.target.checked)} className="rounded" />
-            순위가 있는 일정만 보기
-          </label>
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input autoFocus value={kw} onChange={e => setKw(e.target.value)} placeholder="키워드 검색 — 예: 위편장쾌한의원"
+              className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto px-3 py-2">
           {candidates.length === 0 ? (
-            <p className="text-center text-sm text-gray-400 py-10">연결할 수 있는 일정이 없습니다.</p>
+            <p className="text-center text-sm text-gray-400 py-10">{q ? `'${kw}'에 맞는 작업내역이 없습니다.` : '검색어를 입력하면 그 업체의 작업내역이 나옵니다.'}</p>
           ) : candidates.map(e => (
             <button key={e.id} onClick={() => toggle(e.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${sel.has(e.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
@@ -807,12 +873,13 @@ function EntryPicker({ clientId, entries, excludeIds, onClose, onConfirm }: {
 }
 
 // ── 커버리지 스트립 ─────────────────────────────────────
-// 윈도우의 각 날짜를 한 칸으로: 초록=목표순위 이내 충족, 회색=미충족, 옅은=미래(오늘 이후).
-function CoverageStrip({ item, win, today }: { item: RankGuaranteeItem; win: { start: string; end: string }; today: string }) {
+// 윈도우의 각 날짜를 한 칸으로: 초록=판정순위 목표 이내 충족, 회색=미충족, 옅은=미래(오늘 이후).
+function CoverageStrip({ item, win, judge, today }: { item: RankGuaranteeItem; win: { start: string; end: string }; judge: Judge; today: string }) {
   const covered = new Set<string>();
   for (const s of item.samples ?? []) {
     if (s.date < win.start || s.date > win.end) continue;
-    if (item.targetRank == null || s.rank <= item.targetRank) covered.add(s.date);
+    const r = sampleJudged(s, judge.judgeTabs);
+    if (r != null && r <= judge.targetRank) covered.add(s.date);
   }
   const days: string[] = [];
   for (let d = win.start; d <= win.end; d = addDays(d, 1)) days.push(d);
@@ -829,9 +896,12 @@ function CoverageStrip({ item, win, today }: { item: RankGuaranteeItem; win: { s
 }
 
 // ── 순위 추이 스파크라인 ────────────────────────────────
-// 윈도우 안 샘플을 선으로. 낮은 순위(=좋음)를 위로 그린다.
-function Sparkline({ samples, win }: { samples: RankSample[]; win: { start: string; end: string } }) {
-  const pts = (samples ?? []).filter(s => s.date >= win.start && s.date <= win.end).sort((a, b) => a.date.localeCompare(b.date));
+// 윈도우 안 샘플의 '판정순위'를 선으로. 낮은 순위(=좋음)를 위로 그린다.
+function Sparkline({ samples, win, judge }: { samples: RankSample[]; win: { start: string; end: string }; judge: Judge }) {
+  const pts = (samples ?? []).filter(s => s.date >= win.start && s.date <= win.end)
+    .map(s => ({ date: s.date, rank: sampleJudged(s, judge.judgeTabs) }))
+    .filter((p): p is { date: string; rank: number } => p.rank != null)
+    .sort((a, b) => a.date.localeCompare(b.date));
   if (pts.length === 0) return <span className="text-xs text-gray-300">데이터 없음</span>;
   const W = 120, H = 26, pad = 3;
   const ranks = pts.map(p => p.rank);

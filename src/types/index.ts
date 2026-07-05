@@ -469,9 +469,12 @@ export type RankGuaranteeStatus = 'active' | 'due_soon' | 'reached' | 'closed';
 export type RankGuaranteeType = 'count' | 'count_monthly' | 'keyword_coverage' | 'monitor';
 
 // 일별 순위 샘플(키워드 월보장·모니터링의 이력). 하루 1개(같은 날 재수집이면 최신값으로 덮음).
+//  • ranks = 그날 탭별 순위(수집기가 채운 rankByTab 스냅샷, 노출된 탭만). 판정탭(judgeTabs) 기준으로 계산.
+//  • rank = 레거시(수동 단일 입력) — ranks 없을 때 폴백. 미노출 탭/미수집이면 값 없음(=그날 미충족).
 export interface RankSample {
-  date: string;   // YYYY-MM-DD (수집일 = rankCheckedAt 또는 수동 입력일)
-  rank: number;   // 그날 순위(잡힌 탭 중 targetTab 또는 최상위). 미노출은 샘플 안 남김(=그날 미충족).
+  date: string;                                 // YYYY-MM-DD (수집일 = rankCheckedAt 또는 수동 입력일)
+  ranks?: Partial<Record<SearchTab, number>>;   // 탭별 순위(통합/블로그/카페)
+  rank?: number;                                // 레거시 단일 순위(수동 입력·구버전 호환)
 }
 
 // 항목 1개 = "1건". rank 값이 있으면 카운트 대상.
@@ -488,9 +491,13 @@ export interface RankGuaranteeItem {
   entryId?: string;    // 연결된 일정 id (있으면 '연동 항목' — 읽기전용)
   link?: string;       // 일정에서 가져온 링크 (연동/동결 시 스냅샷)
   frozen?: boolean;    // 원본 일정 삭제로 연동이 끊긴 항목(마지막 순위 보존)
-  // ── 키워드 월보장·모니터링 전용 ──
-  targetRank?: number;         // 커버리지 인정 기준: 이 순위 '이내'인 날만 1일 인정(예: 10 = 10위 이내)
-  targetTab?: SearchTab;       // 어느 탭 순위로 판정할지(미지정 시 잡힌 탭 중 최상위 bestRank)
+  postDate?: string;   // 포스팅 일자(연동 일정 date 스냅샷) — 순위 기재일이 아니라 이게 표시 기준
+  rankByTab?: Partial<Record<SearchTab, number | null>>; // 현재 탭별 순위 스냅샷(연동 일정에서 동기화). 탭별 표시·판정 원천
+  // ── 목표순위·판정탭 (항목 덮어쓰기) ──
+  //  • 미지정이면 보장(캠페인)의 targetRank/judgeTabs 를 따른다.
+  targetRank?: number;         // 이 순위 '이내'면 달성 인정 (예: 10 = 10위 이내)
+  judgeTabs?: SearchTab[];     // 판정 기준 탭(들). 여럿이면 그 중 최상위 순위로 판정(둘 중 아무데나)
+  targetTab?: SearchTab;       // (레거시) 단일 판정 탭 — judgeTabs 로 대체됨
   samples?: RankSample[];      // 일별 순위 이력(최근 ~35일 보관, 초과분 evict). 커버리지 일수·추이 계산 원천.
 }
 
@@ -503,6 +510,9 @@ export interface RankGuarantee {
   guaranteedCount: number; // 보장 목표 건수 (count/count_monthly — 기본 20)
   guaranteedDays?: number; // keyword_coverage: 윈도우 안 보장 일수(기본 25)
   windowDays?: number;     // keyword_coverage/count_monthly: 판정 윈도우 길이(기본 30)
+  // ── 목표순위·판정탭 (보장 단위 기본값, 항목이 덮어쓸 수 있음). 모든 방식에 적용. ──
+  targetRank?: number;     // 기본 목표순위 — 이 순위 이내면 '달성'(기본 10위=1페이지)
+  judgeTabs?: SearchTab[]; // 기본 판정 탭 — 통합검색만/블로그탭만/둘 다(기본 [integrated,blog]=둘 중 아무데나)
   alertOffset: number;     // 목표 몇 건/일 전에 알림 (기본 2)
   cycle: number;           // 현재 회차 (연장 시 +1)
   closed?: boolean;        // 종료(연장 안 함) — true 면 카운팅/알림 멈춤

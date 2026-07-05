@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, Notice, NoticeAudience, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply, AssistantProposalUpdate, AssistantProposalEntry, RankGuarantee, RankGuaranteeItem } from '../types';
-import { deriveStatus, progress, guaranteeType, appendSample } from '../utils/rankGuarantee';
+import { deriveStatus, progress, guaranteeType, appendSample, addDays } from '../utils/rankGuarantee';
 import { USERS } from '../data/mockData';
 import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
 import type { ReminderOption } from '../types';
@@ -149,6 +149,25 @@ export interface AiPlanJobInput {
 }
 
 const nowMs = () => Date.now();
+
+// ── 순위 보장 편입 헬퍼 ──
+// 일정 rankByTab 에서 숫자 순위만 뽑은 탭별 맵(샘플·스냅샷용).
+const tabRanksOf = (rbt?: Partial<Record<SearchTab, number | null>>): Partial<Record<SearchTab, number>> => {
+  const out: Partial<Record<SearchTab, number>> = {};
+  SEARCH_TAB_ORDER.forEach(t => { const v = rbt?.[t]; if (typeof v === 'number') out[t] = v; });
+  return out;
+};
+// 순위추적 대상 일정인가(블로그/카페 상위노출 등 + 수집 탭 + 키워드 존재). 순위 값 유무와 무관.
+const isRankTrackable = (e: ScheduleEntry): boolean =>
+  isRankTrackedCategory(e.category) && effectiveSearchTabs(e).length > 0 && !!e.keyword;
+// 일정 → 보장 항목(연동). 순위 없어도 편입(수집 전이라도 목록·수집 대상이 됨). 포스팅일·탭 스냅샷 포함.
+const rgItemFromEntry = (e: ScheduleEntry, cycle: number): RankGuaranteeItem => ({
+  id: `rgi-${nowMs()}-${Math.random().toString(36).slice(2, 6)}`,
+  cycle, entryId: e.id,
+  keyword: e.keyword || '(키워드 없음)', link: e.link,
+  rank: e.rank, rankByTab: e.rankByTab, postDate: e.date,
+  rankedAt: e.rank != null ? todayStr() : undefined,
+});
 
 // 상담 전화번호 정규화: 사용자가 010 을 빼고 말해도 010 을 붙이고, 휴대폰이면 010-XXXX-XXXX 로 포맷.
 //  • "23398893" → "010-2339-8893"  /  "1023398893" → "010-2339-8893"  /  "0212345678"(0 으로 시작=유선) → 그대로 숫자
@@ -521,43 +540,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
       let items = rg.items.map(it => {
         const e = it.entryId ? byId.get(it.entryId) : undefined;
         if (!e) return it;
-        const rank = e.rank;
-        // 이력 샘플: targetTab 지정 시 그 탭 순위, 아니면 대표순위(e.rank). 날짜는 수집시각(탭별 ISO의 최신) 또는 오늘.
-        const tabRank = it.targetTab ? e.rankByTab?.[it.targetTab] : undefined;
-        const sampleRank = tabRank != null ? tabRank : rank;
+        // 이력 샘플(월보장·모니터링): 그날 탭별 순위(rankByTab)를 통째로. 날짜=수집시각(탭별 ISO 최신) 또는 오늘.
+        const ranks = tabRanksOf(e.rankByTab);
+        const hasRanks = Object.keys(ranks).length > 0;
         const checked = Object.values(e.rankCheckedAt ?? {}).filter(Boolean).map(s => String(s).slice(0, 10)).sort();
         const sampleDate = checked.length ? checked[checked.length - 1] : todayStr();
         const prevForDate = it.samples?.find(s => s.date === sampleDate);
-        const sampleChanged = keepsHistory && sampleRank != null && (!prevForDate || prevForDate.rank !== sampleRank);
-        const samples = sampleChanged ? appendSample(it.samples, sampleDate, sampleRank as number) : it.samples;
+        const sampleChanged = keepsHistory && hasRanks && JSON.stringify(prevForDate?.ranks ?? null) !== JSON.stringify(ranks);
+        const samples = sampleChanged ? appendSample(it.samples, { date: sampleDate, ranks }) : it.samples;
         const updated: RankGuaranteeItem = {
           ...it,
           keyword: e.keyword || it.keyword,
           link: e.link,
-          rank,
-          rankedAt: rank != null && it.rankedAt == null ? todayStr() : it.rankedAt,
+          rank: e.rank,
+          rankByTab: e.rankByTab,
+          postDate: e.date,
+          rankedAt: e.rank != null && it.rankedAt == null ? todayStr() : it.rankedAt,
           samples,
         };
-        if (updated.keyword !== it.keyword || updated.link !== it.link || updated.rank !== it.rank || sampleChanged) changed = true;
+        const metaChanged = updated.keyword !== it.keyword || updated.link !== it.link || updated.rank !== it.rank
+          || updated.postDate !== it.postDate || JSON.stringify(updated.rankByTab) !== JSON.stringify(it.rankByTab);
+        if (metaChanged || sampleChanged) changed = true;
         return updated;
       });
-      // (2) 자동 편입: 순위가 있는 미연결 일정을 항목으로 추가.
-      //     이 함수는 '사용자가 일정을 직접 저장(순위 입력/수정)'한 경우에만 돈다(reconcile 과 별개).
-      //     따라서 예전에 보장함에서 삭제해 제외(excludedEntryIds)된 일정이라도, 일정에서 순위를 다시 넣으면
-      //     '재연동 의사'로 보고 제외를 풀고 다시 편입한다(수동 삭제 직후 reconcile 자동 되살아남은 그대로 막힘).
+      // (2) 자동 편입: 그 업체의 순위추적 일정을 (순위 없어도) 항목으로 추가 — 등록만 하면 작업 전량이 보이고 수집 가능.
+      //     사용자가 일정을 직접 저장한 경우에만 돈다(reconcile 과 별개). 제외(excludedEntryIds)된 건은 재편입.
       let nextExcluded = rg.excludedEntryIds;
       if (autoIncludable(rg) && activeByClient.get(rg.clientId) === 1) {
         const linked = new Set(items.map(it => it.entryId).filter(Boolean));
         const excluded = new Set(rg.excludedEntryIds ?? []);
         list.forEach(e => {
-          if (e.clientId !== rg.clientId || e.rank == null || linked.has(e.id)) return;
-          excluded.delete(e.id); // 일정에서 순위를 (다시) 넣음 → 제외 해제하고 재연동
-          items = [...items, {
-            id: `rgi-${nowMs()}-${Math.random().toString(36).slice(2, 6)}`,
-            cycle: rg.cycle, entryId: e.id,
-            keyword: e.keyword || '(키워드 없음)', link: e.link,
-            rank: e.rank, rankedAt: todayStr(),
-          }];
+          if (e.clientId !== rg.clientId || !isRankTrackable(e) || linked.has(e.id)) return;
+          excluded.delete(e.id);
+          items = [...items, rgItemFromEntry(e, rg.cycle)];
           linked.add(e.id);
           changed = true;
         });
@@ -589,14 +604,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!autoIncludable(rg) || activeByClient.get(rg.clientId) !== 1) return;
       const linked = new Set(rg.items.map(it => it.entryId).filter(Boolean));
       const excluded = new Set(rg.excludedEntryIds ?? []);
-      const missing = entries.filter(e => e.clientId === rg.clientId && e.rank != null && !linked.has(e.id) && !excluded.has(e.id));
+      // 순위추적 일정을 (순위 없어도) 최근 90일 범위에서 전량 편입. 오래된 것까지 무한 편입은 막는다(수동 불러오기로 보충 가능).
+      const recent = addDays(todayStr(), -90);
+      const missing = entries.filter(e => e.clientId === rg.clientId && isRankTrackable(e) && e.date >= recent && !linked.has(e.id) && !excluded.has(e.id));
       if (!missing.length) return;
-      const added: RankGuaranteeItem[] = missing.map(e => ({
-        id: `rgi-${nowMs()}-${Math.random().toString(36).slice(2, 6)}`,
-        cycle: rg.cycle, entryId: e.id,
-        keyword: e.keyword || '(키워드 없음)', link: e.link,
-        rank: e.rank, rankedAt: todayStr(),
-      }));
+      const added: RankGuaranteeItem[] = missing.map(e => rgItemFromEntry(e, rg.cycle));
       saveRankGuarantee({ ...rg, items: [...rg.items, ...added] });
     });
   }, [entries, rankGuarantees, saveRankGuarantee]);
