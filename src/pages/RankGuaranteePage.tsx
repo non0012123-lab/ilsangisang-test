@@ -12,7 +12,7 @@ import { useRankCollect } from '../hooks/useRankCollect';
 import { todayStr } from '../utils/today';
 import {
   thresholdOf, isRanked, STATUS_LABEL, TYPE_LABEL, guaranteeType, progress,
-  appendSample, coveredDays, currentWindow, addDays, judgeOf, currentJudged, sampleJudged,
+  appendSample, coveredDays, currentWindow, addDays, judgeOf, bestJudged, sampleJudged,
   JUDGE_PRESETS, judgePresetKey, DEFAULT_GUARANTEED_DAYS, DEFAULT_WINDOW_DAYS, DEFAULT_TARGET_RANK,
   type Judge,
 } from '../utils/rankGuarantee';
@@ -406,6 +406,7 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
   const pr = progress(rg, { anchorDate });
   const reached = rg.status === 'reached';
   const linkedEntryIds = new Set(rg.items.filter(it => it.entryId).map(it => it.entryId));
+  const entriesById = useMemo(() => new Map(entries.map(e => [e.id, e])), [entries]);
   const judge = (it: RankGuaranteeItem): Judge => judgeOf(it, rg);
 
   // 순위 수집 — 현재 회차 연동 항목의 일정을 수집 큐에 넣는다(진행 현황은 좌하단 위젯). 미수집 항목도 포함.
@@ -511,12 +512,12 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
   // 순위가 잡힌 항목만 엑셀(CSV)로 내보낸다 — 보장 건수 도달 시 전달용. 보고 있는 회차 기준, 판정순위 오름차순.
   const exportCsv = async () => {
     const ranked = items.filter(isRanked)
-      .map(it => ({ it, jr: currentJudged(it, judge(it)) }))
+      .map(it => ({ it, jr: bestJudged(it, judge(it)) }))
       .filter(x => x.jr != null)
       .sort((a, b) => (a.jr as number) - (b.jr as number));
     if (ranked.length === 0) { alert('이 회차에 순위가 잡힌 항목이 없습니다.'); return; }
-    const tabStr = (it: RankGuaranteeItem) => foundRanks(it.rankByTab).map(r => `${SEARCH_TAB_SHORT[r.tab]} ${r.rank}위`).join(', ') || (it.rank != null ? `${it.rank}위` : '');
-    const rows = ranked.map((x, i) => [i + 1, x.it.keyword, `${x.jr}위`, tabStr(x.it), x.it.link ?? '', x.it.postDate ?? '']);
+    const tabStr = (it: RankGuaranteeItem) => foundRanks(it.bestByTab ?? it.rankByTab).map(r => `${SEARCH_TAB_SHORT[r.tab]} ${r.rank}위`).join(', ') || (it.rank != null ? `${it.rank}위` : '');
+    const rows = ranked.map((x, i) => [i + 1, x.it.keyword, `${x.jr}위`, tabStr(x.it), x.it.link ?? '', (x.it.postDate ?? (x.it.entryId ? entriesById.get(x.it.entryId)?.date : '') ?? '')]);
     const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '_').trim();
     const cyc = rg.cycle > 1 ? `_${viewCycle}차` : '';
     const res = await downloadCsv(`${safe(rg.clientName)}_${safe(rg.title)}${cyc}_순위보장_${todayStr()}`,
@@ -665,11 +666,12 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
                   const linked = !!it.entryId;
                   const editable = isCurrent && !linked;          // 수동 항목만 키워드 직접 편집
                   const jd = judge(it);
-                  const jr = currentJudged(it, jd);               // 현재 판정순위(판정탭 중 최상위)
-                  const hit = jr != null && jr <= jd.targetRank;  // 목표순위 이내?
-                  const tabs = foundRanks(it.rankByTab);          // 잡힌 탭별 순위
+                  const jr = bestJudged(it, jd);                  // 역대 최고 판정순위(밀려도 유지)
+                  const hit = jr != null && jr <= jd.targetRank;  // 목표순위 이내 달성?
+                  const tabs = foundRanks(it.bestByTab ?? it.rankByTab); // 탭별 역대 최고 순위(증빙)
                   const cov = isCoverage ? coveredDays(it, win, jd) : 0;
                   const itemJudgeKey = it.judgeTabs ? judgePresetKey(it.judgeTabs) : '';
+                  const postDate = it.postDate ?? (it.entryId ? entriesById.get(it.entryId)?.date : undefined);
                   return (
                     <tr key={it.id} className="border-b border-gray-50 align-top">
                       {/* 키워드 · 포스팅일 */}
@@ -688,7 +690,7 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
                           )}
                         </div>
                         <span className="ml-[18px] text-[10px] text-gray-400">
-                          {it.postDate ? `포스팅 ${it.postDate}` : '포스팅일 미상'}{it.frozen ? ' · 원본 삭제됨' : ''}
+                          {postDate ? `포스팅 ${postDate}` : '포스팅일 미상'}{it.frozen ? ' · 원본 삭제됨' : ''}
                         </span>
                       </td>
 

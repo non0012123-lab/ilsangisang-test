@@ -160,14 +160,49 @@ const tabRanksOf = (rbt?: Partial<Record<SearchTab, number | null>>): Partial<Re
 // 순위추적 대상 일정인가(블로그/카페 상위노출 등 + 수집 탭 + 키워드 존재). 순위 값 유무와 무관.
 const isRankTrackable = (e: ScheduleEntry): boolean =>
   isRankTrackedCategory(e.category) && effectiveSearchTabs(e).length > 0 && !!e.keyword;
-// 일정 → 보장 항목(연동). 순위 없어도 편입(수집 전이라도 목록·수집 대상이 됨). 포스팅일·탭 스냅샷 포함.
+// 탭별 '역대 최고(min)' 병합 — sticky. 재수집으로 순위가 밀려도 최고 기록은 유지.
+const mergeBestByTab = (prev?: Partial<Record<SearchTab, number>>, cur?: Partial<Record<SearchTab, number>>): Partial<Record<SearchTab, number>> => {
+  const out: Partial<Record<SearchTab, number>> = { ...(prev ?? {}) };
+  SEARCH_TAB_ORDER.forEach(t => { const v = cur?.[t]; if (typeof v === 'number') out[t] = out[t] != null ? Math.min(out[t] as number, v) : v; });
+  return out;
+};
+// 일정 → 보장 항목(연동). 순위 없어도 편입(수집 전이라도 목록·수집 대상이 됨). 포스팅일·탭·최고 스냅샷 포함.
 const rgItemFromEntry = (e: ScheduleEntry, cycle: number): RankGuaranteeItem => ({
   id: `rgi-${nowMs()}-${Math.random().toString(36).slice(2, 6)}`,
   cycle, entryId: e.id,
   keyword: e.keyword || '(키워드 없음)', link: e.link,
-  rank: e.rank, rankByTab: e.rankByTab, postDate: e.date,
+  rank: e.rank, rankByTab: e.rankByTab, bestByTab: mergeBestByTab(undefined, tabRanksOf(e.rankByTab)), postDate: e.date,
   rankedAt: e.rank != null ? todayStr() : undefined,
 });
+// 연동 항목을 현재 일정 값으로 갱신(스냅샷 새로고침). 이력형이면 그날 탭별 샘플 append. 변화 없으면 changed=false.
+//  → 수집기(realtime)로 rankByTab 이 바뀌면 여기로 흘러 들어와 bestByTab·샘플·포스팅일이 갱신된다.
+const refreshRgItem = (it: RankGuaranteeItem, e: ScheduleEntry, keepsHistory: boolean): { item: RankGuaranteeItem; changed: boolean } => {
+  const curRanks = tabRanksOf(e.rankByTab);
+  const bestByTab = mergeBestByTab(it.bestByTab, curRanks);
+  let samples = it.samples;
+  let sampleChanged = false;
+  if (keepsHistory && Object.keys(curRanks).length) {
+    const checked = Object.values(e.rankCheckedAt ?? {}).filter(Boolean).map(s => String(s).slice(0, 10)).sort();
+    const sampleDate = checked.length ? checked[checked.length - 1] : todayStr();
+    const prev = it.samples?.find(s => s.date === sampleDate);
+    if (JSON.stringify(prev?.ranks ?? null) !== JSON.stringify(curRanks)) { samples = appendSample(it.samples, { date: sampleDate, ranks: curRanks }); sampleChanged = true; }
+  }
+  const item: RankGuaranteeItem = {
+    ...it,
+    keyword: e.keyword || it.keyword,
+    link: e.link,
+    rank: e.rank,
+    rankByTab: e.rankByTab,
+    bestByTab,
+    postDate: e.date,
+    rankedAt: e.rank != null && it.rankedAt == null ? todayStr() : it.rankedAt,
+    samples,
+  };
+  const changed = sampleChanged
+    || item.keyword !== it.keyword || item.link !== it.link || item.rank !== it.rank || item.postDate !== it.postDate
+    || JSON.stringify(item.rankByTab) !== JSON.stringify(it.rankByTab) || JSON.stringify(item.bestByTab) !== JSON.stringify(it.bestByTab);
+  return { item, changed };
+};
 
 // 상담 전화번호 정규화: 사용자가 010 을 빼고 말해도 010 을 붙이고, 휴대폰이면 010-XXXX-XXXX 로 포맷.
 //  • "23398893" → "010-2339-8893"  /  "1023398893" → "010-2339-8893"  /  "0212345678"(0 으로 시작=유선) → 그대로 숫자
@@ -540,28 +575,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       let items = rg.items.map(it => {
         const e = it.entryId ? byId.get(it.entryId) : undefined;
         if (!e) return it;
-        // 이력 샘플(월보장·모니터링): 그날 탭별 순위(rankByTab)를 통째로. 날짜=수집시각(탭별 ISO 최신) 또는 오늘.
-        const ranks = tabRanksOf(e.rankByTab);
-        const hasRanks = Object.keys(ranks).length > 0;
-        const checked = Object.values(e.rankCheckedAt ?? {}).filter(Boolean).map(s => String(s).slice(0, 10)).sort();
-        const sampleDate = checked.length ? checked[checked.length - 1] : todayStr();
-        const prevForDate = it.samples?.find(s => s.date === sampleDate);
-        const sampleChanged = keepsHistory && hasRanks && JSON.stringify(prevForDate?.ranks ?? null) !== JSON.stringify(ranks);
-        const samples = sampleChanged ? appendSample(it.samples, { date: sampleDate, ranks }) : it.samples;
-        const updated: RankGuaranteeItem = {
-          ...it,
-          keyword: e.keyword || it.keyword,
-          link: e.link,
-          rank: e.rank,
-          rankByTab: e.rankByTab,
-          postDate: e.date,
-          rankedAt: e.rank != null && it.rankedAt == null ? todayStr() : it.rankedAt,
-          samples,
-        };
-        const metaChanged = updated.keyword !== it.keyword || updated.link !== it.link || updated.rank !== it.rank
-          || updated.postDate !== it.postDate || JSON.stringify(updated.rankByTab) !== JSON.stringify(it.rankByTab);
-        if (metaChanged || sampleChanged) changed = true;
-        return updated;
+        const { item, changed: c } = refreshRgItem(it, e, keepsHistory);
+        if (c) changed = true;
+        return item;
       });
       // (2) 자동 편입: 그 업체의 순위추적 일정을 (순위 없어도) 항목으로 추가 — 등록만 하면 작업 전량이 보이고 수집 가능.
       //     사용자가 일정을 직접 저장한 경우에만 돈다(reconcile 과 별개). 제외(excludedEntryIds)된 건은 재편입.
@@ -589,27 +605,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveRankGuarantee({ ...rg, items });
     });
   }, [saveRankGuarantee]);
-  // 정합성 보정(reconcile): 순위가 잡힌 일정인데 아직 항목에 없는 건을 빠짐없이 자동 편입한다.
-  //  • 저장 이벤트 기반(syncEntriesToGuarantees)으로는 과거 일정·다른 기기 realtime·캠페인 생성 전 데이터가 누락되므로,
-  //    entries/rankGuarantees 가 바뀔 때마다 전수 검사해 보충한다. add 전용(스냅샷 갱신은 sync 가 담당).
-  //  • 라우팅이 모호한 '진행중 캠페인 2개 이상' 업체는 건너뜀. 삭제·연동해제한 건(excludedEntryIds)은 되살리지 않음.
-  //  • 추가가 있을 때만 저장 → 다음 렌더에선 누락 0 이라 멈춤(루프 없음).
+  // 정합성 보정(reconcile): entries/rankGuarantees 가 바뀔 때마다 전수 검사해
+  //  (1) 연동 항목 스냅샷 갱신(수집기 realtime 결과·포스팅일·bestByTab·샘플 반영 — 이 경로가 유일하게 수집 결과를 보장함에 흘려줌),
+  //  (2) 건수형 캠페인엔 누락된 순위추적 일정을 자동 편입.
+  //  • 변화 있을 때만 저장 → 다음 렌더에선 변화 0 이라 멈춤(루프 없음).
+  //  • add 라우팅은 '진행중 캠페인 2개 이상' 업체는 건너뜀. 삭제·연동해제(excludedEntryIds)는 되살리지 않음.
   useEffect(() => {
     if (!entries.length || !rankGuarantees.length) return;
-    // 자동 편입은 건수형(count/count_monthly)만 — 키워드 월보장·모니터링은 후보 선택 방식이라 제외.
+    const byId = new Map(entries.map(e => [e.id, e]));
     const autoIncludable = (rg: RankGuarantee) => !rg.closed && (guaranteeType(rg) === 'count' || guaranteeType(rg) === 'count_monthly');
     const activeByClient = new Map<string, number>();
     rankGuarantees.forEach(rg => { if (autoIncludable(rg)) activeByClient.set(rg.clientId, (activeByClient.get(rg.clientId) || 0) + 1); });
+    const recent = addDays(todayStr(), -90);
     rankGuarantees.forEach(rg => {
-      if (!autoIncludable(rg) || activeByClient.get(rg.clientId) !== 1) return;
-      const linked = new Set(rg.items.map(it => it.entryId).filter(Boolean));
-      const excluded = new Set(rg.excludedEntryIds ?? []);
-      // 순위추적 일정을 (순위 없어도) 최근 90일 범위에서 전량 편입. 오래된 것까지 무한 편입은 막는다(수동 불러오기로 보충 가능).
-      const recent = addDays(todayStr(), -90);
-      const missing = entries.filter(e => e.clientId === rg.clientId && isRankTrackable(e) && e.date >= recent && !linked.has(e.id) && !excluded.has(e.id));
-      if (!missing.length) return;
-      const added: RankGuaranteeItem[] = missing.map(e => rgItemFromEntry(e, rg.cycle));
-      saveRankGuarantee({ ...rg, items: [...rg.items, ...added] });
+      if (rg.closed) return;
+      const rgType = guaranteeType(rg);
+      const keepsHistory = rgType === 'keyword_coverage' || rgType === 'monitor';
+      let changed = false;
+      // (1) 연동 항목 스냅샷 갱신
+      let items = rg.items.map(it => {
+        const e = it.entryId ? byId.get(it.entryId) : undefined;
+        if (!e) return it;
+        const { item, changed: c } = refreshRgItem(it, e, keepsHistory);
+        if (c) changed = true;
+        return item;
+      });
+      // (2) 건수형 자동 편입(업체당 진행중 건수형 1개일 때만). 최근 90일 순위추적 일정 전량.
+      if (autoIncludable(rg) && activeByClient.get(rg.clientId) === 1) {
+        const linked = new Set(items.map(it => it.entryId).filter(Boolean));
+        const excluded = new Set(rg.excludedEntryIds ?? []);
+        const missing = entries.filter(e => e.clientId === rg.clientId && isRankTrackable(e) && e.date >= recent && !linked.has(e.id) && !excluded.has(e.id));
+        if (missing.length) { items = [...items, ...missing.map(e => rgItemFromEntry(e, rg.cycle))]; changed = true; }
+      }
+      if (changed) saveRankGuarantee({ ...rg, items });
     });
   }, [entries, rankGuarantees, saveRankGuarantee]);
 

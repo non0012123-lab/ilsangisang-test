@@ -492,7 +492,9 @@ export interface RankGuaranteeItem {
   link?: string;       // 일정에서 가져온 링크 (연동/동결 시 스냅샷)
   frozen?: boolean;    // 원본 일정 삭제로 연동이 끊긴 항목(마지막 순위 보존)
   postDate?: string;   // 포스팅 일자(연동 일정 date 스냅샷) — 순위 기재일이 아니라 이게 표시 기준
-  rankByTab?: Partial<Record<SearchTab, number | null>>; // 현재 탭별 순위 스냅샷(연동 일정에서 동기화). 탭별 표시·판정 원천
+  rankByTab?: Partial<Record<SearchTab, number | null>>; // 현재 탭별 순위 스냅샷(연동 일정에서 동기화)
+  bestByTab?: Partial<Record<SearchTab, number>>;        // 탭별 '역대 최고(min)' 순위 — sticky. 재수집으로 밀려도 안 내려감.
+                                                          //  월 건바이건 카운트·탭별 뱃지의 기준(1일이라도 달성하면 유지 = 증빙).
   // ── 목표순위·판정탭 (항목 덮어쓰기) ──
   //  • 미지정이면 보장(캠페인)의 targetRank/judgeTabs 를 따른다.
   targetRank?: number;         // 이 순위 '이내'면 달성 인정 (예: 10 = 10위 이내)

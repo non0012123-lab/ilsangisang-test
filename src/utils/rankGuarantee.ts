@@ -41,6 +41,12 @@ export function currentJudged(item: RankGuaranteeItem, judge: Judge): number | u
   const j = judgedRank(item.rankByTab, judge.judgeTabs);
   return j != null ? j : (typeof item.rank === 'number' ? item.rank : undefined);
 }
+// 항목의 '역대 최고' 판정순위 — bestByTab(sticky) 우선. 밀려도 안 내려감(월건 카운트·증빙 기준).
+export function bestJudged(item: RankGuaranteeItem, judge: Judge): number | undefined {
+  const b = judgedRank(item.bestByTab, judge.judgeTabs);
+  if (b != null) return b;
+  return currentJudged(item, judge);
+}
 
 // ── 날짜 헬퍼(로컬 기준) ──
 const parseYmd = (s: string): Date => { const [y, m, d] = s.split('-').map(Number); return new Date(y, (m ?? 1) - 1, d ?? 1); };
@@ -66,8 +72,9 @@ export function appendSample(samples: RankSample[] | undefined, sample: RankSamp
 }
 
 // ── 레거시 건수 보장(count) ──
-// 순위가 하나라도 잡혀 있으면 카운트(목표순위 미적용 — 기존 데이터 안정성 유지).
+// 순위가 하나라도 잡혀 있으면 카운트(목표순위 미적용 — 기존 데이터 안정성 유지). best/current/legacy 모두 인정.
 export const isRanked = (it: RankGuaranteeItem): boolean =>
+  (!!it.bestByTab && Object.values(it.bestByTab).some(v => typeof v === 'number')) ||
   (!!it.rankByTab && Object.values(it.rankByTab).some(v => typeof v === 'number')) || it.rank != null;
 export const countAchieved = (rg: Pick<RankGuarantee, 'items' | 'cycle'>): number =>
   rg.items.filter(it => it.cycle === rg.cycle && isRanked(it)).length;
@@ -78,10 +85,11 @@ export const coverageItems = (rg: Pick<RankGuarantee, 'items' | 'cycle'>): RankG
 
 // ── 월 건바이건(count_monthly) ──
 // 윈도우(포스팅일 기준) 안에서 '목표순위 이내'로 잡힌 건수.
+//  • 판정은 bestByTab(역대 최고) 기준 → 1일이라도 달성하면 카운트, 재수집으로 밀려도 안 빠짐.
 export function countInWindow(rg: Pick<RankGuarantee, 'items' | 'cycle' | 'targetRank' | 'judgeTabs'>, w: { start: string; end: string }): number {
   return coverageItems(rg).filter(it => {
     const judge = judgeOf(it, rg);
-    const r = currentJudged(it, judge);
+    const r = bestJudged(it, judge);
     if (r == null || r > judge.targetRank) return false;
     const date = it.postDate ?? it.rankedAt ?? (it.samples?.length ? it.samples[it.samples.length - 1].date : undefined);
     return inWindow(date, w);
