@@ -461,6 +461,19 @@ export interface InternalEvent {
 export type RankGuaranteeStatus = 'active' | 'due_soon' | 'reached' | 'closed';
 //  진행중      / 임박(목표-offset 도달) / 도달(목표 달성)    / 종료(연장 안 함)
 
+// 보장/모니터링 방식.
+//  • undefined = 레거시(=count, 기존 건수 보장 그대로 — 일회성 목표 + 연장)
+//  • count_monthly    = 월 건바이건: 30일 윈도우(보고주기 정렬) 안에 순위 잡힌 '건수' ≥ 목표
+//  • keyword_coverage = 키워드 월보장: 특정 키워드가 30일 중 '목표순위 이내인 일수' ≥ 보장일수
+//  • monitor          = 주요 키워드 모니터링: 목표 없이 순위 추이만 추적
+export type RankGuaranteeType = 'count' | 'count_monthly' | 'keyword_coverage' | 'monitor';
+
+// 일별 순위 샘플(키워드 월보장·모니터링의 이력). 하루 1개(같은 날 재수집이면 최신값으로 덮음).
+export interface RankSample {
+  date: string;   // YYYY-MM-DD (수집일 = rankCheckedAt 또는 수동 입력일)
+  rank: number;   // 그날 순위(잡힌 탭 중 targetTab 또는 최상위). 미노출은 샘플 안 남김(=그날 미충족).
+}
+
 // 항목 1개 = "1건". rank 값이 있으면 카운트 대상.
 //  • 일정(ScheduleEntry)을 연결하면(entryId) 키워드·링크·순위는 그 일정이 원천이 된다(단방향 스냅샷).
 //    연동 항목은 보장함에서 읽기전용 — 순위는 일정에서만 바뀐다(일정 저장 시 자동 동기화).
@@ -475,6 +488,10 @@ export interface RankGuaranteeItem {
   entryId?: string;    // 연결된 일정 id (있으면 '연동 항목' — 읽기전용)
   link?: string;       // 일정에서 가져온 링크 (연동/동결 시 스냅샷)
   frozen?: boolean;    // 원본 일정 삭제로 연동이 끊긴 항목(마지막 순위 보존)
+  // ── 키워드 월보장·모니터링 전용 ──
+  targetRank?: number;         // 커버리지 인정 기준: 이 순위 '이내'인 날만 1일 인정(예: 10 = 10위 이내)
+  targetTab?: SearchTab;       // 어느 탭 순위로 판정할지(미지정 시 잡힌 탭 중 최상위 bestRank)
+  samples?: RankSample[];      // 일별 순위 이력(최근 ~35일 보관, 초과분 evict). 커버리지 일수·추이 계산 원천.
 }
 
 export interface RankGuarantee {
@@ -482,8 +499,11 @@ export interface RankGuarantee {
   clientId: string;        // Client 참조(임베드 아님)
   clientName: string;      // 표시 캐시(클라이언트명 변경 시 갱신)
   title: string;           // 상품/캠페인명 (예: "네이버 자동완성 보장")
-  guaranteedCount: number; // 보장 목표 건수 (입력 가능, 기본 20)
-  alertOffset: number;     // 목표 몇 건 전에 알림 (입력 가능, 기본 2)
+  type?: RankGuaranteeType; // 보장/모니터링 방식(없으면 레거시 count). [[rank-guarantee]]
+  guaranteedCount: number; // 보장 목표 건수 (count/count_monthly — 기본 20)
+  guaranteedDays?: number; // keyword_coverage: 윈도우 안 보장 일수(기본 25)
+  windowDays?: number;     // keyword_coverage/count_monthly: 판정 윈도우 길이(기본 30)
+  alertOffset: number;     // 목표 몇 건/일 전에 알림 (기본 2)
   cycle: number;           // 현재 회차 (연장 시 +1)
   closed?: boolean;        // 종료(연장 안 함) — true 면 카운팅/알림 멈춤
   status: RankGuaranteeStatus; // 파생 결과 캐시 + 전이 감지용

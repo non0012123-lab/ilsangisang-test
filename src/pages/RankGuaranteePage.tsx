@@ -9,8 +9,12 @@ import Header from '../components/Header';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { todayStr } from '../utils/today';
-import { countAchieved, thresholdOf, isAchieved, STATUS_LABEL } from '../utils/rankGuarantee';
-import type { RankGuarantee, RankGuaranteeItem, RankGuaranteeStatus, ScheduleEntry } from '../types';
+import {
+  thresholdOf, isAchieved, STATUS_LABEL, TYPE_LABEL, guaranteeType, progress,
+  appendSample, coveredDays, currentWindow, addDays, DEFAULT_GUARANTEED_DAYS, DEFAULT_WINDOW_DAYS,
+} from '../utils/rankGuarantee';
+import ClientCombobox from '../components/ClientCombobox';
+import type { RankGuarantee, RankGuaranteeItem, RankGuaranteeStatus, RankGuaranteeType, RankSample, ScheduleEntry } from '../types';
 
 const genId = (p: string) => `${p}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -36,10 +40,31 @@ const barColor = (s: RankGuaranteeStatus) =>
 interface FormState {
   clientId: string;
   title: string;
-  guaranteedCount: number;
+  type: RankGuaranteeType;
+  guaranteedCount: number;   // count / count_monthly
+  guaranteedDays: number;    // keyword_coverage
+  windowDays: number;        // keyword_coverage / count_monthly
+  targetRank: number;        // keyword_coverage 신규 항목 기본 목표순위
   alertOffset: number;
 }
-const EMPTY_FORM: FormState = { clientId: '', title: '', guaranteedCount: 20, alertOffset: 2 };
+const EMPTY_FORM: FormState = {
+  clientId: '', title: '', type: 'count_monthly',
+  guaranteedCount: 20, guaranteedDays: DEFAULT_GUARANTEED_DAYS, windowDays: DEFAULT_WINDOW_DAYS, targetRank: 10, alertOffset: 2,
+};
+
+// 방식 선택지(생성 폼). 레거시 count 는 신규 생성에선 노출하지 않는다(기존 데이터만 유지).
+const TYPE_OPTIONS: { key: RankGuaranteeType; label: string; desc: string }[] = [
+  { key: 'count_monthly', label: '월 건바이건', desc: '이번 달(30일) 순위 잡힌 건수 목표' },
+  { key: 'keyword_coverage', label: '키워드 월보장', desc: '키워드가 30일 중 N일 목표순위 유지' },
+  { key: 'monitor', label: '키워드 모니터링', desc: '목표 없이 주요 키워드 순위 추이만' },
+];
+
+const TYPE_CHIP: Record<RankGuaranteeType, string> = {
+  count: 'bg-slate-100 text-slate-600',
+  count_monthly: 'bg-blue-100 text-blue-700',
+  keyword_coverage: 'bg-violet-100 text-violet-700',
+  monitor: 'bg-teal-100 text-teal-700',
+};
 
 const STATUS_FILTERS: { key: 'all' | RankGuaranteeStatus; label: string }[] = [
   { key: 'all', label: '전체' },
@@ -50,9 +75,11 @@ const STATUS_FILTERS: { key: 'all' | RankGuaranteeStatus; label: string }[] = [
 ];
 
 export default function RankGuaranteePage() {
-  const { rankGuarantees, saveRankGuarantee, removeRankGuarantee, clients, entries } = useApp();
+  const { rankGuarantees, saveRankGuarantee, removeRankGuarantee, clients, entries, favoriteClientIds } = useApp();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  // 방식별 윈도우를 업체 보고 기준일(reportAnchorDate)에 정렬하기 위한 조회.
+  const anchorOf = (clientId: string) => clients.find(c => c.id === clientId)?.reportAnchorDate;
 
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | RankGuaranteeStatus>('all');
@@ -76,7 +103,11 @@ export default function RankGuaranteePage() {
 
   const openAdd = () => { setForm(EMPTY_FORM); setEditId(null); setShowForm(true); };
   const openEdit = (rg: RankGuarantee) => {
-    setForm({ clientId: rg.clientId, title: rg.title, guaranteedCount: rg.guaranteedCount, alertOffset: rg.alertOffset });
+    setForm({
+      clientId: rg.clientId, title: rg.title, type: guaranteeType(rg),
+      guaranteedCount: rg.guaranteedCount, guaranteedDays: rg.guaranteedDays ?? DEFAULT_GUARANTEED_DAYS,
+      windowDays: rg.windowDays ?? DEFAULT_WINDOW_DAYS, targetRank: 10, alertOffset: rg.alertOffset,
+    });
     setEditId(rg.id);
     setShowForm(true);
   };
@@ -85,26 +116,30 @@ export default function RankGuaranteePage() {
     const client = activeClients.find(c => c.id === form.clientId);
     if (!client) { alert('클라이언트를 선택하세요.'); return; }
     if (!form.title.trim()) { alert('상품/캠페인명을 입력하세요.'); return; }
+    const type = form.type;
     const guaranteedCount = Math.max(1, Math.floor(form.guaranteedCount) || 1);
-    const alertOffset = Math.min(guaranteedCount, Math.max(0, Math.floor(form.alertOffset) || 0));
+    const guaranteedDays = Math.max(1, Math.floor(form.guaranteedDays) || 1);
+    const windowDays = Math.max(1, Math.floor(form.windowDays) || DEFAULT_WINDOW_DAYS);
+    const alertMax = type === 'keyword_coverage' ? guaranteedDays : guaranteedCount;
+    const alertOffset = Math.min(alertMax, Math.max(0, Math.floor(form.alertOffset) || 0));
+    const patch = { clientId: client.id, clientName: client.name, title: form.title.trim(), type, guaranteedCount, guaranteedDays, windowDays, alertOffset };
     if (editId) {
       const cur = rankGuarantees.find(r => r.id === editId);
       if (!cur) return;
       // 설정만 바꾼다(items·cycle 보존). saveRankGuarantee 가 status 를 다시 파생한다.
-      saveRankGuarantee({ ...cur, clientId: client.id, clientName: client.name, title: form.title.trim(), guaranteedCount, alertOffset });
+      saveRankGuarantee({ ...cur, ...patch });
     } else {
-      // 백필: 이 캠페인이 그 업체의 첫 진행중 캠페인이면, 이미 순위가 잡힌 기존 일정을 자동으로 항목에 담는다.
-      //  (이후 일정은 AppContext.syncEntriesToGuarantees 가 저장 시점에 자동 편입한다.)
-      const soleActive = !rankGuarantees.some(r => r.clientId === client.id && !r.closed);
-      const seed: RankGuaranteeItem[] = soleActive
+      // 건수형만 백필(기존 순위 일정 자동 편입). 키워드 월보장·모니터링은 후보에서 골라 담는다(자동 편입 안 함).
+      const soleActiveCount = (type === 'count' || type === 'count_monthly')
+        && !rankGuarantees.some(r => r.clientId === client.id && !r.closed && (guaranteeType(r) === 'count' || guaranteeType(r) === 'count_monthly'));
+      const seed: RankGuaranteeItem[] = soleActiveCount
         ? entries.filter(e => e.clientId === client.id && e.rank != null).map(e => ({
             id: genId('rgi'), cycle: 1, entryId: e.id,
             keyword: e.keyword || '(키워드 없음)', link: e.link, rank: e.rank, rankedAt: todayStr(),
           }))
         : [];
       saveRankGuarantee({
-        id: genId('rg'), clientId: client.id, clientName: client.name, title: form.title.trim(),
-        guaranteedCount, alertOffset, cycle: 1, closed: false, status: 'active', items: seed,
+        id: genId('rg'), ...patch, cycle: 1, closed: false, status: 'active', items: seed,
         createdAt: Date.now(), updatedAt: Date.now(),
       });
     }
@@ -154,8 +189,15 @@ export default function RankGuaranteePage() {
         ) : (
           <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
             {filtered.map(rg => {
-              const n = countAchieved(rg);
-              const pct = Math.min(100, Math.round((n / rg.guaranteedCount) * 100));
+              const type = guaranteeType(rg);
+              const { n, target, unit } = progress(rg, { anchorDate: anchorOf(rg.clientId) });
+              const isMonitor = type === 'monitor';
+              const pct = target > 0 ? Math.min(100, Math.round((n / target) * 100)) : 0;
+              const sub = type === 'keyword_coverage'
+                ? `30일 중 ${rg.guaranteedDays ?? DEFAULT_GUARANTEED_DAYS}일 보장`
+                : type === 'count_monthly'
+                  ? `이번 달 · 임박 ${thresholdOf(rg.guaranteedCount, rg.alertOffset)}건`
+                  : isMonitor ? '추이 모니터링' : `${rg.cycle > 1 ? `${rg.cycle}차 · ` : ''}임박 ${thresholdOf(rg.guaranteedCount, rg.alertOffset)}건`;
               return (
                 <div key={rg.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col">
                   <div className="flex items-start justify-between mb-3">
@@ -174,20 +216,32 @@ export default function RankGuaranteePage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_CHIP[rg.status]}`}>
-                      {STATUS_LABEL[rg.status]}
-                    </span>
-                    <span className="text-xs text-gray-400">{rg.cycle > 1 ? `${rg.cycle}차` : '1차'} · 임박 {thresholdOf(rg)}건</span>
+                  <div className="flex items-center justify-between mb-1.5 gap-1">
+                    <div className="flex items-center gap-1 min-w-0">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${TYPE_CHIP[type]}`}>{TYPE_LABEL[type]}</span>
+                      {!isMonitor && (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_CHIP[rg.status]}`}>{STATUS_LABEL[rg.status]}</span>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-gray-400 truncate shrink-0">{sub}</span>
                   </div>
 
-                  <div className="flex items-end justify-between mb-1">
-                    <span className="text-sm font-bold text-gray-900">{n}<span className="text-gray-400 font-medium"> / {rg.guaranteedCount}건</span></span>
-                    <span className="text-xs text-gray-400">{pct}%</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-gray-100 overflow-hidden mb-4">
-                    <div className={`h-full rounded-full transition-all ${barColor(rg.status)}`} style={{ width: `${pct}%` }} />
-                  </div>
+                  {isMonitor ? (
+                    <div className="flex items-end justify-between mb-4">
+                      <span className="text-sm font-bold text-gray-900">{n}<span className="text-gray-400 font-medium"> 개 키워드</span></span>
+                      <span className="text-xs text-gray-400">순위 추적</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-end justify-between mb-1">
+                        <span className="text-sm font-bold text-gray-900">{n}<span className="text-gray-400 font-medium"> / {target}{unit}</span></span>
+                        <span className="text-xs text-gray-400">{pct}%</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-gray-100 overflow-hidden mb-4">
+                        <div className={`h-full rounded-full transition-all ${barColor(rg.status)}`} style={{ width: `${pct}%` }} />
+                      </div>
+                    </>
+                  )}
 
                   <button onClick={() => setDetailId(rg.id)}
                     className="mt-auto flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
@@ -211,35 +265,80 @@ export default function RankGuaranteePage() {
             <div className="px-6 py-5 space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">클라이언트 *</label>
-                <select value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="">선택하세요</option>
-                  {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <ClientCombobox clients={activeClients} value={form.clientId} favIds={favoriteClientIds}
+                  onChange={c => setForm(f => ({ ...f, clientId: c.id }))} placeholder="업체 검색·선택" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">방식 *</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {TYPE_OPTIONS.map(t => (
+                    <button key={t.key} type="button" onClick={() => setForm(f => ({ ...f, type: t.key }))}
+                      className={`px-2 py-2 rounded-lg border text-center transition-colors ${form.type === t.key ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                      <span className="block text-xs font-semibold">{t.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1">{TYPE_OPTIONS.find(t => t.key === form.type)?.desc}</p>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">상품/캠페인명 *</label>
                 <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="예: 네이버 자동완성 보장"
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">보장 건수</label>
-                  <input type="number" min={1} value={form.guaranteedCount}
-                    onChange={e => setForm(f => ({ ...f, guaranteedCount: Number(e.target.value) }))}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">알림(몇 건 전)</label>
-                  <input type="number" min={0} value={form.alertOffset}
-                    onChange={e => setForm(f => ({ ...f, alertOffset: Number(e.target.value) }))}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-              </div>
-              <p className="text-[11px] text-gray-400">
-                순위가 잡힌(순위 값이 입력된) 항목만 카운트됩니다. 목표 {Math.max(1, Math.floor(form.guaranteedCount) || 1)}건 중
-                {' '}{Math.max(0, Math.floor(form.guaranteedCount) || 1) - Math.min(Math.floor(form.guaranteedCount) || 1, Math.max(0, Math.floor(form.alertOffset) || 0))}건째에 ‘임박’ 알림이 갑니다.
-              </p>
+
+              {(form.type === 'count' || form.type === 'count_monthly') && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">보장 건수</label>
+                      <input type="number" min={1} value={form.guaranteedCount}
+                        onChange={e => setForm(f => ({ ...f, guaranteedCount: Number(e.target.value) }))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">알림(몇 건 전)</label>
+                      <input type="number" min={0} value={form.alertOffset}
+                        onChange={e => setForm(f => ({ ...f, alertOffset: Number(e.target.value) }))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    순위가 잡힌 항목만 카운트{form.type === 'count_monthly' ? '(이번 30일 윈도우 기준, 업체 보고 기준일에 정렬)' : ''}됩니다.
+                  </p>
+                </>
+              )}
+
+              {form.type === 'keyword_coverage' && (
+                <>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">보장 일수</label>
+                      <input type="number" min={1} value={form.guaranteedDays}
+                        onChange={e => setForm(f => ({ ...f, guaranteedDays: Number(e.target.value) }))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">윈도우(일)</label>
+                      <input type="number" min={1} value={form.windowDays}
+                        onChange={e => setForm(f => ({ ...f, windowDays: Number(e.target.value) }))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">목표 순위(이내)</label>
+                      <input type="number" min={1} value={form.targetRank}
+                        onChange={e => setForm(f => ({ ...f, targetRank: Number(e.target.value) }))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    각 키워드가 {form.windowDays || 30}일 중 <b className="text-gray-500">목표 {form.targetRank || 10}위 이내인 날 ≥ {form.guaranteedDays || 25}일</b>이면 충족. 목표 순위는 항목별로 조정할 수 있어요.
+                  </p>
+                </>
+              )}
+
+              {form.type === 'monitor' && (
+                <p className="text-[11px] text-gray-400">목표 없이 주요 키워드의 순위 추이만 추적합니다. 항목 관리에서 일정 불러오기·수동 키워드로 추가하세요.</p>
+              )}
             </div>
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
               <button onClick={() => setShowForm(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">취소</button>
@@ -253,7 +352,7 @@ export default function RankGuaranteePage() {
 
       {/* 항목 관리(상세) 모달 */}
       {detail && (
-        <DetailModal rg={detail} entries={entries} onClose={() => setDetailId(null)} onChange={saveRankGuarantee} />
+        <DetailModal rg={detail} entries={entries} anchorDate={anchorOf(detail.clientId)} onClose={() => setDetailId(null)} onChange={saveRankGuarantee} />
       )}
     </Layout>
   );
@@ -264,7 +363,7 @@ export default function RankGuaranteePage() {
 //  • 연동 항목(entryId): 일정이 원천이라 키워드·순위 읽기전용. 순위는 일정에서 바뀌면 자동 동기화됨.
 //  • 동결 항목(frozen): 원본 일정이 삭제돼 끊긴 항목 — 마지막 순위를 보존하며 다시 수동 편집 가능.
 //  • 수동 항목: 보장함에서 직접 입력.
-function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; entries: ScheduleEntry[]; onClose: () => void; onChange: (rg: RankGuarantee) => void }) {
+function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankGuarantee; entries: ScheduleEntry[]; anchorDate?: string; onClose: () => void; onChange: (rg: RankGuarantee) => void }) {
   const [newKeyword, setNewKeyword] = useState('');
   const [picking, setPicking] = useState(false);
   const [toast, setToast] = useState<string | null>(null); // 내보내기 완료 등 일시 안내
@@ -273,7 +372,12 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
   const isCurrent = viewCycle === rg.cycle;             // 현재 회차만 편집/추가 가능
   const items = rg.items.filter(it => it.cycle === viewCycle);
   const viewAchieved = items.filter(isAchieved).length; // 보는 회차의 달성 건수(내보내기 라벨/대상)
-  const n = countAchieved(rg);
+  const type = guaranteeType(rg);
+  const isCoverage = type === 'keyword_coverage';
+  const isMonitor = type === 'monitor';
+  const gDays = rg.guaranteedDays ?? DEFAULT_GUARANTEED_DAYS;
+  const win = currentWindow(anchorDate, rg.windowDays ?? DEFAULT_WINDOW_DAYS);
+  const pr = progress(rg, { anchorDate });
   const reached = rg.status === 'reached';
   const linkedEntryIds = new Set(rg.items.filter(it => it.entryId).map(it => it.entryId));
 
@@ -289,8 +393,16 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
     commitItems(rg.items.map(it => it.id === id ? { ...it, ...patch } : it));
   const setRank = (it: RankGuaranteeItem, raw: string) => {
     const rank = parseRank(raw);
-    if (rank === it.rank) return; // 값 변화 없으면 저장 안 함(불필요한 알림·쓰기 방지)
-    patchItem(it.id, { rank, rankedAt: rank != null && it.rankedAt == null ? todayStr() : it.rankedAt });
+    const patch: Partial<RankGuaranteeItem> = { rank, rankedAt: rank != null && it.rankedAt == null ? todayStr() : it.rankedAt };
+    // 키워드 월보장·모니터링은 수동 입력도 '오늘 순위' 이력으로 남긴다(수집기 없이 Phase 1 동작 — 오늘 커버리지 반영).
+    if ((isCoverage || isMonitor) && rank != null) patch.samples = appendSample(it.samples, todayStr(), rank);
+    else if (rank === it.rank) return; // 건수형: 값 변화 없으면 저장 안 함(불필요한 알림·쓰기 방지)
+    patchItem(it.id, patch);
+  };
+  const setTargetRank = (it: RankGuaranteeItem, raw: string) => {
+    const t = parseRank(raw);
+    if (t === it.targetRank) return;
+    patchItem(it.id, { targetRank: t });
   };
   // 항목 삭제 — 일정 연동 항목이면 그 일정 id 를 제외 목록에 넣어 자동 보정(reconcile)이 되살리지 않게 한다.
   const withExcluded = (entryId: string | undefined) =>
@@ -379,8 +491,15 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
           <div className="min-w-0">
             <h2 className="text-lg font-bold text-gray-900 truncate">{rg.clientName} · {rg.title}</h2>
             <p className="text-xs text-gray-500">
-              {rg.cycle > 1 ? `${rg.cycle}차 · ` : ''}달성 <span className="font-bold text-gray-800">{n}</span> / {rg.guaranteedCount}건
-              {' '}· 임박 {thresholdOf(rg)}건 · <span className={STATUS_CHIP[rg.status].replace(/bg-[a-z]+-100/, '') + ' font-semibold'}>{STATUS_LABEL[rg.status]}</span>
+              <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold mr-1.5 ${TYPE_CHIP[type]}`}>{TYPE_LABEL[type]}</span>
+              {isMonitor ? (
+                <>{pr.n}개 키워드 추적</>
+              ) : isCoverage ? (
+                <>충족 <span className="font-bold text-gray-800">{pr.n}</span> / {pr.target}키워드 · 30일 중 {gDays}일 · <span className={STATUS_CHIP[rg.status].replace(/bg-[a-z]+-100/, '') + ' font-semibold'}>{STATUS_LABEL[rg.status]}</span></>
+              ) : (
+                <>{rg.cycle > 1 ? `${rg.cycle}차 · ` : ''}달성 <span className="font-bold text-gray-800">{pr.n}</span> / {pr.target}{pr.unit}
+                {' '}· 임박 {thresholdOf(rg.guaranteedCount, rg.alertOffset)}건 · <span className={STATUS_CHIP[rg.status].replace(/bg-[a-z]+-100/, '') + ' font-semibold'}>{STATUS_LABEL[rg.status]}</span></>
+              )}
             </p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 shrink-0"><X size={18} /></button>
@@ -432,8 +551,13 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
         {isCurrent ? (
           <div className="px-6 pt-4 space-y-2">
             <p className="text-[11px] text-gray-400 leading-relaxed">
-              이 업체의 일정에 <b className="text-gray-500">순위를 입력하면 자동으로 여기에 편입</b>됩니다(순위는 일정에서 관리).
-              순위 없는 일정을 미리 담거나 직접 입력하려면 아래에서 추가하세요.
+              {isCoverage || isMonitor ? (
+                <>이 업체의 <b className="text-gray-500">순위추적 작업(키워드·링크)을 아래에서 불러와</b> 대상으로 담으세요.
+                  순위를 수집하면 그날 이력이 쌓여 {isCoverage ? '커버리지 일수' : '추이'}가 계산됩니다.</>
+              ) : (
+                <>이 업체의 일정에 <b className="text-gray-500">순위를 입력하면 자동으로 여기에 편입</b>됩니다(순위는 일정에서 관리).
+                  순위 없는 일정을 미리 담거나 직접 입력하려면 아래에서 추가하세요.</>
+              )}
             </p>
             <button onClick={() => setPicking(true)}
               className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
@@ -464,17 +588,35 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
               <thead>
                 <tr className="text-xs text-gray-400 border-b border-gray-100">
                   <th className="text-left font-medium py-2 pl-1">키워드</th>
-                  <th className="text-left font-medium py-2 w-24">순위</th>
-                  <th className="text-left font-medium py-2 w-28">기재일</th>
+                  {isCoverage ? (
+                    <>
+                      <th className="text-left font-medium py-2 w-20">목표순위</th>
+                      <th className="text-left font-medium py-2 w-20">오늘순위</th>
+                      <th className="text-left font-medium py-2">커버리지 ({gDays}일)</th>
+                    </>
+                  ) : isMonitor ? (
+                    <>
+                      <th className="text-left font-medium py-2 w-20">최신순위</th>
+                      <th className="text-left font-medium py-2">추이 (30일)</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="text-left font-medium py-2 w-24">순위</th>
+                      <th className="text-left font-medium py-2 w-28">기재일</th>
+                    </>
+                  )}
                   <th className="w-8" />
                 </tr>
               </thead>
               <tbody>
                 {items.map(it => {
                   const linked = !!it.entryId;
-                  const editable = isCurrent && !linked; // 현재 회차의 수동 항목만 직접 편집
+                  const editable = isCurrent && !linked; // 현재 회차의 수동 항목만 키워드 직접 편집
+                  const rankEditable = isCurrent && (isCoverage || isMonitor || !linked); // 이력형은 링크·수동 모두 '오늘 순위' 입력 가능
+                  const cov = isCoverage ? coveredDays(it, win) : 0;
+                  const latest = it.samples?.length ? it.samples[it.samples.length - 1].rank : it.rank;
                   return (
-                    <tr key={it.id} className="border-b border-gray-50">
+                    <tr key={it.id} className="border-b border-gray-50 align-top">
                       <td className="py-2 pl-1">
                         <div className="flex items-center gap-1.5">
                           {linked && <Link2 size={13} className="text-blue-500 shrink-0" />}
@@ -491,18 +633,58 @@ function DetailModal({ rg, entries, onClose, onChange }: { rg: RankGuarantee; en
                         </div>
                         {it.frozen && <span className="ml-[18px] text-[10px] text-gray-400">원본 일정 삭제됨</span>}
                       </td>
-                      <td className="py-2">
-                        {editable ? (
-                          <input defaultValue={it.rank != null ? String(it.rank) : ''} onBlur={e => setRank(it, e.target.value)}
-                            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                            placeholder="미반영"
-                            className={`w-20 border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${isAchieved(it) ? 'border-green-300 bg-green-50 text-green-700 font-semibold' : 'border-gray-200 text-gray-400'}`} />
-                        ) : (
-                          <span className={`inline-block w-20 text-center border rounded-lg px-2 py-1 text-sm ${isAchieved(it) ? 'border-green-200 bg-green-50 text-green-700 font-semibold' : 'border-gray-100 bg-gray-50 text-gray-400'}`}
-                            title={linked ? '순위는 일정에서 수정됩니다' : undefined}>{it.rank != null ? it.rank : '미반영'}</span>
-                        )}
-                      </td>
-                      <td className="py-2 text-xs text-gray-400">{it.rankedAt ?? '—'}</td>
+
+                      {isCoverage ? (
+                        <>
+                          <td className="py-2">
+                            {isCurrent ? (
+                              <input defaultValue={it.targetRank != null ? String(it.targetRank) : ''} onBlur={e => setTargetRank(it, e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="예:10"
+                                className="w-16 border border-gray-200 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            ) : <span className="text-gray-500">{it.targetRank ?? '—'}위</span>}
+                          </td>
+                          <td className="py-2">
+                            {rankEditable ? (
+                              <input defaultValue={latest != null ? String(latest) : ''} onBlur={e => setRank(it, e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="미노출"
+                                className="w-16 border border-gray-200 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            ) : <span className="text-gray-500">{latest ?? '—'}</span>}
+                          </td>
+                          <td className="py-2">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-xs font-semibold ${cov >= gDays ? 'text-green-600' : 'text-gray-500'}`}>{cov}/{gDays}일</span>
+                              <CoverageStrip item={it} win={win} today={todayStr()} />
+                            </div>
+                          </td>
+                        </>
+                      ) : isMonitor ? (
+                        <>
+                          <td className="py-2">
+                            {rankEditable ? (
+                              <input defaultValue={latest != null ? String(latest) : ''} onBlur={e => setRank(it, e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} placeholder="미노출"
+                                className="w-16 border border-gray-200 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            ) : <span className="text-gray-500">{latest ?? '—'}</span>}
+                          </td>
+                          <td className="py-2"><Sparkline samples={it.samples ?? []} win={win} /></td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="py-2">
+                            {editable ? (
+                              <input defaultValue={it.rank != null ? String(it.rank) : ''} onBlur={e => setRank(it, e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                                placeholder="미반영"
+                                className={`w-20 border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${isAchieved(it) ? 'border-green-300 bg-green-50 text-green-700 font-semibold' : 'border-gray-200 text-gray-400'}`} />
+                            ) : (
+                              <span className={`inline-block w-20 text-center border rounded-lg px-2 py-1 text-sm ${isAchieved(it) ? 'border-green-200 bg-green-50 text-green-700 font-semibold' : 'border-gray-100 bg-gray-50 text-gray-400'}`}
+                                title={linked ? '순위는 일정에서 수정됩니다' : undefined}>{it.rank != null ? it.rank : '미반영'}</span>
+                            )}
+                          </td>
+                          <td className="py-2 text-xs text-gray-400">{it.rankedAt ?? '—'}</td>
+                        </>
+                      )}
+
                       <td className="py-2 text-right whitespace-nowrap">
                         {isCurrent && linked && (
                           <button onClick={() => unlinkItem(it.id)} className="p-1 text-gray-300 hover:text-amber-500 transition-colors" title="연동 해제(수동 전환)"><Unlink size={13} /></button>
@@ -620,6 +802,53 @@ function EntryPicker({ clientId, entries, excludeIds, onClose, onConfirm }: {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── 커버리지 스트립 ─────────────────────────────────────
+// 윈도우의 각 날짜를 한 칸으로: 초록=목표순위 이내 충족, 회색=미충족, 옅은=미래(오늘 이후).
+function CoverageStrip({ item, win, today }: { item: RankGuaranteeItem; win: { start: string; end: string }; today: string }) {
+  const covered = new Set<string>();
+  for (const s of item.samples ?? []) {
+    if (s.date < win.start || s.date > win.end) continue;
+    if (item.targetRank == null || s.rank <= item.targetRank) covered.add(s.date);
+  }
+  const days: string[] = [];
+  for (let d = win.start; d <= win.end; d = addDays(d, 1)) days.push(d);
+  return (
+    <div className="flex gap-[2px] flex-wrap max-w-[240px]">
+      {days.map(d => {
+        const future = d > today;
+        const ok = covered.has(d);
+        return <span key={d} title={`${d}${ok ? ' · 충족' : future ? '' : ' · 미충족'}`}
+          className={`w-1.5 h-3.5 rounded-[1px] ${future ? 'bg-gray-100' : ok ? 'bg-green-500' : 'bg-gray-300'}`} />;
+      })}
+    </div>
+  );
+}
+
+// ── 순위 추이 스파크라인 ────────────────────────────────
+// 윈도우 안 샘플을 선으로. 낮은 순위(=좋음)를 위로 그린다.
+function Sparkline({ samples, win }: { samples: RankSample[]; win: { start: string; end: string } }) {
+  const pts = (samples ?? []).filter(s => s.date >= win.start && s.date <= win.end).sort((a, b) => a.date.localeCompare(b.date));
+  if (pts.length === 0) return <span className="text-xs text-gray-300">데이터 없음</span>;
+  const W = 120, H = 26, pad = 3;
+  const ranks = pts.map(p => p.rank);
+  const min = Math.min(...ranks), max = Math.max(...ranks);
+  const span = Math.max(1, max - min);
+  const n = pts.length;
+  const x = (i: number) => (n === 1 ? W / 2 : pad + (i / (n - 1)) * (W - 2 * pad));
+  const y = (r: number) => pad + ((r - min) / span) * (H - 2 * pad); // 좋은 순위(작음) → 위
+  const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.rank).toFixed(1)}`).join(' ');
+  const last = pts[n - 1];
+  return (
+    <div className="flex items-center gap-1.5">
+      <svg width={W} height={H}>
+        <path d={d} fill="none" stroke="#14b8a6" strokeWidth={1.5} strokeLinejoin="round" />
+        {pts.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.rank)} r={1.6} fill="#14b8a6" />)}
+      </svg>
+      <span className="text-xs font-semibold text-teal-600 shrink-0">{last.rank}위</span>
     </div>
   );
 }

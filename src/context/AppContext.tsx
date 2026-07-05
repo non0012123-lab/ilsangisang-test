@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import type { ScheduleEntry, ScheduleStatus, Client, HandoverDoc, TeamMember, AiPlanResult, AiPlanImage, Category, AssistantMessage, AssistantConversation, Vendor, AssistantUndo, AccountEntry, SiteEntry, Report, AppNotification, WorkRequest, Notice, NoticeAudience, StickyNotice, InternalEvent, InternalCategory, PriceProduct, SalesEntry, SalesReply, AssistantProposalUpdate, AssistantProposalEntry, RankGuarantee, RankGuaranteeItem } from '../types';
-import { deriveStatus, countAchieved } from '../utils/rankGuarantee';
+import { deriveStatus, progress, guaranteeType, appendSample } from '../utils/rankGuarantee';
 import { USERS } from '../data/mockData';
 import { DEFAULT_INTERNAL_CATEGORIES, CATEGORY_COLORS, REMINDER_OFFSET_MIN, REMINDER_LABEL } from '../data/internalCategories';
 import type { ReminderOption } from '../types';
@@ -470,7 +470,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   //    본인이 일으킨 변경은 여기서 직접 알림. 다른 사람의 변경은 realtime 구독이 처리(에코는 prev 비교로 dedup).
   const saveRankGuarantee = useCallback((rg: RankGuarantee) => {
     const prev = rankGuaranteesRef.current.find(x => x.id === rg.id);
-    const status = deriveStatus(rg);
+    // 방식별 판정은 클라이언트 보고 기준일(reportAnchorDate)에 윈도우를 정렬한다(월 건바이건·키워드 월보장).
+    const anchorDate = clientsRef.current.find(c => c.id === rg.clientId)?.reportAnchorDate;
+    const status = deriveStatus(rg, { anchorDate });
     const next: RankGuarantee = {
       ...rg,
       status,
@@ -480,15 +482,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     setRankGuarantees(list => list.some(x => x.id === next.id) ? list.map(x => x.id === next.id ? next : x) : [next, ...list]);
     persistOne('rank_guarantees', next);
-    // 전이 알림 — 새로 임박/도달에 진입했을 때만.
-    if (prev && prev.status !== status && (status === 'due_soon' || status === 'reached')) {
-      const n = countAchieved(next);
+    // 전이 알림 — 새로 임박/도달에 진입했을 때만. 모니터링(목표 없음)은 알림 없음.
+    if (prev && prev.status !== status && (status === 'due_soon' || status === 'reached') && guaranteeType(next) !== 'monitor') {
+      const { n, target, unit } = progress(next, { anchorDate });
       const reached = status === 'reached';
-      const title = reached ? '순위 보장 건수 도달' : '순위 보장 곧 도달';
-      const tail = reached ? '연장 또는 종료를 결정하세요' : '연장 여부를 확인하세요';
-      const body = `${next.clientName} · ${next.title} (${n}/${next.guaranteedCount}건) — ${tail}`;
+      const title = reached ? '순위 보장 목표 도달' : '순위 보장 곧 도달';
+      const tail = reached ? '연장 또는 종료를 결정하세요' : '달성 상황을 확인하세요';
+      const body = `${next.clientName} · ${next.title} (${n}/${target}${unit}) — ${tail}`;
       pushNotification({ type: 'rank', title, body, link: '/rank-guarantee' });
-      pushStickyNotice({ type: 'rank', title, body: `${next.clientName} ${n}/${next.guaranteedCount}건`, link: '/rank-guarantee' });
+      pushStickyNotice({ type: 'rank', title, body: `${next.clientName} ${n}/${target}${unit}`, link: '/rank-guarantee' });
     }
   }, [pushNotification, pushStickyNotice]);
   const removeRankGuarantee = useCallback((id: string) => {
@@ -505,25 +507,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!list.length) return;
     const byId = new Map(list.map(e => [e.id, e]));
     const all = rankGuaranteesRef.current;
-    // 업체별 진행중(미종료) 캠페인 수 — 자동 편입은 정확히 1개일 때만.
+    // 자동 편입은 '건수형(count/count_monthly)' 캠페인이 업체당 정확히 1개일 때만.
+    //  → 키워드 월보장·모니터링은 후보에서 골라 넣는 방식이라 순위 있는 일정을 무작정 밀어넣지 않는다.
+    const autoIncludable = (rg: RankGuarantee) => !rg.closed && (guaranteeType(rg) === 'count' || guaranteeType(rg) === 'count_monthly');
     const activeByClient = new Map<string, number>();
-    all.forEach(rg => { if (!rg.closed) activeByClient.set(rg.clientId, (activeByClient.get(rg.clientId) || 0) + 1); });
+    all.forEach(rg => { if (autoIncludable(rg)) activeByClient.set(rg.clientId, (activeByClient.get(rg.clientId) || 0) + 1); });
 
     all.forEach(rg => {
       let changed = false;
-      // (1) 연결된 항목 갱신
+      const rgType = guaranteeType(rg);
+      const keepsHistory = rgType === 'keyword_coverage' || rgType === 'monitor';
+      // (1) 연결된 항목 갱신 (+ 이력 방식이면 그날 순위 샘플 append)
       let items = rg.items.map(it => {
         const e = it.entryId ? byId.get(it.entryId) : undefined;
         if (!e) return it;
         const rank = e.rank;
+        // 이력 샘플: targetTab 지정 시 그 탭 순위, 아니면 대표순위(e.rank). 날짜는 수집시각(탭별 ISO의 최신) 또는 오늘.
+        const tabRank = it.targetTab ? e.rankByTab?.[it.targetTab] : undefined;
+        const sampleRank = tabRank != null ? tabRank : rank;
+        const checked = Object.values(e.rankCheckedAt ?? {}).filter(Boolean).map(s => String(s).slice(0, 10)).sort();
+        const sampleDate = checked.length ? checked[checked.length - 1] : todayStr();
+        const prevForDate = it.samples?.find(s => s.date === sampleDate);
+        const sampleChanged = keepsHistory && sampleRank != null && (!prevForDate || prevForDate.rank !== sampleRank);
+        const samples = sampleChanged ? appendSample(it.samples, sampleDate, sampleRank as number) : it.samples;
         const updated: RankGuaranteeItem = {
           ...it,
           keyword: e.keyword || it.keyword,
           link: e.link,
           rank,
           rankedAt: rank != null && it.rankedAt == null ? todayStr() : it.rankedAt,
+          samples,
         };
-        if (updated.keyword !== it.keyword || updated.link !== it.link || updated.rank !== it.rank) changed = true;
+        if (updated.keyword !== it.keyword || updated.link !== it.link || updated.rank !== it.rank || sampleChanged) changed = true;
         return updated;
       });
       // (2) 자동 편입: 순위가 있는 미연결 일정을 항목으로 추가.
@@ -531,7 +546,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       //     따라서 예전에 보장함에서 삭제해 제외(excludedEntryIds)된 일정이라도, 일정에서 순위를 다시 넣으면
       //     '재연동 의사'로 보고 제외를 풀고 다시 편입한다(수동 삭제 직후 reconcile 자동 되살아남은 그대로 막힘).
       let nextExcluded = rg.excludedEntryIds;
-      if (!rg.closed && activeByClient.get(rg.clientId) === 1) {
+      if (autoIncludable(rg) && activeByClient.get(rg.clientId) === 1) {
         const linked = new Set(items.map(it => it.entryId).filter(Boolean));
         const excluded = new Set(rg.excludedEntryIds ?? []);
         list.forEach(e => {
@@ -566,10 +581,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   //  • 추가가 있을 때만 저장 → 다음 렌더에선 누락 0 이라 멈춤(루프 없음).
   useEffect(() => {
     if (!entries.length || !rankGuarantees.length) return;
+    // 자동 편입은 건수형(count/count_monthly)만 — 키워드 월보장·모니터링은 후보 선택 방식이라 제외.
+    const autoIncludable = (rg: RankGuarantee) => !rg.closed && (guaranteeType(rg) === 'count' || guaranteeType(rg) === 'count_monthly');
     const activeByClient = new Map<string, number>();
-    rankGuarantees.forEach(rg => { if (!rg.closed) activeByClient.set(rg.clientId, (activeByClient.get(rg.clientId) || 0) + 1); });
+    rankGuarantees.forEach(rg => { if (autoIncludable(rg)) activeByClient.set(rg.clientId, (activeByClient.get(rg.clientId) || 0) + 1); });
     rankGuarantees.forEach(rg => {
-      if (rg.closed || activeByClient.get(rg.clientId) !== 1) return;
+      if (!autoIncludable(rg) || activeByClient.get(rg.clientId) !== 1) return;
       const linked = new Set(rg.items.map(it => it.entryId).filter(Boolean));
       const excluded = new Set(rg.excludedEntryIds ?? []);
       const missing = entries.filter(e => e.clientId === rg.clientId && e.rank != null && !linked.has(e.id) && !excluded.has(e.id));
@@ -1289,11 +1306,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
               };
             }),
           // 순위 보장 — "○○ 보장 몇 건 찼어?", "△△ 보장 종료/삭제" 조회·수정·삭제용.
-          rankGuarantees: rankGuaranteesRef.current.slice(0, 80).map(g => ({
-            id: g.id, clientName: g.clientName, title: g.title,
-            guaranteedCount: g.guaranteedCount, achievedCount: countAchieved(g),
-            alertOffset: g.alertOffset, cycle: g.cycle, closed: g.closed, status: g.status,
-          })),
+          rankGuarantees: rankGuaranteesRef.current.slice(0, 80).map(g => {
+            const anchorDate = clientsRef.current.find(c => c.id === g.clientId)?.reportAnchorDate;
+            const pr = progress(g, { anchorDate });
+            return {
+              id: g.id, clientName: g.clientName, title: g.title, type: guaranteeType(g),
+              guaranteedCount: g.guaranteedCount, achievedCount: pr.n, progressTarget: pr.target, progressUnit: pr.unit,
+              alertOffset: g.alertOffset, cycle: g.cycle, closed: g.closed, status: g.status,
+            };
+          }),
           // 월간 보고서(기존 초안/발행 상태) — "○○ 보고서 발행해줘", 중복/발행 판단용
           reports: reportsRef.current.slice(0, 80).map(r => ({
             id: r.id, clientName: r.clientName, period: r.period,
@@ -2432,15 +2453,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!rg || !rg.id) return;
         const prev = rankGuaranteesRef.current.find(x => x.id === rg.id);
         setRankGuarantees(list => list.some(x => x.id === rg.id) ? list.map(x => x.id === rg.id ? rg : x) : [rg, ...list]);
-        // 다른 사람이 순위를 입력해 임박/도달로 전이된 경우만 알림(내 변경은 prev 와 같아 스킵).
-        if (prev && prev.status !== rg.status && (rg.status === 'due_soon' || rg.status === 'reached')) {
-          const n = countAchieved(rg);
+        // 다른 사람이 순위를 입력해 임박/도달로 전이된 경우만 알림(내 변경은 prev 와 같아 스킵). 모니터링 제외.
+        if (prev && prev.status !== rg.status && (rg.status === 'due_soon' || rg.status === 'reached') && guaranteeType(rg) !== 'monitor') {
+          const anchorDate = clientsRef.current.find(c => c.id === rg.clientId)?.reportAnchorDate;
+          const { n, target, unit } = progress(rg, { anchorDate });
           const reached = rg.status === 'reached';
-          const title = reached ? '순위 보장 건수 도달' : '순위 보장 곧 도달';
-          const tail = reached ? '연장 또는 종료를 결정하세요' : '연장 여부를 확인하세요';
-          const body = `${rg.clientName} · ${rg.title} (${n}/${rg.guaranteedCount}건) — ${tail}`;
+          const title = reached ? '순위 보장 목표 도달' : '순위 보장 곧 도달';
+          const tail = reached ? '연장 또는 종료를 결정하세요' : '달성 상황을 확인하세요';
+          const body = `${rg.clientName} · ${rg.title} (${n}/${target}${unit}) — ${tail}`;
           pushNotification({ type: 'rank', title, body, link: '/rank-guarantee' });
-          pushStickyNotice({ type: 'rank', title, body: `${rg.clientName} ${n}/${rg.guaranteedCount}건`, link: '/rank-guarantee' });
+          pushStickyNotice({ type: 'rank', title, body: `${rg.clientName} ${n}/${target}${unit}`, link: '/rank-guarantee' });
         }
       })
       .subscribe();
