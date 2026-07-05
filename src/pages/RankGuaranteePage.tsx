@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { useRankCollect } from '../hooks/useRankCollect';
 import { todayStr } from '../utils/today';
 import {
-  thresholdOf, isRanked, STATUS_LABEL, TYPE_LABEL, guaranteeType, progress,
+  thresholdOf, STATUS_LABEL, TYPE_LABEL, guaranteeType, progress,
   appendSample, coveredDays, currentWindow, addDays, judgeOf, bestJudged, sampleJudged,
   JUDGE_PRESETS, judgePresetKey, DEFAULT_GUARANTEED_DAYS, DEFAULT_WINDOW_DAYS, DEFAULT_TARGET_RANK,
   type Judge,
@@ -397,7 +397,8 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
   const [viewCycle, setViewCycle] = useState(rg.cycle); // 보고 있는 회차(기본=현재). 과거 회차는 읽기전용 이력.
   const isCurrent = viewCycle === rg.cycle;             // 현재 회차만 편집/추가 가능
   const items = rg.items.filter(it => it.cycle === viewCycle);
-  const viewAchieved = items.filter(isRanked).length; // 보는 회차의 순위 잡힌 건수(내보내기 라벨/대상)
+  // 내보내기 라벨/대상 = 목표 순위 이내로 달성한 건수(순위만 잡힌 미달성분 제외).
+  const viewAchieved = items.filter(it => { const j = judgeOf(it, rg); const r = bestJudged(it, j); return r != null && r <= j.targetRank; }).length;
   const type = guaranteeType(rg);
   const isCoverage = type === 'keyword_coverage';
   const isMonitor = type === 'monitor';
@@ -511,11 +512,12 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
 
   // 순위가 잡힌 항목만 엑셀(CSV)로 내보낸다 — 보장 건수 도달 시 전달용. 보고 있는 회차 기준, 판정순위 오름차순.
   const exportCsv = async () => {
-    const ranked = items.filter(isRanked)
-      .map(it => ({ it, jr: bestJudged(it, judge(it)) }))
-      .filter(x => x.jr != null)
+    // 목표 순위 '이내'로 달성한 항목만 내보낸다(순위만 잡힌 미달성분은 제외). 판정순위 오름차순.
+    const ranked = items
+      .map(it => { const j = judge(it); return { it, jr: bestJudged(it, j), target: j.targetRank }; })
+      .filter(x => x.jr != null && (x.jr as number) <= x.target)
       .sort((a, b) => (a.jr as number) - (b.jr as number));
-    if (ranked.length === 0) { alert('이 회차에 순위가 잡힌 항목이 없습니다.'); return; }
+    if (ranked.length === 0) { alert('이 회차에 목표 순위 이내로 달성한 항목이 없습니다.'); return; }
     const tabStr = (it: RankGuaranteeItem) => foundRanks(it.bestByTab ?? it.rankByTab).map(r => `${SEARCH_TAB_SHORT[r.tab]} ${r.rank}위`).join(', ') || (it.rank != null ? `${it.rank}위` : '');
     const rows = ranked.map((x, i) => [i + 1, x.it.keyword, `${x.jr}위`, tabStr(x.it), x.it.link ?? '', (x.it.postDate ?? (x.it.entryId ? entriesById.get(x.it.entryId)?.date : '') ?? '')]);
     const safe = (s: string) => s.replace(/[\\/:*?"<>|]/g, '_').trim();
