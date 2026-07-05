@@ -12,4 +12,4 @@ class_name = "UsProxy"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["UsProxy"]
+new_sqlite_classes = ["UsProxy"]  # 무료 플랜은 SQLite 백엔드 DO 필요(저장소 미사용이라 무방)
