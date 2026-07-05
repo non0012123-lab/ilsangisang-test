@@ -72,6 +72,9 @@ interface AppContextType {
   removeSeries: (seriesId: string, fromDate?: string) => void;  // 반복 일정 일괄 삭제(이후 전체)
   saveClient: (client: Client) => void;
   removeClient: (id: string) => void;
+  // 개인별 즐겨찾기(별표) — 각 사용자가 자주 보는 업체를 고정. 목록/사이드바 맨 위로.
+  favoriteClientIds: Set<string>;
+  toggleFavorite: (clientId: string) => void;
   saveHandover: (doc: HandoverDoc) => void;
   removeHandover: (id: string) => void;
   saveVendor: (vendor: Vendor) => void;
@@ -212,6 +215,17 @@ const INTERNAL_CATS_LS_KEY = 'ilsangisang.internalCategories.v1';
 const FIRED_REMINDERS_LS_KEY = 'ilsangisang.firedReminders.v1'; // 이미 띄운 내부일정 리마인더(기기별, 중복 방지)
 const NOTIFS_LS_KEY = 'ilsangisang.notifications.v1';
 const DESKTOP_NOTIFY_LS_KEY = 'ilsangisang.notify.desktop.v1';
+// 개인별 클라이언트 즐겨찾기(별표). "각자"의 목록이라 사용자(uid)별로 캐시를 분리한다(공유 X).
+//  → 소스는 Supabase client_favorites(RLS 본인 행만), 로컬은 첫 화면 즉시반영용 캐시.
+const FAV_CLIENTS_LS_PREFIX = 'ilsangisang.favClients.v1.'; // + uid
+const loadFavIds = (uid?: string): string[] => {
+  if (!uid) return [];
+  try { const raw = localStorage.getItem(FAV_CLIENTS_LS_PREFIX + uid); return raw ? (JSON.parse(raw) as string[]) : []; }
+  catch { return []; }
+};
+const saveFavIds = (uid: string, ids: string[]) => {
+  try { localStorage.setItem(FAV_CLIENTS_LS_PREFIX + uid, JSON.stringify(ids)); } catch { /* 용량초과 등 무시(메모리로 동작) */ }
+};
 const NOTIFS_MAX = 50; // 알림은 최근 50개까지만 보관
 // AI 결과 화면 계열 경로 — 이 페이지에 머무는 동안엔 AI 완료 알림을 만들지 않는다(이미 보고 있으므로)
 const AI_RESULT_PATHS = ['/ai-planning', '/ai-results'];
@@ -236,6 +250,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [entries, setEntries] = useState<ScheduleEntry[]>(() => lsLoad<ScheduleEntry>(SCHEDULE_LS_KEY));
   const [clients, setClients] = useState<Client[]>(() => lsLoad<Client>(CLIENTS_LS_KEY));
+  // 개인별 즐겨찾기(별표)한 클라이언트 id 집합. uid 확정 시 로컬 캐시 → Supabase 순으로 하이드레이트.
+  const [favoriteClientIds, setFavoriteClientIds] = useState<Set<string>>(new Set());
   const [handoverDocs, setHandoverDocs] = useState<HandoverDoc[]>(() => lsLoad<HandoverDoc>(HANDOVER_LS_KEY));
   // 캐시에 일정이 있으면 즉시 그려지므로 로딩 아님. 캐시가 비었을 때만 첫 Supabase 응답 전까지 로딩.
   const [dataLoading, setDataLoading] = useState<boolean>(() => lsLoad<ScheduleEntry>(SCHEDULE_LS_KEY).length === 0);
@@ -823,6 +839,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       docs.forEach(d => persistDelete('handover_docs', d.id));
     }
   }, []);
+  // 개인 즐겨찾기 토글(별표). 로컬 캐시로 즉시 반영하고 본인 행(id=uid) 하나를 Supabase 에 upsert.
+  //  → 같은 계정 다른 기기/창은 realtime(client_favorites 구독)으로 동기화된다.
+  const toggleFavorite = useCallback((clientId: string) => {
+    if (!uid) return;
+    setFavoriteClientIds(prev => {
+      const next = new Set(prev);
+      if (next.has(clientId)) next.delete(clientId); else next.add(clientId);
+      const ids = Array.from(next);
+      saveFavIds(uid, ids);
+      // upsertRow 가 객체 전체를 data(jsonb)로 저장 → clientIds 가 그대로 보관된다(런타임엔 유지, 타입만 넓힘).
+      persistOne('client_favorites', { id: uid, clientIds: ids } as { id: string });
+      return next;
+    });
+  }, [uid]);
 
   // ── 인계문서 ──
   const saveHandover = useCallback((doc: HandoverDoc) => {
@@ -2179,6 +2209,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // user 가 바뀔 때(로그인/로그아웃)마다 담당자 목록을 다시 불러온다.
   useEffect(() => { reloadMembers(); }, [user?.id, reloadMembers]);
 
+  // 즐겨찾기: uid 확정 즉시 로컬 캐시로 하이드레이트(첫 화면 별표 바로 표시). 로그아웃 시 비운다.
+  //  → 아래 로드 이펙트에서 Supabase 원본이 도착하면 그 값으로 교체된다(기기 간 최신 반영).
+  useEffect(() => {
+    setFavoriteClientIds(new Set(loadFavIds(uid)));
+  }, [uid]);
+
   // 로그인 시 업무 데이터를 Supabase 에서 로드한다(빈 테이블이어도 목업 시드는 하지 않음).
   useEffect(() => {
     if (!supabase) { setDataLoading(false); setEntriesLoaded(true); return; }  // Supabase 미설정이면 기다릴 게 없음
@@ -2253,6 +2289,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       else if (plans && plans.length === 0 && aiHistoryRef.current.length) persistMany('ai_plans', aiHistoryRef.current);
     }));
     // 어시스턴트 대화: 최신순 정렬 후 가장 최근 대화 활성화(RLS 로 본인 것만 조회됨).
+    // 개인 즐겨찾기(RLS 로 본인 행만 옴 → 최대 1행). 테이블 미생성(마이그레이션 전)이면 null → 로컬 캐시 유지.
+    load<{ id: string; clientIds?: string[] }>('client_favorites').then(guard(rows => {
+      if (rows && rows.length) setFavoriteClientIds(new Set(rows[0].clientIds ?? []));
+    }));
     load<AssistantConversation>('assistant_conversations').then(guard(convs => {
       if (!convs) return;
       const sorted = [...convs].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -2494,6 +2534,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'handover_docs' }, sync<HandoverDoc>(setHandoverDocs))
       // 보고서 — 담당자가 발행/수정하면 클라이언트 포털·미리보기·다른 창에 실시간 반영(0041 publication+REPLICA IDENTITY FULL 필요)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, sync<Report>(setReports))
+      // 개인 즐겨찾기 — 같은 계정 다른 기기/창에서 별표를 바꾸면 반영(RLS 로 본인 이벤트만 옴, 0042 필요).
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'client_favorites' }, payload => {
+        if (payload.eventType === 'DELETE') { setFavoriteClientIds(new Set()); return; }
+        const d = (payload.new as { data?: { clientIds?: string[] } })?.data;
+        if (d) setFavoriteClientIds(new Set(d.clientIds ?? []));
+      })
       .subscribe();
     return () => { sb.removeChannel(channel); };
   }, [uid]);
@@ -2537,7 +2583,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       aiImageRunning, aiImageError, startAiImageJob,
       assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, setProposalCategory, undoAssistantProposal,
       conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
-      saveEntry, saveEntries, patchEntry, removeEntry, removeSeries, saveClient, removeClient, saveHandover, removeHandover,
+      saveEntry, saveEntries, patchEntry, removeEntry, removeSeries, saveClient, removeClient, favoriteClientIds, toggleFavorite, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
       internalEvents, internalCategories, saveInternalEvent, removeInternalEvent, saveInternalCategory, removeInternalCategory,
       salesEntries, salesAccess, saveSalesEntry, removeSalesEntry, addSalesReply, removeSalesReply,

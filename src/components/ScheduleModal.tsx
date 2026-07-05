@@ -4,6 +4,7 @@ import type { ScheduleEntry, Category, ScheduleStatus, AIMetrics, Recurrence, Se
 import { useApp } from '../context/AppContext';
 import ImageDropzone from './ImageDropzone';
 import ImageThumb from './ImageThumb';
+import ClientCombobox from './ClientCombobox';
 import { MAX_IMAGES, entryImages } from '../utils/entryImages';
 import { openExternal } from '../utils/openExternal';
 import { recurrenceOccurrences } from '../utils/recurrence';
@@ -53,7 +54,7 @@ interface Props {
 }
 
 export default function ScheduleModal({ entry, defaultDate, defaultClientId, prefill, onSave, onCreated, onClose }: Props) {
-  const { clients, members, saveEntries } = useApp();
+  const { clients, members, saveEntries, favoriteClientIds } = useApp();
   const activeClients = clients.filter(c => c.status !== 'inactive');
   const defaultClient = activeClients.find(c => c.id === defaultClientId) ?? activeClients[0];
   const isEdit = !!entry; // 반복은 신규 등록에서만 (수정은 단건)
@@ -125,11 +126,6 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
   const setMetric = (key: keyof AIMetrics, value: string) => {
     const num = Number(value.replace(/,/g, ''));
     setMetrics(prev => ({ ...prev, [key]: isNaN(num) ? value : (value === '' ? undefined : num) }));
-  };
-
-  const handleClient = (id: string) => {
-    const c = clients.find(cl => cl.id === id);
-    if (c) setForm(prev => ({ ...prev, clientId: c.id, clientName: c.name }));
   };
 
   const handleManager = (id: string) => {
@@ -294,10 +290,8 @@ export default function ScheduleModal({ entry, defaultDate, defaultClientId, pre
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">클라이언트 *</label>
-              <select value={form.clientId} onChange={e => handleClient(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <ClientCombobox clients={activeClients} value={form.clientId ?? ''} favIds={favoriteClientIds}
+                onChange={c => setForm(prev => ({ ...prev, clientId: c.id, clientName: c.name }))} />
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">카테고리 *</label>

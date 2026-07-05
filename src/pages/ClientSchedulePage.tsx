@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useParams, NavLink, Navigate } from 'react-router-dom';
-import { Plus, Pencil, Trash2, CalendarRange, Building2, Search } from 'lucide-react';
+import { Plus, Pencil, Trash2, CalendarRange, Building2, Search, Star } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import CategoryBadge from '../components/CategoryBadge';
@@ -10,14 +10,15 @@ import { entryImages } from '../utils/entryImages';
 import EntryLinkCell from '../components/EntryLinkCell';
 import ScheduleModal from '../components/ScheduleModal';
 import ScheduleCardList from '../components/ScheduleCardList';
-import type { ScheduleEntry } from '../types';
+import type { ScheduleEntry, Client } from '../types';
 import { useApp } from '../context/AppContext';
 import { useCopyToast } from '../hooks/useCopyToast';
 import { isMultiDay } from '../utils/dateRange';
+import { sortClients } from '../utils/clientSort';
 
 export default function ClientSchedulePage() {
   const { clientId = '' } = useParams<{ clientId: string }>();
-  const { entries, saveEntry, removeEntry, patchEntry, clients } = useApp();
+  const { entries, saveEntry, removeEntry, patchEntry, clients, favoriteClientIds, toggleFavorite } = useApp();
   const { notify, show: showToast } = useCopyToast();
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
@@ -32,11 +33,15 @@ export default function ClientSchedulePage() {
     for (const e of entries) m.set(e.clientId, (m.get(e.clientId) ?? 0) + 1);
     return m;
   }, [entries]);
-  // 검색어로 사이드바 목록 추리기(업체명·업종)
+  // 검색어로 사이드바 목록 추리기(업체명·업종) → 즐겨찾기 → 가나다 정렬
   const q = clientSearch.trim().toLowerCase();
-  const sidebarClients = q
-    ? tabClients.filter(c => c.name.toLowerCase().includes(q) || (c.industry ?? '').toLowerCase().includes(q))
-    : tabClients;
+  const sidebarClients = sortClients(
+    q ? tabClients.filter(c => c.name.toLowerCase().includes(q) || (c.industry ?? '').toLowerCase().includes(q)) : tabClients,
+    favoriteClientIds,
+  );
+  // 즐겨찾기/일반 분리 — 검색 중이 아닐 때만 별도 섹션으로 보여준다.
+  const favClients = q ? [] : sidebarClients.filter(c => favoriteClientIds.has(c.id));
+  const restClients = q ? sidebarClients : sidebarClients.filter(c => !favoriteClientIds.has(c.id));
 
   // 등록되지 않은 클라이언트면 첫 활성 클라이언트로 이동
   if (!client) {
@@ -67,6 +72,34 @@ export default function ClientSchedulePage() {
   const inProg = filtered.filter(e => e.status === 'in-progress').length;
   const pending = filtered.filter(e => e.status === 'pending').length;
 
+  // 사이드바 업체 한 줄. NavLink(선택 이동) 위에 별표 토글 버튼을 겹쳐 얹는다(링크 안 중첩 회피).
+  const renderClientRow = (c: Client) => {
+    const fav = favoriteClientIds.has(c.id);
+    return (
+      <div key={c.id} className="relative group">
+        <NavLink to={`/client/${c.id}`}
+          className={({ isActive }) =>
+            `flex items-center gap-2.5 pl-3 pr-9 py-2 rounded-xl text-sm transition-colors ${isActive ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-700 hover:bg-gray-50'}`
+          }>
+          {({ isActive }) => (
+            <>
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${isActive ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>{c.name[0]}</div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold truncate leading-tight">{c.name}</p>
+                <p className={`text-[11px] truncate leading-tight ${isActive ? 'text-white/70' : 'text-gray-400'}`}>{c.industry || '업종 미지정'} · {countByClient.get(c.id) ?? 0}건</p>
+              </div>
+            </>
+          )}
+        </NavLink>
+        <button type="button" onClick={() => toggleFavorite(c.id)}
+          title={fav ? '즐겨찾기 해제' : '즐겨찾기'}
+          className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors ${fav ? 'text-amber-400' : 'text-gray-300 hover:text-amber-400 opacity-0 group-hover:opacity-100'}`}>
+          <Star size={15} className={fav ? 'fill-amber-400' : ''} />
+        </button>
+      </div>
+    );
+  };
+
   return (
     <Layout>
       <Header title="클라이언트별 스케줄" subtitle="업체별 작업 현황을 확인합니다" />
@@ -84,22 +117,20 @@ export default function ClientSchedulePage() {
             <div className="space-y-1 max-h-[40vh] lg:max-h-[calc(100vh-180px)] overflow-y-auto pr-0.5">
               {sidebarClients.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center py-6">검색 결과가 없습니다</p>
-              ) : sidebarClients.map(c => (
-                <NavLink key={c.id} to={`/client/${c.id}`}
-                  className={({ isActive }) =>
-                    `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-colors ${isActive ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-700 hover:bg-gray-50'}`
-                  }>
-                  {({ isActive }) => (
+              ) : (
+                <>
+                  {favClients.length > 0 && (
                     <>
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${isActive ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>{c.name[0]}</div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold truncate leading-tight">{c.name}</p>
-                        <p className={`text-[11px] truncate leading-tight ${isActive ? 'text-white/70' : 'text-gray-400'}`}>{c.industry || '업종 미지정'} · {countByClient.get(c.id) ?? 0}건</p>
-                      </div>
+                      <p className="flex items-center gap-1 px-2 pt-1 pb-0.5 text-[10px] font-bold text-amber-500 uppercase tracking-wider">
+                        <Star size={10} className="fill-amber-400 text-amber-400" /> 즐겨찾기
+                      </p>
+                      {favClients.map(renderClientRow)}
+                      <div className="h-px bg-gray-100 my-1.5 mx-2" />
                     </>
                   )}
-                </NavLink>
-              ))}
+                  {restClients.map(renderClientRow)}
+                </>
+              )}
             </div>
           </div>
         </aside>

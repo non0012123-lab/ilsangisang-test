@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import type { ScheduleEntry, ScheduleStatus, Category } from '../types';
 import { CATEGORIES, CATEGORY_GROUPS, catLabel, normalizeNaverCategory } from '../data/categories';
+import ClientCombobox from './ClientCombobox';
 
 const STATUSES: { value: ScheduleStatus; label: string }[] = [
   { value: 'pending', label: '대기중' },
@@ -28,7 +29,7 @@ interface Props {
 }
 
 export default function AIScheduleModal({ onClose, onAdd }: Props) {
-  const { members, clients } = useApp();
+  const { members, clients, favoriteClientIds } = useApp();
   const { user } = useAuth();
   const activeClients = clients.filter(c => c.status !== 'inactive');
   // 담당자명이 매칭되지 않으면 작성 중인 본인을 기본 담당자로
@@ -210,11 +211,9 @@ export default function AIScheduleModal({ onClose, onAdd }: Props) {
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">업체</label>
-                      <select value={d.clientId} onChange={e => update(d.tempId, { clientId: e.target.value })}
-                        className={`w-full border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 ${need(d.clientId)}`}>
-                        <option value="">선택</option>
-                        {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
+                      <ClientCombobox clients={activeClients} value={d.clientId} favIds={favoriteClientIds} compact
+                        invalid={!d.clientId} placeholder="업체 선택"
+                        onChange={c => update(d.tempId, { clientId: c.id })} />
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">카테고리</label>

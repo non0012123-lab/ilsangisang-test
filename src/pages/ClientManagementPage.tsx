@@ -4,7 +4,7 @@ import { useSessionState } from '../hooks/usePersisted';
 import {
   Plus, Mail, Calendar, X, Pencil, Users, Phone, Save, Check, Copy, Sparkles,
   Link2, FileText, AlertTriangle, MessageSquare, BookOpen, ChevronDown, ChevronUp,
-  Trash2, ImageIcon, Download, Wallet, Wand2, Loader2, Search, Eye,
+  Trash2, ImageIcon, Download, Wallet, Wand2, Loader2, Search, Eye, Star,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
@@ -17,10 +17,10 @@ import { openAiPlanPrint } from '../utils/aiPlanPdf';
 import { todayStr } from '../utils/today';
 import type { Client, Category, HandoverDoc, KeyContact, ImportantLink, BudgetItem, ReportPeriod } from '../types';
 import { CATEGORIES, catLabel } from '../data/categories';
+import { sortClients } from '../utils/clientSort';
 
 // 업체 서비스 태그 선택지 — '기타'만 빼고 전체 카테고리(네이버 세부 포함)
 const ALL_CATEGORIES: Category[] = CATEGORIES.filter(c => c !== '기타');
-const STATUS_ORDER: Record<string, number> = { active: 0, pending: 1, inactive: 2 };
 
 const EMPTY_CLIENT: Omit<Client, 'id'> = {
   name: '', industry: '', contactPerson: '', email: '', phone: '',
@@ -164,7 +164,7 @@ function StatusDot({ status }: { status: Client['status'] }) {
 }
 
 export default function ClientManagementPage() {
-  const { entries, clients, saveClient, removeClient, handoverDocs, saveHandover, aiHistory } = useApp();
+  const { entries, clients, saveClient, removeClient, handoverDocs, saveHandover, aiHistory, favoriteClientIds, toggleFavorite } = useApp();
   const { user } = useAuth();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
@@ -197,13 +197,16 @@ export default function ClientManagementPage() {
   const [aiError, setAiError] = useState('');
   const [aiResult, setAiResult] = useState<AiHandoverResult | null>(null);
 
-  // Sort: active → pending → inactive
-  const sorted = [...clients].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
+  // 정렬: 즐겨찾기 → 상태(active→pending→inactive) → 가나다
+  const sorted = sortClients(clients, favoriteClientIds);
   const q = search.trim().toLowerCase();
   const filtered = sorted.filter(c =>
     (filterStatus === 'all' || c.status === filterStatus) &&
     (!q || c.name.toLowerCase().includes(q) || (c.industry ?? '').toLowerCase().includes(q))
   );
+  // 즐겨찾기 업체를 별도 섹션으로 분리(현재 필터/검색 결과 내에서). 별표한 게 없으면 섹션 숨김.
+  const favFiltered = filtered.filter(c => favoriteClientIds.has(c.id));
+  const restFiltered = filtered.filter(c => !favoriteClientIds.has(c.id));
 
   const resetSubStates = () => {
     setHoEditing(false); setHoDraft(null);
@@ -447,6 +450,51 @@ export default function ClientManagementPage() {
     navigator.clipboard.writeText(promptText);
     setPromptCopied(true);
     setTimeout(() => setPromptCopied(false), 2000);
+  };
+
+  // 업체 카드 한 장. 우상단에 별표 토글(클릭 전파 막아 카드 열림과 분리)과 상태 점.
+  const renderCard = (client: Client) => {
+    const hasHandover = handoverDocs.some(d => d.clientId === client.id);
+    const fav = favoriteClientIds.has(client.id);
+    return (
+      <div key={client.id} onClick={() => openClient(client)}
+        className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 cursor-pointer hover:border-blue-200 hover:shadow-md transition-all group">
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-lg font-bold shrink-0">
+              {client.name[0]}
+            </div>
+            <div>
+              <h3 className="font-bold text-gray-900 group-hover:text-blue-600 transition-colors">{client.name}</h3>
+              <p className="text-xs text-gray-400">{client.industry}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button type="button" title={fav ? '즐겨찾기 해제' : '즐겨찾기'}
+              onClick={e => { e.stopPropagation(); toggleFavorite(client.id); }}
+              className={`p-1 rounded-lg transition-colors ${fav ? 'text-amber-400' : 'text-gray-300 hover:text-amber-400'}`}>
+              <Star size={17} className={fav ? 'fill-amber-400' : ''} />
+            </button>
+            <StatusDot status={client.status} />
+          </div>
+        </div>
+
+        <div className="flex gap-1 flex-wrap mb-4">
+          {client.categories.map(c => <CategoryBadge key={c} category={c} />)}
+        </div>
+
+        <div className="space-y-1.5 text-xs text-gray-500 border-t border-gray-50 pt-3">
+          <div className="flex items-center gap-2"><Mail size={12} /> {client.email}</div>
+          <div className="flex items-center gap-2"><Calendar size={12} /> 계약 시작: {client.startDate}</div>
+          <div className="flex items-center justify-between">
+            {client.monthlyBudget ? <span className="font-medium text-blue-600">월 {client.monthlyBudget}</span> : <span />}
+            <span className={`inline-flex items-center gap-1 text-xs ${hasHandover ? 'text-emerald-600' : 'text-gray-300'}`}>
+              <FileText size={12} /> {hasHandover ? '인수인계 있음' : '인수인계 없음'}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -996,42 +1044,21 @@ export default function ClientManagementPage() {
               </div>
             )}
 
+            {favFiltered.length > 0 && (
+              <div className="mb-5">
+                <p className="flex items-center gap-1.5 mb-2 text-xs font-bold text-amber-500 uppercase tracking-wider">
+                  <Star size={12} className="fill-amber-400 text-amber-400" /> 즐겨찾기 ({favFiltered.length})
+                </p>
+                <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {favFiltered.map(renderCard)}
+                </div>
+              </div>
+            )}
+            {favFiltered.length > 0 && restFiltered.length > 0 && (
+              <p className="mb-2 text-xs font-bold text-gray-400 uppercase tracking-wider">전체</p>
+            )}
             <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {filtered.map(client => {
-                const hasHandover = handoverDocs.some(d => d.clientId === client.id);
-                return (
-                  <div key={client.id} onClick={() => openClient(client)}
-                    className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 cursor-pointer hover:border-blue-200 hover:shadow-md transition-all group">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-lg font-bold shrink-0">
-                          {client.name[0]}
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-gray-900 group-hover:text-blue-600 transition-colors">{client.name}</h3>
-                          <p className="text-xs text-gray-400">{client.industry}</p>
-                        </div>
-                      </div>
-                      <StatusDot status={client.status} />
-                    </div>
-
-                    <div className="flex gap-1 flex-wrap mb-4">
-                      {client.categories.map(c => <CategoryBadge key={c} category={c} />)}
-                    </div>
-
-                    <div className="space-y-1.5 text-xs text-gray-500 border-t border-gray-50 pt-3">
-                      <div className="flex items-center gap-2"><Mail size={12} /> {client.email}</div>
-                      <div className="flex items-center gap-2"><Calendar size={12} /> 계약 시작: {client.startDate}</div>
-                      <div className="flex items-center justify-between">
-                        {client.monthlyBudget ? <span className="font-medium text-blue-600">월 {client.monthlyBudget}</span> : <span />}
-                        <span className={`inline-flex items-center gap-1 text-xs ${hasHandover ? 'text-emerald-600' : 'text-gray-300'}`}>
-                          <FileText size={12} /> {hasHandover ? '인수인계 있음' : '인수인계 없음'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {restFiltered.map(renderCard)}
             </div>
           </div>
         )}
