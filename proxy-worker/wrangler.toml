@@ -1,0 +1,15 @@
+# OpenAI 미국 egress 프록시 워커 (Pages 와 별개로 배포).
+#   배포:  cd proxy-worker && npx wrangler deploy
+#   시크릿: npx wrangler secret put PROXY_SECRET
+name = "ilsangisang-openai-proxy"
+main = "index.ts"
+compatibility_date = "2025-05-01"
+
+# 미국 고정 egress 용 Durable Object.
+[[durable_objects.bindings]]
+name = "US_PROXY"
+class_name = "UsProxy"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["UsProxy"]

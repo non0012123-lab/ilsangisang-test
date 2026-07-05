@@ -44,6 +44,8 @@ function extractText(data: unknown): string {
   return parts.join('\n').trim();
 }
 
+import { openaiFetch } from './_openai';
+
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
   if (!env.OPENAI_API_KEY) return json({ error: 'OPENAI_API_KEY 가 설정되지 않았습니다.' }, 500);
@@ -78,7 +80,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   let aiRes: Response;
   try {
-    aiRes = await fetch('https://api.openai.com/v1/responses', {
+    aiRes = await openaiFetch(env, '/v1/responses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
       body: JSON.stringify({

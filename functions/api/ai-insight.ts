@@ -57,6 +57,8 @@ const fmtRanks = (rows: RankRow[]) => rows.length
     }).join('\n')
   : '(순위 잡힌 항목 없음)';
 
+import { openaiFetch } from './_openai';
+
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
   // ★ 에러도 200(JSON)으로 반환한다 — Cloudflare 가 워커의 5xx 응답을 자기 HTML 에러페이지로 바꿔치기해서,
@@ -88,7 +90,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   try {
     let aiRes: Response;
     try {
-      aiRes = await fetch('https://api.openai.com/v1/responses', {
+      aiRes = await openaiFetch(env, '/v1/responses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
         body: JSON.stringify({

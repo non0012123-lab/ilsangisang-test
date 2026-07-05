@@ -9,6 +9,7 @@
 // 환경변수: OPENAI_API_KEY(+OPENAI_MODEL) / NAVER_AD_*(검색량, 필수)
 // ───────────────────────────────────────────────────────────────
 import { keywordVolumes, normKw, type SearchAdEnv } from './_searchad';
+import { openaiFetch } from './_openai';
 
 interface Env extends SearchAdEnv {
   OPENAI_API_KEY?: string;
@@ -110,7 +111,7 @@ async function llmCandidates(env: Env, keyword: string, title?: string): Promise
   // 429(레이트리밋)·5xx 는 일시적이라 백오프 재시도. 403(지역차단)은 재시도 무의미 → 즉시 반환(폴백).
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await fetch('https://api.openai.com/v1/responses', {
+      const res = await openaiFetch(env, '/v1/responses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
         body: reqBody,

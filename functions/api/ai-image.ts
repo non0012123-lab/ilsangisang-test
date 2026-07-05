@@ -104,7 +104,7 @@ function buildPrompt(p: Platform, cols: number, clientName: string, guideline: s
 interface OpenAIImageItem { b64_json?: string }
 
 async function generate(env: Env, p: Platform, cols: number, clientName: string, guideline: string): Promise<AiImage[]> {
-  const res = await fetch('https://api.openai.com/v1/images/generations', {
+  const res = await openaiFetch(env, '/v1/images/generations', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -137,6 +137,8 @@ async function generate(env: Env, p: Platform, cols: number, clientName: string,
 }
 
 interface AiImage { id: string; platform: string; channel: string; cols: number; url: string }
+
+import { openaiFetch } from './_openai';
 
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
