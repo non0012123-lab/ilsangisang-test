@@ -13,12 +13,13 @@ import { todayStr } from '../utils/today';
 import {
   thresholdOf, STATUS_LABEL, TYPE_LABEL, guaranteeType, progress,
   appendSample, coveredDays, currentWindow, addDays, judgeOf, bestJudged, sampleJudged,
+  bestMet, sampleMet, targetForTab,
   JUDGE_PRESETS, judgePresetKey, DEFAULT_GUARANTEED_DAYS, DEFAULT_WINDOW_DAYS, DEFAULT_TARGET_RANK,
   type Judge,
 } from '../utils/rankGuarantee';
 import { SEARCH_TAB_SHORT, foundRanks, isRankTrackedCategory, effectiveSearchTabs } from '../utils/searchTabs';
 import ClientCombobox from '../components/ClientCombobox';
-import type { RankGuarantee, RankGuaranteeItem, RankGuaranteeStatus, RankGuaranteeType, RankSample, ScheduleEntry } from '../types';
+import type { RankGuarantee, RankGuaranteeItem, RankGuaranteeStatus, RankGuaranteeType, RankSample, ScheduleEntry, SearchTab } from '../types';
 
 const genId = (p: string) => `${p}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -50,12 +51,14 @@ interface FormState {
   windowDays: number;        // keyword_coverage / count_monthly
   targetRank: number;        // 기본 목표순위 (모든 방식)
   judgeKey: string;          // 판정탭 프리셋 키 (any/integrated/blog/cafe)
+  targetIntegrated: string;  // 탭별 목표순위(선택, 판정=any일 때) — 통합검색. 빈값=targetRank 폴백
+  targetBlog: string;        // 탭별 목표순위(선택, 판정=any일 때) — 블로그탭. 빈값=targetRank 폴백
   alertOffset: number;
 }
 const EMPTY_FORM: FormState = {
   clientId: '', title: '', type: 'count_monthly',
   guaranteedCount: 20, guaranteedDays: DEFAULT_GUARANTEED_DAYS, windowDays: DEFAULT_WINDOW_DAYS,
-  targetRank: DEFAULT_TARGET_RANK, judgeKey: 'any', alertOffset: 2,
+  targetRank: DEFAULT_TARGET_RANK, judgeKey: 'any', targetIntegrated: '', targetBlog: '', alertOffset: 2,
 };
 
 // 방식 선택지(생성 폼). 레거시 count 는 신규 생성에선 노출하지 않는다(기존 데이터만 유지).
@@ -114,6 +117,8 @@ export default function RankGuaranteePage() {
       guaranteedCount: rg.guaranteedCount, guaranteedDays: rg.guaranteedDays ?? DEFAULT_GUARANTEED_DAYS,
       windowDays: rg.windowDays ?? DEFAULT_WINDOW_DAYS, targetRank: rg.targetRank ?? DEFAULT_TARGET_RANK,
       judgeKey: judgePresetKey(rg.judgeTabs), alertOffset: rg.alertOffset,
+      targetIntegrated: rg.targetByTab?.integrated != null ? String(rg.targetByTab.integrated) : '',
+      targetBlog: rg.targetByTab?.blog != null ? String(rg.targetByTab.blog) : '',
     });
     setEditId(rg.id);
     setShowForm(true);
@@ -131,7 +136,17 @@ export default function RankGuaranteePage() {
     const alertOffset = Math.min(alertMax, Math.max(0, Math.floor(form.alertOffset) || 0));
     const targetRank = Math.max(1, Math.floor(form.targetRank) || DEFAULT_TARGET_RANK);
     const judgeTabs = JUDGE_PRESETS.find(p => p.key === form.judgeKey)?.tabs ?? JUDGE_PRESETS[0].tabs;
-    const patch = { clientId: client.id, clientName: client.name, title: form.title.trim(), type, guaranteedCount, guaranteedDays, windowDays, targetRank, judgeTabs, alertOffset };
+    // 탭별 목표순위(판정=둘 중 아무데나일 때만) — 값이 있는 탭만 저장, 없는 탭은 targetRank 폴백. 다 비면 undefined(=탭별맵 미사용).
+    let targetByTab: Partial<Record<SearchTab, number>> | undefined;
+    if (form.judgeKey === 'any') {
+      const map: Partial<Record<SearchTab, number>> = {};
+      const ti = Math.floor(Number(form.targetIntegrated));
+      const tb = Math.floor(Number(form.targetBlog));
+      if (form.targetIntegrated.trim() !== '' && ti >= 1) map.integrated = ti;
+      if (form.targetBlog.trim() !== '' && tb >= 1) map.blog = tb;
+      if (Object.keys(map).length) targetByTab = map;
+    }
+    const patch = { clientId: client.id, clientName: client.name, title: form.title.trim(), type, guaranteedCount, guaranteedDays, windowDays, targetRank, judgeTabs, targetByTab, alertOffset };
     if (editId) {
       const cur = rankGuarantees.find(r => r.id === editId);
       if (!cur) return;
@@ -315,8 +330,30 @@ export default function RankGuaranteePage() {
                 </div>
               </div>
               <p className="text-[11px] text-gray-400 -mt-1">
-                {form.judgeKey === 'any' ? '통합검색·블로그탭 중 아무데나' : JUDGE_PRESETS.find(p => p.key === form.judgeKey)?.label}에서 <b className="text-gray-500">{form.targetRank || 10}위 이내</b>면 달성으로 봅니다. (항목별 조정 가능)
+                {form.judgeKey === 'any' ? '통합검색·블로그탭 중 한 탭이라도' : JUDGE_PRESETS.find(p => p.key === form.judgeKey)?.label}에서 <b className="text-gray-500">{form.targetRank || 10}위 이내</b>면 달성으로 봅니다{form.judgeKey === 'any' ? '(OR)' : ''}. (항목·탭별 조정 가능)
               </p>
+
+              {/* 탭별 목표순위 — 판정이 '둘 중 아무데나'일 때만. 비우면 위 목표순위를 그대로 적용(하위호환) */}
+              {form.judgeKey === 'any' && (
+                <div className="rounded-lg border border-gray-100 bg-gray-50/60 p-3 space-y-2 -mt-1">
+                  <p className="text-[11px] font-semibold text-gray-500">탭별 목표순위 <span className="font-normal text-gray-400">(선택 · 비우면 위 목표순위 적용)</span></p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="block text-[11px] text-gray-500 mb-1">통합검색 목표(이내)</span>
+                      <input type="number" min={1} value={form.targetIntegrated} placeholder={String(form.targetRank || 10)}
+                        onChange={e => setForm(f => ({ ...f, targetIntegrated: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </label>
+                    <label className="block">
+                      <span className="block text-[11px] text-gray-500 mb-1">블로그탭 목표(이내)</span>
+                      <input type="number" min={1} value={form.targetBlog} placeholder={String(form.targetRank || 10)}
+                        onChange={e => setForm(f => ({ ...f, targetBlog: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-gray-400">예: 통합 <b>10</b>·블로그 <b>5</b> → 통합 10위 이내 <b>또는</b> 블로그 5위 이내면 달성.</p>
+                </div>
+              )}
 
               {(form.type === 'count' || form.type === 'count_monthly') && (
                 <>
@@ -398,7 +435,7 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
   const isCurrent = viewCycle === rg.cycle;             // 현재 회차만 편집/추가 가능
   const items = rg.items.filter(it => it.cycle === viewCycle);
   // 내보내기 라벨/대상 = 목표 순위 이내로 달성한 건수(순위만 잡힌 미달성분 제외).
-  const viewAchieved = items.filter(it => { const j = judgeOf(it, rg); const r = bestJudged(it, j); return r != null && r <= j.targetRank; }).length;
+  const viewAchieved = items.filter(it => bestMet(it, judgeOf(it, rg)) != null).length;
   const type = guaranteeType(rg);
   const isCoverage = type === 'keyword_coverage';
   const isMonitor = type === 'monitor';
@@ -514,9 +551,9 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
   const exportCsv = async () => {
     // 목표 순위 '이내'로 달성한 항목만 내보낸다(순위만 잡힌 미달성분은 제외). 판정순위 오름차순.
     const ranked = items
-      .map(it => { const j = judge(it); return { it, jr: bestJudged(it, j), target: j.targetRank }; })
-      .filter(x => x.jr != null && (x.jr as number) <= x.target)
-      .sort((a, b) => (a.jr as number) - (b.jr as number));
+      .map(it => ({ it, jr: bestMet(it, judge(it)) }))
+      .filter((x): x is { it: RankGuaranteeItem; jr: number } => x.jr != null)
+      .sort((a, b) => a.jr - b.jr);
     if (ranked.length === 0) { alert('이 회차에 목표 순위 이내로 달성한 항목이 없습니다.'); return; }
     const tabStr = (it: RankGuaranteeItem) => foundRanks(it.bestByTab ?? it.rankByTab).map(r => `${SEARCH_TAB_SHORT[r.tab]} ${r.rank}위`).join(', ') || (it.rank != null ? `${it.rank}위` : '');
     const rows = ranked.map((x, i) => [i + 1, x.it.keyword, `${x.jr}위`, tabStr(x.it), x.it.link ?? '', (x.it.postDate ?? (x.it.entryId ? entriesById.get(x.it.entryId)?.date : '') ?? '')]);
@@ -668,8 +705,8 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
                   const linked = !!it.entryId;
                   const editable = isCurrent && !linked;          // 수동 항목만 키워드 직접 편집
                   const jd = judge(it);
-                  const jr = bestJudged(it, jd);                  // 역대 최고 판정순위(밀려도 유지)
-                  const hit = jr != null && jr <= jd.targetRank;  // 목표순위 이내 달성?
+                  const jr = bestJudged(it, jd);                  // 표시용 역대 최고 순위(목표 무관, 밀려도 유지)
+                  const hit = bestMet(it, jd) != null;            // 목표순위 이내 달성?(탭별 OR)
                   const tabs = foundRanks(it.bestByTab ?? it.rankByTab); // 탭별 역대 최고 순위(증빙)
                   const cov = isCoverage ? coveredDays(it, win, jd) : 0;
                   const itemJudgeKey = it.judgeTabs ? judgePresetKey(it.judgeTabs) : '';
@@ -702,7 +739,7 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
                           <div className="flex flex-wrap gap-1">
                             {tabs.map(r => {
                               const inJudge = jd.judgeTabs.includes(r.tab);
-                              const cls = inJudge && r.rank <= jd.targetRank ? 'bg-green-100 text-green-700'
+                              const cls = inJudge && r.rank <= targetForTab(jd, r.tab) ? 'bg-green-100 text-green-700'
                                 : inJudge ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500';
                               return <span key={r.tab} className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold ${cls}`} title={inJudge ? '판정 대상 탭' : '참고(판정 제외)'}>{SEARCH_TAB_SHORT[r.tab]} {r.rank}</span>;
                             })}
@@ -882,8 +919,7 @@ function CoverageStrip({ item, win, judge, today }: { item: RankGuaranteeItem; w
   const covered = new Set<string>();
   for (const s of item.samples ?? []) {
     if (s.date < win.start || s.date > win.end) continue;
-    const r = sampleJudged(s, judge.judgeTabs);
-    if (r != null && r <= judge.targetRank) covered.add(s.date);
+    if (sampleMet(s, judge) != null) covered.add(s.date);
   }
   const days: string[] = [];
   for (let d = win.start; d <= win.end; d = addDays(d, 1)) days.push(d);

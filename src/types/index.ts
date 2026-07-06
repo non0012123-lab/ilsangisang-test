@@ -498,7 +498,8 @@ export interface RankGuaranteeItem {
   // ── 목표순위·판정탭 (항목 덮어쓰기) ──
   //  • 미지정이면 보장(캠페인)의 targetRank/judgeTabs 를 따른다.
   targetRank?: number;         // 이 순위 '이내'면 달성 인정 (예: 10 = 10위 이내)
-  judgeTabs?: SearchTab[];     // 판정 기준 탭(들). 여럿이면 그 중 최상위 순위로 판정(둘 중 아무데나)
+  judgeTabs?: SearchTab[];     // 판정 기준 탭(들). 여럿이면 탭별 목표 이내인 탭이 하나라도 있으면 달성(OR)
+  targetByTab?: Partial<Record<SearchTab, number>>; // 판정탭별 목표순위(예: 통합 10·블로그 5). 없는 탭은 targetRank 폴백
   targetTab?: SearchTab;       // (레거시) 단일 판정 탭 — judgeTabs 로 대체됨
   samples?: RankSample[];      // 일별 순위 이력(최근 ~35일 보관, 초과분 evict). 커버리지 일수·추이 계산 원천.
 }
@@ -515,6 +516,7 @@ export interface RankGuarantee {
   // ── 목표순위·판정탭 (보장 단위 기본값, 항목이 덮어쓸 수 있음). 모든 방식에 적용. ──
   targetRank?: number;     // 기본 목표순위 — 이 순위 이내면 '달성'(기본 10위=1페이지)
   judgeTabs?: SearchTab[]; // 기본 판정 탭 — 통합검색만/블로그탭만/둘 다(기본 [integrated,blog]=둘 중 아무데나)
+  targetByTab?: Partial<Record<SearchTab, number>>; // 판정탭별 목표순위(예: 통합 10·블로그 5). 없는 탭은 targetRank 폴백(OR 판정)
   alertOffset: number;     // 목표 몇 건/일 전에 알림 (기본 2)
   cycle: number;           // 현재 회차 (연장 시 +1)
   closed?: boolean;        // 종료(연장 안 함) — true 면 카운팅/알림 멈춤

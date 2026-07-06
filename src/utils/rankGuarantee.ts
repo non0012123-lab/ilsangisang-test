@@ -1,6 +1,7 @@
 // 순위 보장 카운팅/상태 파생 헬퍼 — 페이지(표시)와 AppContext(저장/알림)가 함께 쓴다.
 //  • 카운트/커버리지는 저장값이 아니라 items 에서 매번 센다(수정·삭제에도 자동 정확).
-//  • "달성(인정)" 기준 = 판정탭(judgeTabs) 중 최상위 순위가 목표순위(targetRank) '이내'. 여기 한 곳에서만 정의.
+//  • "달성(인정)" 기준 = 판정탭(judgeTabs) 중 '자기 탭 목표순위 이내'인 탭이 하나라도 있으면(OR).
+//    탭별 목표는 targetByTab(예: 통합 10·블로그 5), 없는 탭은 targetRank 폴백. 여기 한 곳에서만 정의.
 //  • 판정탭/목표순위는 보장(캠페인) 기본값 + 항목 덮어쓰기(judgeOf 로 해석). [[rank-guarantee]]
 import type { RankGuarantee, RankGuaranteeItem, RankGuaranteeStatus, RankGuaranteeType, RankSample, SearchTab } from '../types';
 import { todayStr, localDateStr } from './today';
@@ -15,14 +16,50 @@ export const DEFAULT_JUDGE_TABS: SearchTab[] = ['integrated', 'blog']; // 기본
 export const guaranteeType = (rg: Pick<RankGuarantee, 'type'>): RankGuaranteeType => rg.type ?? 'count';
 
 // ── 목표순위·판정탭 해석 (항목 → 보장 → 기본값) ──
-export interface Judge { targetRank: number; judgeTabs: SearchTab[] }
+//  targetByTab: 판정탭별 목표순위(통합 10·블로그 5 등). 없는 탭은 targetRank 로 폴백.
+export interface Judge { targetRank: number; judgeTabs: SearchTab[]; targetByTab?: Partial<Record<SearchTab, number>> }
 export function judgeOf(
-  item: Pick<RankGuaranteeItem, 'targetRank' | 'judgeTabs' | 'targetTab'>,
-  rg: Pick<RankGuarantee, 'targetRank' | 'judgeTabs'>,
+  item: Pick<RankGuaranteeItem, 'targetRank' | 'judgeTabs' | 'targetTab' | 'targetByTab'>,
+  rg: Pick<RankGuarantee, 'targetRank' | 'judgeTabs' | 'targetByTab'>,
 ): Judge {
   const targetRank = item.targetRank ?? rg.targetRank ?? DEFAULT_TARGET_RANK;
   const judgeTabs = item.judgeTabs ?? (item.targetTab ? [item.targetTab] : undefined) ?? rg.judgeTabs ?? DEFAULT_JUDGE_TABS;
-  return { targetRank, judgeTabs: judgeTabs.length ? judgeTabs : DEFAULT_JUDGE_TABS };
+  // 항목이 자체 targetByTab 를 두면 그것, 없으면: 항목이 flat targetRank 를 지정했으면 그 값을 모든 탭에 적용(보장 탭별맵 무시),
+  // 그것도 없으면 보장(캠페인)의 탭별맵을 상속.
+  const targetByTab = item.targetByTab ?? (item.targetRank != null ? undefined : rg.targetByTab);
+  return { targetRank, judgeTabs: judgeTabs.length ? judgeTabs : DEFAULT_JUDGE_TABS, targetByTab };
+}
+// 판정탭의 목표순위 — 탭별 지정값 우선, 없으면 기본 targetRank.
+export const targetForTab = (judge: Judge, tab: SearchTab): number => judge.targetByTab?.[tab] ?? judge.targetRank;
+
+const anyTabNum = (m?: Partial<Record<SearchTab, number | null>>): boolean =>
+  !!m && Object.values(m).some(v => typeof v === 'number');
+
+// 탭별 순위 맵에서 '자기 탭 목표 이내'인 탭들(OR). 하나라도 있으면 달성, 대표순위 = 그 중 최상위(min). 없으면 undefined.
+export function metRank(ranks: Partial<Record<SearchTab, number | null>> | undefined, judge: Judge): number | undefined {
+  if (!ranks) return undefined;
+  const passed: number[] = [];
+  for (const t of judge.judgeTabs) {
+    const r = ranks[t];
+    if (typeof r === 'number' && r <= targetForTab(judge, t)) passed.push(r);
+  }
+  return passed.length ? Math.min(...passed) : undefined;
+}
+// 항목의 '역대 최고' 달성순위 — bestByTab(sticky) 우선 → 현재 rankByTab → 탭데이터 전무 시 레거시 rank(기본 targetRank 판정).
+export function bestMet(item: RankGuaranteeItem, judge: Judge): number | undefined {
+  const b = metRank(item.bestByTab, judge);
+  if (b != null) return b;
+  const c = metRank(item.rankByTab, judge);
+  if (c != null) return c;
+  if (!anyTabNum(item.bestByTab) && !anyTabNum(item.rankByTab) && typeof item.rank === 'number' && item.rank <= judge.targetRank) return item.rank;
+  return undefined;
+}
+// 샘플의 달성순위 — ranks(탭별) 우선, 없으면 레거시 단일 rank(기본 targetRank 판정).
+export function sampleMet(s: RankSample, judge: Judge): number | undefined {
+  const m = metRank(s.ranks, judge);
+  if (m != null) return m;
+  if (!anyTabNum(s.ranks) && typeof s.rank === 'number' && s.rank <= judge.targetRank) return s.rank;
+  return undefined;
 }
 
 // 탭별 순위 맵에서 판정탭 중 최상위(min). 잡힌 게 없으면 undefined.
@@ -71,13 +108,13 @@ export function appendSample(samples: RankSample[] | undefined, sample: RankSamp
   return [...rest, sample].sort((a, b) => a.date.localeCompare(b.date)).slice(-SAMPLE_KEEP_DAYS);
 }
 
-// ── 레거시 건수 보장(count) ──
-// 순위가 하나라도 잡혀 있으면 카운트(목표순위 미적용 — 기존 데이터 안정성 유지). best/current/legacy 모두 인정.
+// ── 건수 보장(count) ──
+// '목표순위 이내' 달성 건수 — 엑셀 내보내기·집계와 동일 기준(bestMet, 탭별 OR). 미달성분(순위만 잡힌 건)은 제외.
 export const isRanked = (it: RankGuaranteeItem): boolean =>
   (!!it.bestByTab && Object.values(it.bestByTab).some(v => typeof v === 'number')) ||
   (!!it.rankByTab && Object.values(it.rankByTab).some(v => typeof v === 'number')) || it.rank != null;
-export const countAchieved = (rg: Pick<RankGuarantee, 'items' | 'cycle'>): number =>
-  rg.items.filter(it => it.cycle === rg.cycle && isRanked(it)).length;
+export const countAchieved = (rg: Pick<RankGuarantee, 'items' | 'cycle' | 'targetRank' | 'judgeTabs' | 'targetByTab'>): number =>
+  coverageItems(rg).filter(it => bestMet(it, judgeOf(it, rg)) != null).length;
 
 // 현재 회차의 대상 항목.
 export const coverageItems = (rg: Pick<RankGuarantee, 'items' | 'cycle'>): RankGuaranteeItem[] =>
@@ -86,11 +123,10 @@ export const coverageItems = (rg: Pick<RankGuarantee, 'items' | 'cycle'>): RankG
 // ── 월 건바이건(count_monthly) ──
 // 윈도우(포스팅일 기준) 안에서 '목표순위 이내'로 잡힌 건수.
 //  • 판정은 bestByTab(역대 최고) 기준 → 1일이라도 달성하면 카운트, 재수집으로 밀려도 안 빠짐.
-export function countInWindow(rg: Pick<RankGuarantee, 'items' | 'cycle' | 'targetRank' | 'judgeTabs'>, w: { start: string; end: string }): number {
+export function countInWindow(rg: Pick<RankGuarantee, 'items' | 'cycle' | 'targetRank' | 'judgeTabs' | 'targetByTab'>, w: { start: string; end: string }): number {
   return coverageItems(rg).filter(it => {
     const judge = judgeOf(it, rg);
-    const r = bestJudged(it, judge);
-    if (r == null || r > judge.targetRank) return false;
+    if (bestMet(it, judge) == null) return false;
     const date = it.postDate ?? it.rankedAt ?? (it.samples?.length ? it.samples[it.samples.length - 1].date : undefined);
     return inWindow(date, w);
   }).length;
@@ -102,8 +138,7 @@ export function coveredDays(item: RankGuaranteeItem, w: { start: string; end: st
   const seen = new Set<string>();
   for (const s of item.samples ?? []) {
     if (s.date < w.start || s.date > w.end) continue;
-    const r = sampleJudged(s, judge.judgeTabs);
-    if (r != null && r <= judge.targetRank) seen.add(s.date);
+    if (sampleMet(s, judge) != null) seen.add(s.date);
   }
   return seen.size;
 }
