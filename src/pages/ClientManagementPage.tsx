@@ -1117,6 +1117,18 @@ export default function ClientManagementPage() {
                 </select>
               </div>
 
+              {/* 포털 노출 시작일 — 이 날짜 이전 작업·보고서는 클라이언트 화면에서 숨김(내부는 전부 노출) */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">포털 노출 시작일 <span className="text-gray-400 font-normal">(클라이언트 화면)</span></label>
+                <input type="date" value={form.portalCutoff ?? ''}
+                  onChange={e => setForm(prev => ({ ...prev, portalCutoff: e.target.value || undefined }))}
+                  className="w-full sm:w-52 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <p className="mt-1 text-[11px] text-gray-400 leading-relaxed">
+                  이 날짜 <b>이전</b>의 작업·보고서는 클라이언트 포털에서 숨겨집니다(내부 시스템은 전부 표시).<br />
+                  비워두면 정식 개시일 <b>2026-07-01</b>이 적용됩니다.
+                </p>
+              </div>
+
               {/* 월간 보고서 자동화 설정 */}
               <div className="border border-gray-100 rounded-xl p-4 bg-gray-50/50 space-y-3">
                 <p className="text-xs font-bold text-gray-700">월간 보고서 자동화</p>

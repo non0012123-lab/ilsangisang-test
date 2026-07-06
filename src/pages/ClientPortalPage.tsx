@@ -18,6 +18,7 @@ import { ruleBasedInsight, insightBreakdown } from '../utils/clientInsight';
 import { foundRanks, SEARCH_TAB_SHORT, entryLinks } from '../utils/searchTabs';
 import { supabase } from '../lib/supabase';
 import type { ScheduleEntry, ClientInsight } from '../types';
+import { DEFAULT_PORTAL_CUTOFF } from '../types';
 import { CATEGORIES, catHex } from '../data/categories';
 
 type Tab = 'dashboard' | 'category' | 'media' | 'timetable' | 'reports' | 'keywords';
@@ -279,7 +280,12 @@ export default function ClientPortalPage() {
   // DB 에 아무것도 쓰지 않으므로 내부 시스템(관리/대시보드/보고서)에 절대 노출되지 않는다.
   const isDemo = clientId === DEMO_CLIENT_ID;
   const client = isDemo ? DEMO_CLIENT : clients.find(c => c.id === clientId);
-  const entries = isDemo ? DEMO_ENTRIES : allEntries.filter(e => e.clientId === clientId);
+  // 포털 노출 시작일(컷오프) — 이 날짜 이전의 작업·보고서는 광고주에게 숨긴다(6월 테스트 데이터 차단).
+  //  실제 클라이언트는 RLS(0043)로 서버에서 차단되지만, 직원은 is_staff 로 RLS 를 통과하므로
+  //  '미리보기'가 실제 클라이언트 화면과 같도록 여기서도 동일 컷오프를 건다(서버·프론트 같은 값).
+  //  데모(쇼케이스) 계정은 정적 데이터라 컷오프 미적용.
+  const portalCutoff = isDemo ? '' : (client?.portalCutoff || DEFAULT_PORTAL_CUTOFF);
+  const entries = isDemo ? DEMO_ENTRIES : allEntries.filter(e => e.clientId === clientId && (e.date ?? '') >= portalCutoff);
   const TODAY = todayStr();
 
   // 발행된(published) 보고서만 노출한다. 생성·발행은 담당자가 '클라이언트 관리 → 보고서' 탭에서 검토 후 처리.
@@ -287,7 +293,7 @@ export default function ClientPortalPage() {
   const clientReports = isDemo
     ? DEMO_REPORTS
     : allReports
-        .filter(r => r.clientId === clientId && r.status !== 'draft')
+        .filter(r => r.clientId === clientId && r.status !== 'draft' && ((r.periodEnd ?? r.date) ?? '') >= portalCutoff)
         .sort((a, b) => (b.periodEnd ?? b.date).localeCompare(a.periodEnd ?? a.date));
 
   // 마케팅 현황 기간 — 기본은 '지난 30일'(한 달 성과를 한눈에), 당일/7일/기간 지정으로 전환 가능
