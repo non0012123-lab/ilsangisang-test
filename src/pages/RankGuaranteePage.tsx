@@ -452,8 +452,9 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
   const collectEntryIds = items.map(it => it.entryId).filter((x): x is string => !!x);
   const runCollect = async () => {
     if (!collectEntryIds.length) { flash('수집할 연동 일정이 없습니다. 일정에서 불러온 항목이 있어야 합니다.'); return; }
-    await collect({ entryIds: collectEntryIds, mode: 'all' });
-    flash(`✓ ${collectEntryIds.length}건 순위 수집을 요청했어요 — 진행 현황은 좌하단에 표시됩니다.`);
+    // 월보장은 롱테일이 불필요 → 메인 키워드만 수집(롱테일 발굴·순위 생략). 0044 계약.
+    await collect({ entryIds: collectEntryIds, mode: 'all', includeLongtail: false });
+    flash(`✓ ${collectEntryIds.length}건 순위 수집을 요청했어요(메인 키워드만) — 진행 현황은 좌하단에 표시됩니다.`);
   };
 
   const enterBlur = (e: React.KeyboardEvent) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); };
@@ -640,7 +641,7 @@ function DetailModal({ rg, entries, anchorDate, onClose, onChange }: { rg: RankG
             <div className="flex items-center justify-between gap-2 bg-blue-50/60 border border-blue-100 rounded-xl px-3 py-2.5">
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-blue-800">순위 수집</p>
-                <p className="text-[11px] text-blue-500/80 truncate">연동 일정 {collectEntryIds.length}건의 탭별 순위를 지금 수집합니다.</p>
+                <p className="text-[11px] text-blue-500/80 truncate">연동 일정 {collectEntryIds.length}건의 메인 키워드 순위를 지금 수집합니다(롱테일 제외).</p>
               </div>
               <button onClick={runCollect} disabled={collecting || collectEntryIds.length === 0}
                 className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-semibold rounded-lg transition-colors shrink-0">

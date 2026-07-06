@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 
 interface Job {
-  id: string; status: string; mode: string;
+  id: string; status: string; mode: string; include_longtail?: boolean;
   total: number; done: number; success: number; not_found: number; failed: number;
   main_count: number; error?: string | null; finished_at?: string | null;
 }
@@ -97,7 +97,7 @@ export default function RankCollectWidget() {
       {/* 메인 키워드 개수 */}
       <div className="flex items-center justify-between text-[11px]">
         <span className="text-gray-500">메인 키워드</span>
-        <span className="font-semibold text-gray-800">{job.main_count}개{job.mode === 'all' ? ' · 롱테일 포함' : ''}</span>
+        <span className="font-semibold text-gray-800">{job.main_count}개{job.include_longtail === false ? ' · 메인만' : ' · 롱테일 포함'}</span>
       </div>
 
       {/* 진행 바(탭 단위) */}

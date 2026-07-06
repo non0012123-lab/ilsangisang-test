@@ -32,6 +32,7 @@ export default function RankCollectButton({ entries }: { entries: ScheduleEntry[
   const [scope, setScope] = useState<Scope>('mine');     // 기본=본인
   const [managerId, setManagerId] = useState(user?.id ?? '');
   const [mode, setMode] = useState<RankMode>('all');     // 기본=전체수집
+  const [includeLongtail, setIncludeLongtail] = useState(true); // 기본=메인+롱테일(기존 동작 유지)
 
   const MODE_LABEL: Record<RankMode, string> = { all: '전체수집', uncollected: '미수집', unexposed: '미노출' };
 
@@ -52,18 +53,20 @@ export default function RankCollectButton({ entries }: { entries: ScheduleEntry[
     for (const e of scoped) {
       const eff = effectiveSearchTabs(e);
       let n = matchTabs(eff, e.rankByTab, mode);
-      for (const s of e.subKeywords ?? []) n += matchTabs(eff, s.rankByTab, mode);
+      // 메인+롱테일일 때만 기존 롱테일 탭도 재수집 대상(메인만이면 롱테일 미포함 — 0044)
+      if (includeLongtail) for (const s of e.subKeywords ?? []) n += matchTabs(eff, s.rankByTab, mode);
       if (n > 0) { ents++; tabsN += n; ids.push(e.id); }
     }
     return { ents, tabsN, ids };
-  }, [scoped, mode]);
+  }, [scoped, mode, includeLongtail]);
 
   const scopeLabel = scope === 'all' ? '전체' : scope === 'manager' ? (members.find(m => m.id === managerId)?.name ?? '담당자') : '내 담당';
 
   const run = async () => {
-    const modeDesc = mode === 'all' ? '전체수집 + 롱테일 발굴' : mode === 'uncollected' ? '미수집 탭만' : '미노출 탭만';
-    if (!window.confirm(`[${scopeLabel}] ${MODE_LABEL[mode]} 대상 ${stat.ents}건(${stat.tabsN}탭)을 수집 요청합니다.\n(${modeDesc})\n계속할까요?`)) return;
-    await collect({ entryIds: stat.ids, mode });
+    const modeDesc = mode === 'all' ? '전체 탭 재수집' : mode === 'uncollected' ? '미수집 탭만' : '미노출 탭만';
+    const ltDesc = includeLongtail ? '메인+롱테일(신규 발굴 포함)' : '메인 키워드만';
+    if (!window.confirm(`[${scopeLabel}] ${MODE_LABEL[mode]} 대상 ${stat.ents}건(${stat.tabsN}탭)을 수집 요청합니다.\n(${modeDesc} · ${ltDesc})\n계속할까요?`)) return;
+    await collect({ entryIds: stat.ids, mode, includeLongtail });
     setOpen(false);
     setDone(true);
     setTimeout(() => setDone(false), 2500);
@@ -113,10 +116,27 @@ export default function RankCollectButton({ entries }: { entries: ScheduleEntry[
               </div>
               <p className="mt-1 text-[10px] text-gray-400 leading-snug">
                 {mode === 'all'
-                  ? '모든 탭을 다시 수집 + 롱테일 재발굴(순위 변동 확인용). 기본값.'
+                  ? '모든 탭을 다시 수집(순위 변동 확인용). 기본값.'
                   : mode === 'uncollected'
                   ? '아직 한 번도 안 돌린 탭만 수집(신규 등록·새 탭 채우기). 이미 확인한 탭은 건너뜀(프록시 절약).'
                   : '수집은 했지만 순위를 못 찾은 탭만 재확인(2주 뒤 잡히는 케이스 추적). 미수집 탭은 건너뜀.'}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-[11px] font-semibold text-gray-500 mb-1">롱테일</p>
+              <div className="flex gap-1">
+                {([[false, '메인만'], [true, '메인+롱테일']] as [boolean, string][]).map(([v, lb]) => (
+                  <button key={String(v)} onClick={() => setIncludeLongtail(v)}
+                    className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition ${includeLongtail === v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
+                    {lb}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-[10px] text-gray-400 leading-snug">
+                {includeLongtail
+                  ? '메인 + 롱테일(서브키워드)까지 수집. 롱테일이 아직 없는 항목만 새로 발굴하고, 이미 있는 항목은 순위만 갱신.'
+                  : '메인 키워드만 수집(롱테일 발굴·순위 모두 생략). 월보장 등 롱테일이 불필요할 때.'}
               </p>
             </div>
 

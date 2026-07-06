@@ -14,7 +14,8 @@ export function useRankCollect() {
   const [error, setError] = useState('');
 
   // entryIds = 이 화면의 순위추적 일정 id 들. 그 일정만 수집한다.
-  const collect = useCallback(async (opts: { entryIds: string[]; mode: RankMode }) => {
+  //  includeLongtail: false=메인 키워드만, true(기본)=메인+롱테일(발굴은 롱테일 없는 항목만 — 0044).
+  const collect = useCallback(async (opts: { entryIds: string[]; mode: RankMode; includeLongtail?: boolean }) => {
     if (!supabase || !user || opts.entryIds.length === 0) return;
     setBusy(true); setError('');
     try {
@@ -26,6 +27,7 @@ export function useRankCollect() {
         p_requested_by: user.id,
         p_requested_by_name: user.name ?? '',
         p_entry_ids: opts.entryIds,
+        p_include_longtail: opts.includeLongtail ?? true,
       });
       if (e) throw e;
     } catch (e) {
