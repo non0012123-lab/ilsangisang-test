@@ -69,6 +69,9 @@ interface AppContextType {
   saveEntries: (entries: ScheduleEntry[]) => void;
   patchEntry: (id: string, patch: Partial<ScheduleEntry>) => void;
   removeEntry: (id: string) => void;
+  // 서버의 최신 일정 값을 강제로 다시 읽어 반영(순위 수집 결과 재동기화용).
+  //  ids 생략/빈 배열이면 로컬의 순위추적 일정 전체를 대상으로 한다.
+  refreshEntries: (ids?: string[]) => Promise<void>;
   removeSeries: (seriesId: string, fromDate?: string) => void;  // 반복 일정 일괄 삭제(이후 전체)
   saveClient: (client: Client) => void;
   removeClient: (id: string) => void;
@@ -676,6 +679,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setEntries(prev => prev.filter(e => !ids.has(e.id)));
     targets.forEach(e => { persistDelete('schedule_entries', e.id); freezeGuaranteeLinks(e.id); });
   }, [freezeGuaranteeLinks]);
+  // 지정한 일정들을 서버에서 다시 읽어 로컬 상태에 반영한다(순위 수집 결과 재동기화).
+  //  • 왜 필요한가: 수집기의 patch_entry_ranks 결과는 realtime UPDATE 로만 앱에 들어오는데,
+  //    schedule_entries 는 REPLICA IDENTITY FULL(0017) 이라 old+new 행 전체가 실려 나간다.
+  //    이미지가 붙은 일정은 media 컬럼(base64) 때문에 realtime 레코드 상한(1MB)을 넘겨
+  //    payload 가 비고 errors: 413 만 오므로, 아래 realtime 핸들러가 조용히 버린다.
+  //    → 화면엔 "수집기는 순위를 찾았는데 몇 건만 계속 미수집"으로 보인다. 그 구멍을 여기서 메운다.
+  //  • 조회는 목록과 동일하게 가벼운 `select id, data` 만. 이미지는 로컬 보관본을 그대로 유지한다.
+  //  • ids 생략/빈 배열 = 로컬의 순위추적 일정 전체(구버전 scope 기반 작업 대비).
+  const refreshEntries = useCallback(async (ids?: string[]) => {
+    if (!supabase) return;
+    const sb = supabase;
+    const targetIds = ids && ids.length ? ids : entriesRef.current.filter(isRankTrackable).map(e => e.id);
+    if (!targetIds.length) return;
+    const CHUNK = 200;   // .in() URL 길이 한계 회피
+    const fresh = new Map<string, ScheduleEntry>();
+    for (let i = 0; i < targetIds.length; i += CHUNK) {
+      const { data, error } = await sb.from('schedule_entries').select('id, data').in('id', targetIds.slice(i, i + CHUNK));
+      if (error) { console.error('[schedule_entries] 재동기화 실패:', error.message); return; }   // 부분본으로 덮지 않음
+      for (const r of data ?? []) {
+        const e = (r as { data: ScheduleEntry }).data;
+        if (e?.id) fresh.set(e.id, e);
+      }
+    }
+    if (!fresh.size) return;
+    setEntries(prev => prev.map(e => {
+      const next = fresh.get(e.id);
+      if (!next) return e;
+      // data 만 읽었으므로 이미지(media 키)는 현재 로컬 값을 살려둔다(썸네일 사라짐 방지).
+      const merged = { ...next } as ScheduleEntry & Record<string, unknown>;
+      for (const k of MEDIA_KEYS.schedule_entries) {
+        const v = (e as unknown as Record<string, unknown>)[k];
+        if (v !== undefined) merged[k] = v;
+      }
+      return merged as ScheduleEntry;
+    }));
+  }, []);
 
   // ── 업무 요청(요청함) ──
   // 다른 담당자에게 요청을 보낸다(일정과 무관하게 "이거 해줘/확인해줘"). 상대 화면엔 realtime 으로 뜬다.
@@ -2383,7 +2422,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // 이미지는 media 컬럼에 분리 저장되므로 data+media 를 합쳐 완전한 일정으로 복원(안 그러면 이미지가 사라짐).
         const rrow = payload.new as { data?: ScheduleEntry; media?: Partial<ScheduleEntry> };
         const e = rrow?.data ? { ...rrow.data, ...(rrow.media ?? {}) } : undefined;
-        if (!e || !e.id) return;
+        if (!e || !e.id) {
+          // 레코드가 비어 왔다 = realtime 이 페이로드를 못 실어 보냈다는 뜻(주로 'Error 413: Payload Too Large'
+          //  — REPLICA IDENTITY FULL + 큰 media 컬럼). 지금까지 완전 무증상이라 원인 추적이 어려웠으므로 남긴다.
+          //  순위 수집 결과는 작업 종료 시 refreshEntries 로 따로 메운다(RankCollectWidget).
+          const errs = (payload as { errors?: string[] | null }).errors;
+          if (errs?.length) console.warn('[schedule_entries] realtime 이벤트 유실:', errs.join(', '));
+          return;
+        }
         // 변경(순위·링크·상태·날짜·담당 등): 가지고 있던 건 교체, 없던 내 담당분은 추가. 알림 없음(조용히 반영).
         if (payload.eventType === 'UPDATE') {
           setEntries(prev => prev.some(x => x.id === e.id) ? prev.map(x => x.id === e.id ? e : x) : (e.managerId === uid ? [e, ...prev] : prev));
@@ -2645,7 +2691,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       aiImageRunning, aiImageError, startAiImageJob,
       assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, setProposalCategory, undoAssistantProposal,
       conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
-      saveEntry, saveEntries, patchEntry, removeEntry, removeSeries, saveClient, removeClient, favoriteClientIds, toggleFavorite, saveHandover, removeHandover,
+      saveEntry, saveEntries, patchEntry, removeEntry, removeSeries, refreshEntries, saveClient, removeClient, favoriteClientIds, toggleFavorite, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,
       internalEvents, internalCategories, saveInternalEvent, removeInternalEvent, saveInternalCategory, removeInternalCategory,
       salesEntries, salesAccess, saveSalesEntry, removeSalesEntry, addSalesReply, removeSalesReply,

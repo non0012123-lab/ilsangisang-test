@@ -2,27 +2,50 @@
 //  - rank_jobs 를 전역 구독해 '최근 작업'의 진행을 보여준다(단일 수집기라 활성 작업은 1개).
 //  - 메인 키워드 개수 + 진행 바(탭 done/total) + 성공/미노출/실패.
 //  - 실행 중이거나 '최근(10분 내) 완료' 면 표시, 완료건은 닫기로 숨김.
-import { useEffect, useState } from 'react';
+//  - ★ 진행/종료 시 대상 일정을 서버에서 다시 읽어 순위를 반영한다(refreshEntries).
+//    realtime UPDATE 는 이미지가 큰 일정에서 페이로드 초과(413)로 유실될 수 있어,
+//    "수집기는 순위를 찾았는데 몇 건만 계속 미수집"으로 보이던 문제를 이 재조회가 메운다.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Check, AlertCircle, X, Radar, Ban } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { useApp } from '../context/AppContext';
 
 interface Job {
   id: string; status: string; mode: string; include_longtail?: boolean;
   total: number; done: number; success: number; not_found: number; failed: number;
   main_count: number; error?: string | null; finished_at?: string | null;
+  entry_ids?: string[] | null;   // 이 작업의 대상 일정(재동기화 범위). 구버전 scope 작업은 null
 }
 
 const DISMISS_KEY = 'rankWidgetDismissedJob';
 const loadDismissed = () => { try { return localStorage.getItem(DISMISS_KEY) || ''; } catch { return ''; } };
+// 종료 후 재동기화를 이미 끝낸 작업 id — 페이지 이동(위젯 리마운트)·새로고침에도 중복 조회하지 않도록 보관.
+const SYNCED_KEY = 'rankWidgetSyncedJob';
+const loadSynced = () => { try { return localStorage.getItem(SYNCED_KEY) || ''; } catch { return ''; } };
+const RUNNING_SYNC_MS = 30_000;   // 수집 중에는 30초마다 중간 결과 반영
+const isTerminal = (s: string) => s === 'done' || s === 'error' || s === 'cancelled' || s === 'empty';
 
 export default function RankCollectWidget() {
   const { user } = useAuth();
+  const { refreshEntries } = useApp();
   const me = user?.id ?? '';
   const [job, setJob] = useState<Job | null>(null);
   // 닫힘 상태는 localStorage 에 보관 — Layout 리마운트(페이지 이동)에도 유지
   const [dismissed, setDismissed] = useState(loadDismissed);
   const dismiss = (id: string) => { try { localStorage.setItem(DISMISS_KEY, id); } catch { /* ignore */ } setDismissed(id); };
+
+  // 이 작업의 대상 일정을 서버에서 다시 읽어 순위를 화면에 반영한다.
+  //  final=true 면 '이 작업은 재동기화 완료'로 표시해 리마운트/새로고침 때 다시 돌지 않게 한다.
+  const syncedRef = useRef(loadSynced());
+  const syncJobEntries = useCallback(async (j: Job, final: boolean) => {
+    if (final) {
+      if (syncedRef.current === j.id) return;
+      syncedRef.current = j.id;
+      try { localStorage.setItem(SYNCED_KEY, j.id); } catch { /* ignore */ }
+    }
+    await refreshEntries(Array.isArray(j.entry_ids) ? j.entry_ids : undefined);
+  }, [refreshEntries]);
 
   useEffect(() => {
     if (!supabase || !me) return;
@@ -39,7 +62,11 @@ export default function RankCollectWidget() {
           .order('created_at', { ascending: false }).limit(1);
         row = last.data?.[0];
       }
-      if (active && row) setJob(row as Job);
+      if (!active || !row) return;
+      const j = row as Job;
+      setJob(j);
+      // 이미 끝난 작업을 뒤늦게 발견한 경우(새로고침 등)에도 결과를 한 번 확실히 끌어온다.
+      if (isTerminal(j.status)) void syncJobEntries(j, true);
     };
     void loadJob();
     const ch = sb
@@ -48,12 +75,28 @@ export default function RankCollectWidget() {
         const r = payload.new as Job | undefined;
         if (!r || !r.id) return;
         // 활성 변화는 그대로 반영, 끝난(완료/오류/취소) 변화면 아직 도는 다른 작업을 우선 재탐색
-        if (r.status === 'queued' || r.status === 'running') setJob(r);
-        else void loadJob();
+        if (r.status === 'queued' || r.status === 'running') { setJob(r); return; }
+        void syncJobEntries(r, true);   // ★ 종료 시 대상 일정 재조회 — realtime 유실분을 여기서 메움
+        void loadJob();
       })
       .subscribe();
     return () => { active = false; ch.unsubscribe(); };
-  }, [me]);
+  }, [me, syncJobEntries]);
+
+  // 수집 중에는 주기적으로도 반영 — 20분짜리 작업에서 끝날 때까지 순위가 하나도 안 뜨는 걸 막는다.
+  //  (final=false 라 '완료 처리'로 기록하지 않음 → 종료 시 최종 재조회는 그대로 한 번 더 돈다)
+  //  ★ 의존성은 '작업 id' 만 — job 객체를 쓰면 진행도 UPDATE 마다 타이머가 리셋돼 영영 안 돈다.
+  const jobRef = useRef<Job | null>(null);
+  useEffect(() => { jobRef.current = job; }, [job]);
+  const runningId = job && (job.status === 'queued' || job.status === 'running') ? job.id : '';
+  useEffect(() => {
+    if (!runningId) return;
+    const t = setInterval(() => {
+      const j = jobRef.current;
+      if (j && j.id === runningId) void syncJobEntries(j, false);
+    }, RUNNING_SYNC_MS);
+    return () => clearInterval(t);
+  }, [runningId, syncJobEntries]);
 
   if (!job) return null;
   const running = job.status === 'queued' || job.status === 'running';
