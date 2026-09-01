@@ -3,6 +3,7 @@
 //    ClientPortalPage 가 user.clientId === DEMO_CLIENT_ID 일 때만 메모리로 주입한다.
 //    날짜는 '오늘' 기준 상대값으로 생성해, 시연 시점과 무관하게 항상 최근 데이터처럼 보인다.
 import type { Client, ScheduleEntry, Report, Category } from '../types';
+import type { AdvisorPayload, AdvisorPeriod, InflowKeyword, TrendPoint } from '../hooks/useAdvisorInsight';
 import { todayStr } from '../utils/today';
 
 export const DEMO_CLIENT_ID = 'demo';
@@ -114,3 +115,73 @@ export const DEMO_REPORTS: Report[] = [
     createdAt: Date.now(),
   },
 ];
+
+// ── 매체 인사이트(네이버 블로그 어드바이저) 데모 ──────────────────────────────
+// 실제로는 수집기가 advisor_insights 에 기간별로 넣어주는 스냅샷을 MediaInsightsTab 이
+// 읽는다. 데모는 DB 대신 아래 정적 스냅샷을 그대로 주입한다(수집·저장 없음).
+
+// 조회수·방문자 추이 — 날짜는 오늘 기준 상대값이라 시연 시점과 무관하게 항상 최근 데이터.
+//  값은 인덱스 기반 결정적 계산이라 새로고침해도 그래프가 흔들리지 않는다.
+function trendPoints(days: number, endOffset = 0): TrendPoint[] {
+  return Array.from({ length: days }, (_, i) => {
+    const wave = Math.sin(i * 0.8) * 140 + Math.sin(i * 0.27) * 90; // 요일 편차처럼 보이는 굴곡
+    const views = Math.round(980 + i * 12 + wave);
+    return { date: daysAgo(endOffset + days - 1 - i), views, visitors: Math.round(views * 0.62) };
+  });
+}
+
+// 30일 기준 유입 검색어. 짧은 기간은 비율로 축소해 기간별 수치가 자연스럽게 맞물리게 한다.
+const DEMO_INFLOW_30D: InflowKeyword[] = [
+  { keyword: '수분크림 추천', count: 1840 },
+  { keyword: '데모 브랜드', count: 1520 },
+  { keyword: '건성 수분크림', count: 1180 },
+  { keyword: '앰플 추천', count: 940 },
+  { keyword: '데모 브랜드 수분크림 후기', count: 870 },
+  { keyword: '속건조 화장품', count: 720 },
+  { keyword: '히알루론산 앰플', count: 610 },
+  { keyword: '겨울 스킨케어', count: 540 },
+  { keyword: '민감성 피부 크림', count: 480 },
+  { keyword: '데모 브랜드 세일', count: 410 },
+  { keyword: '수분크림 순위', count: 360 },
+  { keyword: '올리브영 수분크림', count: 300 },
+];
+const scaleInflow = (factor: number): InflowKeyword[] =>
+  DEMO_INFLOW_30D.map(k => ({ ...k, count: Math.max(1, Math.round(k.count * factor)) }));
+
+const DEMO_DEMOGRAPHICS: AdvisorPayload['demographics'] = {
+  gender: { male: 0.23, female: 0.77 },
+  age: [
+    { bucket: '10', ratio: 0.06 },
+    { bucket: '20', ratio: 0.34 },
+    { bucket: '30', ratio: 0.31 },
+    { bucket: '40', ratio: 0.19 },
+    { bucket: '50', ratio: 0.10 },
+  ],
+};
+
+export const DEMO_ADVISOR: Partial<Record<AdvisorPeriod, { data: AdvisorPayload; collectedAt: string }>> = {
+  '1d': {
+    data: {
+      viewsTrend: { period: '1d', points: trendPoints(1, 1) }, // 어제 하루
+      inflowKeywords: scaleInflow(0.04),
+      demographics: DEMO_DEMOGRAPHICS,
+    },
+    collectedAt: `${todayStr()}T09:10:00`,
+  },
+  '7d': {
+    data: {
+      viewsTrend: { period: '7d', points: trendPoints(7) },
+      inflowKeywords: scaleInflow(0.25),
+      demographics: DEMO_DEMOGRAPHICS,
+    },
+    collectedAt: `${todayStr()}T09:10:00`,
+  },
+  '30d': {
+    data: {
+      viewsTrend: { period: '30d', points: trendPoints(30) },
+      inflowKeywords: DEMO_INFLOW_30D,
+      demographics: DEMO_DEMOGRAPHICS,
+    },
+    collectedAt: `${todayStr()}T09:10:00`,
+  },
+};

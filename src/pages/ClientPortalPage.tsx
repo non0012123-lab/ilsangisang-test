@@ -10,7 +10,7 @@ import MarketingCharts from '../components/MarketingCharts';
 import InsightCard from '../components/InsightCard';
 import CategoryStatusTab from '../components/CategoryStatusTab';
 import MediaInsightsTab from '../components/MediaInsightsTab';
-import { DEMO_CLIENT_ID, DEMO_CLIENT, DEMO_ENTRIES, DEMO_REPORTS } from '../data/demoData';
+import { DEMO_CLIENT_ID, DEMO_CLIENT, DEMO_ENTRIES, DEMO_REPORTS, DEMO_ADVISOR } from '../data/demoData';
 import { downloadReportPdf } from '../utils/reportPdf';
 import { enumerateDays, isMultiDay, overlapsRange, coversDate, entryEnd, fmtLocal } from '../utils/dateRange';
 import { todayStr } from '../utils/today';
@@ -744,11 +744,10 @@ export default function ClientPortalPage() {
           </div>
         )}
 
-        {/* Tab: 매체 인사이트 — 수집기가 가져온 매체만(현재 네이버 블로그). 데모는 미지원 */}
+        {/* Tab: 매체 인사이트 — 수집기가 가져온 매체만(현재 네이버 블로그).
+            데모는 DB 조회 없이 정적 스냅샷(DEMO_ADVISOR)을 주입한다. */}
         {tab === 'media' && (
-          isDemo
-            ? <p className="text-center text-gray-400 py-10 text-sm bg-white border border-gray-100 rounded-2xl">데모 계정은 매체 인사이트를 제공하지 않습니다.</p>
-            : <MediaInsightsTab clientId={clientId} clientName={client.name} />
+          <MediaInsightsTab clientId={clientId} clientName={client.name} snapshots={isDemo ? DEMO_ADVISOR : undefined} />
         )}
 
         {/* Tab: Timetable */}

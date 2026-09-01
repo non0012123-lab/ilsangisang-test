@@ -4,8 +4,11 @@
 //  • 이후 인스타/유튜브가 붙으면 각 매체 섹션을 같은 방식(데이터 있을 때만)으로 추가한다.
 import { useState } from 'react';
 import { BarChart3, Eye } from 'lucide-react';
-import { useAdvisorInsight, type AdvisorPeriod } from '../hooks/useAdvisorInsight';
+import { useAdvisorInsight, type AdvisorPeriod, type AdvisorPayload } from '../hooks/useAdvisorInsight';
 import { FullInsight } from './AdvisorInsightCard';
+
+// 데모(쇼케이스) 주입용 — 넘기면 DB 조회 없이 이 스냅샷을 그대로 보여준다.
+type Snapshots = Partial<Record<AdvisorPeriod, { data: AdvisorPayload; collectedAt: string }>>;
 
 const PERIODS: { key: AdvisorPeriod; label: string }[] = [
   { key: '1d', label: '어제' },
@@ -15,8 +18,10 @@ const PERIODS: { key: AdvisorPeriod; label: string }[] = [
 const freshness = (iso: string | null) =>
   iso ? `${new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 수집` : '';
 
-export default function MediaInsightsTab({ clientId, clientName }: { clientId: string; clientName: string }) {
-  const { byPeriod } = useAdvisorInsight(clientId, clientName);
+export default function MediaInsightsTab({ clientId, clientName, snapshots }: { clientId: string; clientName: string; snapshots?: Snapshots }) {
+  // snapshots 가 오면(데모) clientId 를 null 로 넘겨 조회·realtime 구독을 아예 걸지 않는다.
+  const { byPeriod: live } = useAdvisorInsight(snapshots ? null : clientId, clientName);
+  const byPeriod = snapshots ?? live;
   const [period, setPeriod] = useState<AdvisorPeriod>('30d');
 
   // 데이터(수집됨)가 있는 기간만 활성. 선택 기간에 데이터가 없으면 있는 기간 중 가장 긴 것으로 대체.
