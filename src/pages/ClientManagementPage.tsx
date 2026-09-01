@@ -18,6 +18,7 @@ import { todayStr } from '../utils/today';
 import type { Client, Category, HandoverDoc, KeyContact, ImportantLink, BudgetItem, ReportPeriod } from '../types';
 import { CATEGORIES, catLabel } from '../data/categories';
 import { sortClients } from '../utils/clientSort';
+import { DEMO_CLIENT, DEMO_CLIENT_ID } from '../data/demoData';
 
 // 업체 서비스 태그 선택지 — '기타'만 빼고 전체 카테고리(네이버 세부 포함)
 const ALL_CATEGORIES: Category[] = CATEGORIES.filter(c => c !== '기타');
@@ -207,6 +208,14 @@ export default function ClientManagementPage() {
   // 즐겨찾기 업체를 별도 섹션으로 분리(현재 필터/검색 결과 내에서). 별표한 게 없으면 섹션 숨김.
   const favFiltered = filtered.filter(c => favoriteClientIds.has(c.id));
   const restFiltered = filtered.filter(c => !favoriteClientIds.has(c.id));
+
+  // 데모(시연용) 업체 — Supabase 에 없는 가상 업체라 clients 에 섞지 않고 별도 섹션으로만 렌더한다.
+  //  실제 목록·상태 카운트·통계에 유입되지 않으며, 카드를 누르면 곧바로 광고주 포털 데모 화면을 연다.
+  //  (상세 화면은 열지 않는다 — 상태 변경·수정·인수인계 등이 모두 DB 쓰기라 가상 업체엔 맞지 않음)
+  const demoVisible =
+    (filterStatus === 'all' || filterStatus === DEMO_CLIENT.status) &&
+    (!q || DEMO_CLIENT.name.toLowerCase().includes(q) || (DEMO_CLIENT.industry ?? '').toLowerCase().includes(q));
+  const openDemoPortal = () => navigate(`/client-portal/preview/${DEMO_CLIENT_ID}`);
 
   const resetSubStates = () => {
     setHoEditing(false); setHoDraft(null);
@@ -496,6 +505,39 @@ export default function ClientManagementPage() {
       </div>
     );
   };
+
+  // 데모 카드 — 실제 업체 카드와 구분되도록 점선 테두리 + '데모' 배지. 별표·인수인계 표시는 없다.
+  const renderDemoCard = () => (
+    <div onClick={openDemoPortal}
+      className="bg-white rounded-2xl shadow-sm border border-dashed border-purple-200 p-5 cursor-pointer hover:border-purple-400 hover:shadow-md transition-all group">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center text-white text-lg font-bold shrink-0">
+            {DEMO_CLIENT.name[0]}
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <h3 className="font-bold text-gray-900 group-hover:text-purple-600 transition-colors">{DEMO_CLIENT.name}</h3>
+              <span className="px-1.5 py-0.5 rounded-md bg-purple-50 text-purple-600 text-[10px] font-bold">데모</span>
+            </div>
+            <p className="text-xs text-gray-400">{DEMO_CLIENT.industry}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex gap-1 flex-wrap mb-4">
+        {DEMO_CLIENT.categories.map(c => <CategoryBadge key={c} category={c} />)}
+      </div>
+
+      <div className="space-y-3 text-xs text-gray-500 border-t border-gray-50 pt-3">
+        <p>시연용 가상 업체입니다. 데이터는 저장되지 않습니다.</p>
+        <button type="button" onClick={e => { e.stopPropagation(); openDemoPortal(); }}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-purple-200 text-purple-600 rounded-xl text-sm font-semibold hover:bg-purple-50 transition-colors">
+          <Eye size={14} /> 클라이언트 화면 보기
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <Layout>
@@ -1038,7 +1080,7 @@ export default function ClientManagementPage() {
               ))}
             </div>
 
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !demoVisible && (
               <div className="bg-white rounded-2xl border border-gray-100 py-12 text-center text-sm text-gray-400">
                 {q ? `'${search}'에 해당하는 업체가 없습니다.` : '등록된 클라이언트가 없습니다.'}
               </div>
@@ -1060,6 +1102,15 @@ export default function ClientManagementPage() {
             <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {restFiltered.map(renderCard)}
             </div>
+
+            {demoVisible && (
+              <div className="mt-6">
+                <p className="mb-2 text-xs font-bold text-purple-400 uppercase tracking-wider">시연용</p>
+                <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {renderDemoCard()}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
