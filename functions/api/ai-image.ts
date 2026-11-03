@@ -4,6 +4,8 @@
 //  • OpenAI Images API (gpt-image-2) 로 가이드라인 기반 광고 시안을 만든다.
 //  • 토큰 절약: 플랫폼마다 낱장 여러 개가 아니라, 2×2(4안)/3×3(9안)
 //    "그리드 시안" 한 장을 생성한다. (요청한 플랫폼만 병렬 생성)
+//  • cols=1 이면 그리드 대신 "단일 시안" 한 장(캔버스 전체가 시안 하나)을 만든다.
+//    한글 카피가 그리드보다 크고 또렷하게 나온다. 비용·시간은 장당 동일.
 //  • 프롬프트는 「플랫폼별 고효율 클릭 유도 이미지 연구 보고서」의
 //    공통 원칙 + 플랫폼별 권장안을 반영한다.
 //
@@ -21,7 +23,7 @@ interface ImageRequest {
   clientName?: string;
   guideline?: string;   // 업로드한 가이드라인 텍스트
   platforms?: string[]; // 생성할 플랫폼 키 목록
-  cols?: number;        // 그리드 열 수 (2 또는 3)
+  cols?: number;        // 1 = 단일 시안(그리드 없음), 2 = 2×2, 3 = 3×3 (기본 2)
   labels?: boolean;     // false 면 칸 번호 라벨을 넣지 않음 (기본 true = 기존 동작)
 }
 
@@ -66,7 +68,7 @@ const PLATFORMS: Record<string, Platform> = {
   },
 };
 
-const COMMON = [
+const COMMON_ITEMS = [
   '가장 중요한 원칙: 각 칸은 단순한 사진이 아니라, 한눈에 시선을 사로잡는 "완성형 광고 시안"이어야 한다.',
   '① 강하고 굵은 한국어 후킹 헤드라인을 크고 또렷하게 넣을 것(궁금증·혜택·결과·공감을 자극). 필요하면 짧은 보조 카피 1줄 추가.',
   '② 단일 핵심 피사체 + 강한 색 대비로 주목도를 극대화하고, 배경은 카피가 잘 읽히도록 정리.',
@@ -74,7 +76,10 @@ const COMMON = [
   '④ 칸마다 헤드라인 카피·구도·배경·강조 포인트가 서로 분명히 다른 변형으로 구성.',
   '⑤ 이미지 속 한국어 텍스트는 정확한 맞춤법으로, 깨지지 않고 또렷하게 렌더링할 것.',
   '의료/병원 광고라면 의료법상 과장·허위·치료 보장성 표현은 피하되, 공감·혜택·신뢰 기반의 강한 후킹 카피는 적극적으로 사용할 것.',
-].join(' ');
+];
+const COMMON = COMMON_ITEMS.join(' ');
+// 단일 시안용: "칸" 표현을 "시안"으로 바꾸고, 칸끼리 달라야 한다는 ④ 항목은 제외
+const COMMON_SINGLE = COMMON_ITEMS.filter(t => !t.startsWith('④')).map(t => t.replace(/각 칸은/g, '이 시안은')).join(' ');
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
@@ -82,7 +87,26 @@ const json = (body: unknown, status = 200): Response =>
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
   });
 
+/** cols=1: 그리드 없이 캔버스 전체를 하나의 완성형 시안으로 */
+function buildSinglePrompt(p: Platform, clientName: string, guideline: string): string {
+  return [
+    '너는 한국 최고 수준의 퍼포먼스 광고 크리에이티브 디렉터다. 아래 조건으로 완성형 광고 시안을 1장 만들어줘.',
+    `대상 업체: "${clientName}".`,
+    '출력은 그리드·콘택트 시트가 아니라 단일 광고 시안 한 장이다. 캔버스 전체를 하나의 시안으로 채우고, 칸 나누기·번호·라벨·워터마크·테두리 글자는 일절 넣지 않는다.',
+    '그 자체로 바로 집행 가능한 완성된 광고여야 한다 — 강한 후킹 헤드라인 카피 + 임팩트 있는 비주얼이 함께 들어가야 하며, 카피 없는 맨 사진은 안 된다.',
+    `${p.ratio} 비율의 ${p.label} 시안으로 구성한다. 헤드라인은 캔버스 폭에 맞춰 크고 굵게, 한 글자도 잘리거나 뭉개지지 않게.`,
+    '',
+    `[플랫폼: ${p.label}] ${p.guidance}`,
+    '',
+    COMMON_SINGLE,
+    '',
+    '── 업체 가이드라인(업종·톤앤매너·금지표현·타깃을 반영해 카피와 비주얼에 녹일 것) ──',
+    (guideline || '(가이드라인 텍스트 없음)').slice(0, 4000),
+  ].join('\n');
+}
+
 function buildPrompt(p: Platform, cols: number, clientName: string, guideline: string, labels = true): string {
+  if (cols === 1) return buildSinglePrompt(p, clientName, guideline);
   const n = cols * cols;
   return [
     '너는 한국 최고 수준의 퍼포먼스 광고 크리에이티브 디렉터다. 아래 조건으로 광고 "시안 시트(콘택트 시트)"를 1장 만들어줘.',
@@ -159,7 +183,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const clientName = req.clientName || '해당 업체';
   const guideline = req.guideline || '';
-  const cols = req.cols === 3 ? 3 : 2; // 2×2(기본) 또는 3×3
+  const cols = req.cols === 3 ? 3 : req.cols === 1 ? 1 : 2; // 1(단일 시안) / 2×2(기본) / 3×3
   const labels = req.labels !== false;  // 기본 true (기존 동작). false 면 번호 라벨 없이 생성
   const keys = (Array.isArray(req.platforms) ? req.platforms : [])
     .filter(k => k in PLATFORMS);
