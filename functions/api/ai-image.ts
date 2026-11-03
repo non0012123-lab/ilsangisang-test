@@ -22,6 +22,7 @@ interface ImageRequest {
   guideline?: string;   // 업로드한 가이드라인 텍스트
   platforms?: string[]; // 생성할 플랫폼 키 목록
   cols?: number;        // 그리드 열 수 (2 또는 3)
+  labels?: boolean;     // false 면 칸 번호 라벨을 넣지 않음 (기본 true = 기존 동작)
 }
 
 // OpenAI Images API 의 size 는 정해진 값만 허용 → 플랫폼 방향에 맞춰 매핑
@@ -81,7 +82,7 @@ const json = (body: unknown, status = 200): Response =>
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
   });
 
-function buildPrompt(p: Platform, cols: number, clientName: string, guideline: string): string {
+function buildPrompt(p: Platform, cols: number, clientName: string, guideline: string, labels = true): string {
   const n = cols * cols;
   return [
     '너는 한국 최고 수준의 퍼포먼스 광고 크리에이티브 디렉터다. 아래 조건으로 광고 "시안 시트(콘택트 시트)"를 1장 만들어줘.',
@@ -89,7 +90,9 @@ function buildPrompt(p: Platform, cols: number, clientName: string, guideline: s
     `출력은 ${cols}×${cols} 그리드 한 장으로, 서로 다른 ${n}개의 완성형 광고 시안을 배치한다.`,
     `각 칸(셀)은 그 자체로 바로 집행 가능한 완성된 광고여야 한다 — 즉 강한 후킹 헤드라인 카피 + 임팩트 있는 비주얼이 함께 들어가야 하며, 카피 없는 맨 사진은 안 된다.`,
     `각 칸은 ${p.ratio} 비율 느낌으로 구성하고, 칸 사이에는 얇은 흰색 여백(거터)을 둔다.`,
-    `각 칸 좌상단에 1부터 ${n}까지의 작은 번호 라벨만 식별용으로 넣고(번호 외 워터마크는 금지), 헤드라인 카피는 번호와 별개로 크게 넣는다.`,
+    labels
+      ? `각 칸 좌상단에 1부터 ${n}까지의 작은 번호 라벨만 식별용으로 넣고(번호 외 워터마크는 금지), 헤드라인 카피는 번호와 별개로 크게 넣는다.`
+      : '칸에 번호·라벨·워터마크·테두리 글자를 일절 넣지 않는다. 각 칸은 그대로 잘라 써도 되는 완성본이어야 한다.',
     `${n}개 시안은 헤드라인 문구·구도·배경·강조 포인트가 실제로 서로 다른 변형이어야 한다.`,
     '',
     `[플랫폼: ${p.label}] ${p.guidance}`,
@@ -103,7 +106,7 @@ function buildPrompt(p: Platform, cols: number, clientName: string, guideline: s
 
 interface OpenAIImageItem { b64_json?: string }
 
-async function generate(env: Env, p: Platform, cols: number, clientName: string, guideline: string): Promise<AiImage[]> {
+async function generate(env: Env, p: Platform, cols: number, clientName: string, guideline: string, labels = true): Promise<AiImage[]> {
   const res = await openaiFetch(env, '/v1/images/generations', {
     method: 'POST',
     headers: {
@@ -112,7 +115,7 @@ async function generate(env: Env, p: Platform, cols: number, clientName: string,
     },
     body: JSON.stringify({
       model: env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
-      prompt: buildPrompt(p, cols, clientName, guideline),
+      prompt: buildPrompt(p, cols, clientName, guideline, labels),
       n: 1, // 그리드 1장 = 여러 시안. 토큰/비용 절약.
       size: p.size,
       quality: 'auto',
@@ -157,12 +160,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const clientName = req.clientName || '해당 업체';
   const guideline = req.guideline || '';
   const cols = req.cols === 3 ? 3 : 2; // 2×2(기본) 또는 3×3
+  const labels = req.labels !== false;  // 기본 true (기존 동작). false 면 번호 라벨 없이 생성
   const keys = (Array.isArray(req.platforms) ? req.platforms : [])
     .filter(k => k in PLATFORMS);
   const targets = (keys.length > 0 ? keys : ['blog-sns']).map(k => PLATFORMS[k]);
 
   try {
-    const results = await Promise.all(targets.map(p => generate(env, p, cols, clientName, guideline)));
+    const results = await Promise.all(targets.map(p => generate(env, p, cols, clientName, guideline, labels)));
     const images = results.flat();
     if (images.length === 0) return json({ error: '생성된 이미지가 없습니다.' }, 502);
     return json({ images });
