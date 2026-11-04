@@ -4,6 +4,7 @@
 //  • OpenAI Images API (gpt-image-2) 로 가이드라인 기반 광고 시안을 만든다.
 //  • 토큰 절약: 플랫폼마다 낱장 여러 개가 아니라, 2×2(4안)/3×3(9안)
 //    "그리드 시안" 한 장을 생성한다. (요청한 플랫폼만 병렬 생성)
+//  • platforms 에 'thumbnail-bg' 를 주면 글자 없는 정사각 배경 1장을 만든다(썸네일용, 글자는 호출 쪽이 얹음).
 //  • cols=1 이면 그리드 대신 "단일 시안" 한 장(캔버스 전체가 시안 하나)을 만든다.
 //    한글 카피가 그리드보다 크고 또렷하게 나온다. 비용·시간은 장당 동일.
 //  • 프롬프트는 「플랫폼별 고효율 클릭 유도 이미지 연구 보고서」의
@@ -57,6 +58,15 @@ const PLATFORMS: Record<string, Platform> = {
       '고대비 색상으로 작은 화면에서도 확 들어오게, 표정이 살아있는 큰 얼굴 또는 강한 상황/결과 비주얼과 결합. 밋밋한 스톡 사진 금지.',
     ].join(' '),
   },
+  // 블로그 썸네일 배경 — 글자 없는 정사각 배경. 호출 쪽(AIagent)이 키워드·업체명·로고를 정확한 글자로 얹는다.
+  'thumbnail-bg': {
+    key: 'thumbnail-bg', label: '블로그 썸네일 배경(글자 없음)', ratio: '정사각(1:1)', size: '1024x1024',
+    guidance: [
+      '네이버 블로그 대표 썸네일의 배경으로 쓸 정사각 이미지. 글자는 나중에 따로 얹으므로 이미지 안에는 어떤 텍스트도 넣지 않는다.',
+      '위쪽 55% 영역은 어둡고 단순하게(흰색·노란색 글자가 올라갈 자리, 복잡한 패턴 금지), 아래쪽에 업종을 상징하는 핵심 비주얼 하나를 배치한다.',
+      '고대비·선명한 색감, 사진 느낌 또는 깔끔한 일러스트. 밋밋한 스톡 사진 금지.',
+    ].join(' '),
+  },
   // 네이버 GFA / 디스플레이 / 웹·앱 배너 — 배너 스타일의 가로형 결과값으로 통합
   'gfa-banner': {
     key: 'gfa-banner', label: '네이버 GFA / 디스플레이 / 배너', ratio: '가로형', size: '1536x1024',
@@ -107,7 +117,21 @@ function buildSinglePrompt(p: Platform, clientName: string, guideline: string): 
   ].join('\n');
 }
 
+/** thumbnail-bg: 글자 없는 정사각 배경 한 장 (cols 무시) */
+function buildBackgroundPrompt(p: Platform, clientName: string, guideline: string): string {
+  return [
+    '너는 한국 최고 수준의 퍼포먼스 광고 아트 디렉터다. 아래 조건으로 "글자가 전혀 없는" 배경 이미지 1장을 만들어줘.',
+    `대상 업체: "${clientName}".`,
+    '절대 규칙: 이미지 안에 글자·숫자·로고·워터마크·말풍선·간판 글씨·라벨·테두리 글자를 단 하나도 넣지 않는다. 텍스트가 있으면 실패다.',
+    `[플랫폼: ${p.label}] ${p.guidance}`,
+    '',
+    '── 업체 가이드라인(업종·톤앤매너·타깃을 비주얼에만 반영할 것. 문구는 쓰지 말 것) ──',
+    (guideline || '(가이드라인 텍스트 없음)').slice(0, 4000),
+  ].join(String.fromCharCode(10));
+}
+
 function buildPrompt(p: Platform, cols: number, clientName: string, guideline: string, labels = true): string {
+  if (p.key === 'thumbnail-bg') return buildBackgroundPrompt(p, clientName, guideline);
   if (cols === 1) return buildSinglePrompt(p, clientName, guideline);
   const n = cols * cols;
   return [
