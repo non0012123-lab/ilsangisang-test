@@ -442,14 +442,15 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     rosterLines || '(등록된 담당자 없음)',
     `업체 목록: ${clientNames.join(', ') || '(없음)'}`,
     '업체 상세(연락처·예산·계약 포함 · 수정/삭제 시 id 사용 · reportAnchorDate=월간 보고 기준 시작일):',
-    JSON.stringify(clients.map(c => ({
+    // 한 줄에 업체 하나(JSON Lines) — 전체를 한 줄로 직렬화하면 메시지 분할(아래 DEV_CHUNK_CHARS)이 불가능해진다.
+    clients.map(c => JSON.stringify({
       id: c.id, name: c.name, industry: c.industry, categories: c.categories,
       reportAnchorDate: c.reportAnchorDate ?? null, status: c.status,
       contactPerson: c.contactPerson || null, phone: c.phone || null, email: c.email || null,
       startDate: c.startDate || null, contractEnd: c.contractEnd || null, description: c.description || null,
       monthlyBudget: c.monthlyBudget || null,
       budgetItems: Array.isArray(c.budgetItems) ? c.budgetItems.map(b => ({ product: b.product, amount: b.amount, notes: b.notes })) : [],
-    }))),
+    })).join('\n'),
     `카테고리 목록(클라이언트 업무 entries 용): ${categories.join(', ')}`,
     `내부 일정 종류(internalEvents 용 — 없으면 새로 만들어도 됨): ${internalCategories.join(', ') || '회의실, 미팅, 면접, 촬영, 휴가'}`,
     '',
@@ -457,7 +458,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  · ★ 이 목록은 성능상 "최근 약 180일 + 예정 60일" 범위로 제한돼 있다(전체 이력이 아님). 다만 ★사용자가 이번 메시지에서 이름을 언급한 업체는 기간 제한 없이 "그 업체 전 일정"이 전량 포함되어 있다★ — 따라서 언급된 업체(예: "위편장쾌한의원 6/8~7/3")는 아래 목록만으로 그 기간 전부를 빠짐없이 답/처리할 수 있고, 반드시 그래야 한다. 언급 안 된 업체가 목록에 없으면 "이 범위에는 없다. 날짜를 알려달라"고 안내한다(없다고 단정 금지).',
     '  · ★★ 이 목록은 "업체(clientName)별로 묶여 연속"되어 있고 업체 안에서는 최신순이다. 특정 업체의 일정을 "전부/모두/기간(예: 6/8~7/3)"으로 물으면(조회든 일괄수정이든), 그 업체 blockName 이 나오는 첫 줄부터 마지막 줄까지 "연속된 블록 전체"를 처음부터 끝까지 빠짐없이 훑어 해당 조건(기간 등)에 맞는 건을 모두 답/처리한다. 위쪽 최근 몇 건만 보고 멈추지 말 것 — 최근 것만 답하는 것은 오답이다. 여러 건이면 각각을 결과/updates 에 모두 담는다.',
     '  · 순위추적(블로그/카페) 일정은 rankByTab(탭별 순위)·rankCheckedAt(탭별 수집시각)를 포함한다. rankByTab 값: 숫자=노출(순위), null=미노출, 키 없음=미수집. 탭: integrated(통합)/blog(블로그탭)/cafe(카페탭).',
-    JSON.stringify(entries),
+    // 한 줄에 일정 하나(JSON Lines) — 업체별 연속 블록 순서는 그대로 유지된다.
+    //  (전체 배열을 한 줄로 직렬화하면 11만 자를 넘는 한 줄이 생겨 OpenAI 가 그 메시지를 통째로 버렸다.)
+    entries.map(e => JSON.stringify(e)).join('\n'),
     '',
     '현재 내부 일정(수정 시 op:"update" 에 이 id 사용):',
     internalEventsContext || '(등록된 내부 일정 없음)',
@@ -501,6 +504,28 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     `사용자: ${req.message}`,
   ].join('\n');
 
+  // ★ OpenAI Responses API 는 메시지 1개가 약 11만 자(≈6.4만 토큰)를 넘으면 "오류 없이" 그 메시지를
+  //   통째로 무시한다(usage.input_tokens 가 사용자 질문 한 줄 분량으로 떨어짐). 데이터가 쌓여 developer
+  //   컨텍스트가 이 한계를 넘자 모델이 지침·데이터를 하나도 못 받아 reply 없는 JSON 을 지어냈고,
+  //   화면엔 "(응답이 비어 있습니다)"만 떴다. → 한 메시지가 한계 아래로 오게 여러 developer 메시지로 쪼갠다.
+  const DEV_CHUNK_CHARS = 60000; // 한계(약 11만 자)의 절반 수준 — 줄 경계로 자르므로 여유를 둔다
+  const developerChunks: string[] = [];
+  {
+    const lines = developer.split('\n');
+    let buf = '';
+    for (const line of lines) {
+      // 한 줄 자체가 한계를 넘으면(안전망) 그 줄을 강제로 쪼갠다 — 못 쪼개면 그 덩어리가 통째로 버려진다.
+      const pieces = line.length > DEV_CHUNK_CHARS
+        ? Array.from({ length: Math.ceil(line.length / DEV_CHUNK_CHARS) }, (_, i) => line.slice(i * DEV_CHUNK_CHARS, (i + 1) * DEV_CHUNK_CHARS))
+        : [line];
+      for (const piece of pieces) {
+        if (buf && buf.length + piece.length + 1 > DEV_CHUNK_CHARS) { developerChunks.push(buf); buf = piece; }
+        else buf = buf ? `${buf}\n${piece}` : piece;
+      }
+    }
+    if (buf) developerChunks.push(buf);
+  }
+
   // ★ 요청이 늘어지면 Cloudflare 가 함수를 죽여 HTML 502 를 내므로, 우리가 먼저 끊고(JSON) 우아하게 안내한다.
   //   (프롬프트가 크면 OpenAI 응답이 느려져 502 가 났다 — ai-insight 와 동일한 가드.)
   const controller = new AbortController();
@@ -516,7 +541,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       body: JSON.stringify({
         model: env.OPENAI_MODEL || 'gpt-5.4-mini',
         input: [
-          { role: 'developer', content: [{ type: 'input_text', text: developer }] },
+          ...developerChunks.map(text => ({ role: 'developer', content: [{ type: 'input_text', text }] })),
           { role: 'user', content: [{ type: 'input_text', text: transcript }] },
         ],
         text: { format: { type: 'json_object' } },
@@ -554,6 +579,16 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   }
 
   const data = await aiRes.json();
+
+  // ★ 입력 소실 감지: OpenAI 가 큰 메시지를 조용히 버리면 usage.input_tokens 가 보낸 분량(한국어 ≈ 0.5~0.6
+  //   토큰/자)에 비해 터무니없이 작아진다. 그대로 두면 모델이 컨텍스트 없이 지어낸 답을 하므로 명확히 알린다.
+  //   (chars/20 은 정상 응답에선 절대 안 걸리는 보수적 기준 — 실제 소실 시엔 수십 토큰까지 떨어진다.)
+  const sentChars = developer.length + transcript.length;
+  const inputTokens = (data as { usage?: { input_tokens?: number } })?.usage?.input_tokens;
+  if (typeof inputTokens === 'number' && inputTokens < sentChars / 20) {
+    return json({ error: '컨텍스트(일정·문서)가 너무 커서 AI 에 전달되지 못했습니다. 특정 업체·기간을 콕 집어 다시 물어봐 주세요.' });
+  }
+
   const content = extractText(data);
   let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; notices?: unknown; internalEvents?: unknown; sales?: unknown; rankGuarantees?: unknown; reports?: unknown; accountLookups?: unknown; siteLookups?: unknown };
   try {
@@ -562,8 +597,14 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     return json({ error: 'AI 응답을 JSON 으로 해석하지 못했습니다.' }); // 200 JSON (CF 5xx→HTML 방지)
   }
 
+  // ★ reply 폴백: 모델이 지침을 못 받으면 "reply" 대신 message/answer/text 같은 임의 키에 답을 담는다.
+  //   빈 reply 로 "(응답이 비어 있습니다)"를 띄우느니, 문장형 값을 찾아 보여준다.
+  const loose = parsed as Record<string, unknown>;
+  const replyText = [loose.reply, loose.message, loose.answer, loose.text]
+    .find(v => typeof v === 'string' && v.trim()) as string | undefined;
+
   return json({
-    reply: typeof parsed?.reply === 'string' ? parsed.reply : '',
+    reply: replyText ?? '',
     entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
     updates: Array.isArray(parsed?.updates) ? parsed.updates : [],
     clients: Array.isArray(parsed?.clients) ? parsed.clients : [],
