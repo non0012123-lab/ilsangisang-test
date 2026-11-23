@@ -151,7 +151,7 @@ function extractText(data: unknown): string {
   return parts.join('\n').trim();
 }
 
-import { openaiFetch } from './_openai';
+import { openaiFetch, toInputMessages, inputWasDropped, INPUT_DROPPED_MSG } from './_openai';
 
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
@@ -504,28 +504,6 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     `사용자: ${req.message}`,
   ].join('\n');
 
-  // ★ OpenAI Responses API 는 메시지 1개가 약 11만 자(≈6.4만 토큰)를 넘으면 "오류 없이" 그 메시지를
-  //   통째로 무시한다(usage.input_tokens 가 사용자 질문 한 줄 분량으로 떨어짐). 데이터가 쌓여 developer
-  //   컨텍스트가 이 한계를 넘자 모델이 지침·데이터를 하나도 못 받아 reply 없는 JSON 을 지어냈고,
-  //   화면엔 "(응답이 비어 있습니다)"만 떴다. → 한 메시지가 한계 아래로 오게 여러 developer 메시지로 쪼갠다.
-  const DEV_CHUNK_CHARS = 60000; // 한계(약 11만 자)의 절반 수준 — 줄 경계로 자르므로 여유를 둔다
-  const developerChunks: string[] = [];
-  {
-    const lines = developer.split('\n');
-    let buf = '';
-    for (const line of lines) {
-      // 한 줄 자체가 한계를 넘으면(안전망) 그 줄을 강제로 쪼갠다 — 못 쪼개면 그 덩어리가 통째로 버려진다.
-      const pieces = line.length > DEV_CHUNK_CHARS
-        ? Array.from({ length: Math.ceil(line.length / DEV_CHUNK_CHARS) }, (_, i) => line.slice(i * DEV_CHUNK_CHARS, (i + 1) * DEV_CHUNK_CHARS))
-        : [line];
-      for (const piece of pieces) {
-        if (buf && buf.length + piece.length + 1 > DEV_CHUNK_CHARS) { developerChunks.push(buf); buf = piece; }
-        else buf = buf ? `${buf}\n${piece}` : piece;
-      }
-    }
-    if (buf) developerChunks.push(buf);
-  }
-
   // ★ 요청이 늘어지면 Cloudflare 가 함수를 죽여 HTML 502 를 내므로, 우리가 먼저 끊고(JSON) 우아하게 안내한다.
   //   (프롬프트가 크면 OpenAI 응답이 느려져 502 가 났다 — ai-insight 와 동일한 가드.)
   const controller = new AbortController();
@@ -540,9 +518,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       },
       body: JSON.stringify({
         model: env.OPENAI_MODEL || 'gpt-5.4-mini',
+        // 대형 메시지는 OpenAI 가 오류 없이 통째로 무시하므로(_openai.ts 참고) 한계 아래 여러 메시지로 분할.
+        // 마지막 형식 재확인 메시지: 컨텍스트가 크면 모델이 맨 앞의 출력 스키마를 잊고
+        // {"date":...,"schedules":[...]} 같은 임의 JSON 을 내는 사례가 실측됨 → 끝에서 한 번 더 못박는다.
         input: [
-          ...developerChunks.map(text => ({ role: 'developer', content: [{ type: 'input_text', text }] })),
-          { role: 'user', content: [{ type: 'input_text', text: transcript }] },
+          ...toInputMessages('developer', developer),
+          ...toInputMessages('user', transcript),
+          { role: 'developer', content: [{ type: 'input_text', text: '출력 형식 최종 확인: 반드시 최상위 키가 "reply"(항상 포함, 사용자에게 보여줄 한국어 답변)와 "entries"/"updates" 등 액션 배열인 JSON 객체 한 개로만 응답한다. 일정 목록을 보여줄 때도 데이터를 임의 구조(schedules/date 등)로 내보내지 말고 reply 문자열 안에 정리해 담는다.' }] },
         ],
         text: { format: { type: 'json_object' } },
         reasoning: { effort: 'low' },
@@ -580,13 +562,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   const data = await aiRes.json();
 
-  // ★ 입력 소실 감지: OpenAI 가 큰 메시지를 조용히 버리면 usage.input_tokens 가 보낸 분량(한국어 ≈ 0.5~0.6
-  //   토큰/자)에 비해 터무니없이 작아진다. 그대로 두면 모델이 컨텍스트 없이 지어낸 답을 하므로 명확히 알린다.
-  //   (chars/20 은 정상 응답에선 절대 안 걸리는 보수적 기준 — 실제 소실 시엔 수십 토큰까지 떨어진다.)
-  const sentChars = developer.length + transcript.length;
-  const inputTokens = (data as { usage?: { input_tokens?: number } })?.usage?.input_tokens;
-  if (typeof inputTokens === 'number' && inputTokens < sentChars / 20) {
-    return json({ error: '컨텍스트(일정·문서)가 너무 커서 AI 에 전달되지 못했습니다. 특정 업체·기간을 콕 집어 다시 물어봐 주세요.' });
+  // ★ 입력 소실 감지(_openai.ts): 그대로 두면 모델이 컨텍스트 없이 지어낸 답을 하므로 명확히 알린다.
+  if (inputWasDropped(data, developer.length + transcript.length)) {
+    return json({ error: INPUT_DROPPED_MSG });
   }
 
   const content = extractText(data);
@@ -597,14 +575,20 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     return json({ error: 'AI 응답을 JSON 으로 해석하지 못했습니다.' }); // 200 JSON (CF 5xx→HTML 방지)
   }
 
-  // ★ reply 폴백: 모델이 지침을 못 받으면 "reply" 대신 message/answer/text 같은 임의 키에 답을 담는다.
+  // ★ reply 폴백: 모델이 형식을 놓치면 "reply" 대신 message/answer/text 같은 임의 키에 답을 담는다.
   //   빈 reply 로 "(응답이 비어 있습니다)"를 띄우느니, 문장형 값을 찾아 보여준다.
   const loose = parsed as Record<string, unknown>;
   const replyText = [loose.reply, loose.message, loose.answer, loose.text]
     .find(v => typeof v === 'string' && v.trim()) as string | undefined;
+  // 그래도 답 문장이 없으면: 액션(제안)이라도 있으면 기본 안내문, 완전 형식 이탈이면 재시도 안내 오류.
+  const ACTION_KEYS = ['entries', 'updates', 'clients', 'handovers', 'vendors', 'accounts', 'sites', 'requests', 'notices', 'internalEvents', 'rankGuarantees', 'reports', 'sales', 'deletes', 'keywords', 'accountLookups', 'siteLookups'];
+  const hasActions = ACTION_KEYS.some(k => Array.isArray(loose[k]) && (loose[k] as unknown[]).length > 0);
+  if (!replyText && !hasActions) {
+    return json({ error: 'AI 가 응답 형식을 지키지 못했어요. 같은 내용으로 다시 한 번 시도해 주세요.' });
+  }
 
   return json({
-    reply: replyText ?? '',
+    reply: replyText ?? '제안을 준비했어요. 내용 확인 후 "적용"을 눌러주세요.',
     entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
     updates: Array.isArray(parsed?.updates) ? parsed.updates : [],
     clients: Array.isArray(parsed?.clients) ? parsed.clients : [],

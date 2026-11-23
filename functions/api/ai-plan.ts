@@ -92,7 +92,7 @@ function extractText(data: any): string {
   return parts.join('\n').trim();
 }
 
-import { openaiFetch } from './_openai';
+import { openaiFetch, toInputMessages, inputWasDropped, INPUT_DROPPED_MSG } from './_openai';
 
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
@@ -132,9 +132,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       },
       body: JSON.stringify({
         model: env.OPENAI_MODEL || 'gpt-5.4-mini',
+        // 대형 메시지는 OpenAI 가 오류 없이 통째로 무시하므로(_openai.ts 참고) 한계 아래 여러 메시지로 분할.
         input: [
-          { role: 'developer', content: [{ type: 'input_text', text: DEVELOPER_PROMPT }] },
-          { role: 'user', content: [{ type: 'input_text', text: userText }] },
+          ...toInputMessages('developer', DEVELOPER_PROMPT),
+          ...toInputMessages('user', userText),
         ],
         text: { format: { type: 'text' }, verbosity: 'medium' },
         reasoning: { effort: 'low' }, // 속도 우선(추론 단계 축소). 품질 더 원하면 'medium'
@@ -153,6 +154,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   }
 
   const data = await aiRes.json();
+  if (inputWasDropped(data, DEVELOPER_PROMPT.length + userText.length)) return json({ error: INPUT_DROPPED_MSG }, 502);
   const report = extractText(data);
   if (!report) return json({ error: 'OpenAI 응답에서 리포트 텍스트를 찾지 못했습니다.' }, 502);
 

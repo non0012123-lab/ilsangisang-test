@@ -44,7 +44,7 @@ const fmtRows = (rows: Row[]) => rows.length
   ? rows.map(r => `- ${[r.clientName, r.category, r.title].filter(Boolean).join(' / ')}`).join('\n')
   : '(없음)';
 
-import { openaiFetch } from './_openai';
+import { openaiFetch, toInputMessages, inputWasDropped, INPUT_DROPPED_MSG } from './_openai';
 
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
@@ -78,9 +78,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
       body: JSON.stringify({
         model: env.OPENAI_MODEL || 'gpt-5.4-mini',
+        // 대형 메시지는 OpenAI 가 오류 없이 통째로 무시하므로(_openai.ts 참고) 한계 아래 여러 메시지로 분할.
         input: [
-          { role: 'developer', content: [{ type: 'input_text', text: developer }] },
-          { role: 'user', content: [{ type: 'input_text', text: userInput }] },
+          ...toInputMessages('developer', developer),
+          ...toInputMessages('user', userInput),
         ],
         text: { format: { type: 'json_object' } },
         reasoning: { effort: 'low' },
@@ -97,6 +98,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   }
 
   const data = await aiRes.json();
+  if (inputWasDropped(data, developer.length + userInput.length)) return json({ error: INPUT_DROPPED_MSG }, 502);
   let summary: string;
   try { summary = (JSON.parse(extractText(data)) as { summary?: string }).summary ?? ''; }
   catch { summary = extractText(data); }
