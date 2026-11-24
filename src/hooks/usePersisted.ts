@@ -56,3 +56,45 @@ export function usePersistedManagerFilter(key: string, selfId: string) {
 
   return [value, set] as const;
 }
+
+// '보던 날짜' 전용 상태: 켤 때마다(그리고 날짜가 바뀌면) 오늘로 시작한다.
+//  - sessionStorage 에 { v: 값, day: 저장한 날 } 로 저장 → 새로고침·배포 리로드·메뉴 이동엔 보던 날짜 유지,
+//    앱을 껐다 켜면 초기값(오늘).
+//  - 저장한 날(day)이 오늘이 아니면 버리고 초기값으로 → 트레이에 며칠 켜둔 데스크톱 앱/밤새 열어둔 탭도
+//    다음 날엔 오늘로 돌아온다(같은 날 안에서 창을 닫았다 열면 보던 날짜 유지).
+//  - 화면이 떠 있는 채로 자정을 넘긴 경우는 창이 다시 보이거나 포커스될 때 검사해 초기화한다.
+//  - initial 은 "지금 기준 오늘"을 다시 계산해야 하므로 값이 아니라 함수로 받는다.
+const localDay = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+export function useTodayResetState<T>(key: string, initial: () => T) {
+  const full = PREFIX + key;
+  const [state, setState] = useState<{ v: T; day: string }>(() => {
+    try {
+      const raw = sessionStorage.getItem(full);
+      if (raw != null) {
+        const saved = JSON.parse(raw) as { v: T; day: string };
+        if (saved && saved.day === localDay()) return saved;
+      }
+    } catch { /* 손상 캐시 무시 */ }
+    return { v: initial(), day: localDay() };
+  });
+  useEffect(() => {
+    try { sessionStorage.setItem(full, JSON.stringify(state)); } catch { /* 무시 */ }
+  }, [full, state]);
+  // 날짜가 바뀐 뒤 창이 다시 보이면 오늘로 초기화. initial 은 매 렌더 새 함수라 ref 없이 최신 클로저를 쓰도록 의존성에서 뺀다.
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState !== 'visible') return;
+      const today = localDay();
+      setState(prev => (prev.day === today ? prev : { v: initial(), day: today }));
+    };
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('focus', check);
+    return () => { document.removeEventListener('visibilitychange', check); window.removeEventListener('focus', check); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const setValue = useCallback((v: T) => setState({ v, day: localDay() }), []);
+  return [state.v, setValue] as const;
+}

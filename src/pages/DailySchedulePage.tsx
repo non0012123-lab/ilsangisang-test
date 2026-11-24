@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { usePersistedState, usePersistedManagerFilter } from '../hooks/usePersisted';
+import { useTodayResetState, usePersistedManagerFilter } from '../hooks/usePersisted';
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, Search, Filter, CalendarRange, User } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
@@ -27,8 +27,8 @@ export default function DailySchedulePage() {
   const { entries, saveEntry, removeEntry, patchEntry, clients, members } = useApp();
   const { notify, show: showToast } = useCopyToast();
 
-  // 날짜는 영속(새로고침/배포 후에도 보던 날짜 유지 — 오늘로 튕기지 않음)
-  const [date, setDate] = usePersistedState('sched.daily.date', toDateStr(new Date()));
+  // 날짜: 새로고침/배포 리로드엔 보던 날짜 유지, 앱을 새로 켜거나 날짜가 바뀌면 오늘로 시작
+  const [date, setDate] = useTodayResetState('sched.daily.date', () => toDateStr(new Date()));
   const [modal, setModal] = useState<{ open: boolean; entry?: ScheduleEntry | null }>({ open: false });
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const [search, setSearch] = useState('');
