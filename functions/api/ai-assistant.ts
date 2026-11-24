@@ -195,9 +195,99 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       return `■ id=${e.id ?? '?'} | ${period}${e.startTime ? ` ${e.startTime}` : ''} | ${e.category ?? ''} | ${e.title}${Array.isArray(e.participantNames) && e.participantNames.length ? ` | 참여자:${e.participantNames.join(',')}` : ''}${e.location ? ` | 장소:${e.location}` : ''}`;
     })
     .filter(Boolean).join('\n');
-  const entries = (Array.isArray(req.entries) ? req.entries : []).slice(0, 400);
-  const handoverDocs = (Array.isArray(req.handoverDocs) ? req.handoverDocs : []).slice(0, 60);
-  const aiPlans = (Array.isArray(req.aiPlans) ? req.aiPlans : []).slice(0, 20);
+
+  // ── 질문별 컨텍스트 선별(토큰 절감) ─────────────────────────────────────
+  // 예전엔 질문과 무관하게 전 데이터를 매번 보내 요청당 수만 토큰이 들었다. 이제 "이번 질문 + 직전 사용자 발화 2개"
+  // (후속 질문 "그거 바꿔줘" 대응)에 주제어·업체명이 있을 때만 해당 목록을 싣고, 나머지는 "(생략 — N건)"으로 알린다.
+  // 생략된 목록이 필요해 보이면 모델이 주제어를 넣어 다시 물어달라고 안내한다(dynamicCtx 의 안내문 참고).
+  const ctxText = [
+    ...(Array.isArray(req.history) ? req.history : []).filter(m => m?.role === 'user').slice(-2).map(m => m.text || ''),
+    req.message,
+  ].join('\n');
+  const has = (re: RegExp) => re.test(ctxText);
+  const omitted = (n: number) => n ? `(생략 — 이번 질문과 무관해 보내지 않음 · 등록 ${n}건)` : '(등록된 항목 없음)';
+  // 빈 값(null/''/빈 배열) 필드는 빼고 직렬화 — "미등록"을 null 로 일일이 적지 않는다.
+  const compact = (o: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && v.length === 0)));
+
+  const entriesAll = (Array.isArray(req.entries) ? req.entries : []).filter(e => e && e.id);
+  const handoverAll = (Array.isArray(req.handoverDocs) ? req.handoverDocs : []).slice(0, 60);
+  const aiPlansAll = (Array.isArray(req.aiPlans) ? req.aiPlans : []).slice(0, 20);
+
+  // 언급된 업체: 정식명 전체 또는 앞 4글자('위편장쾌한의원'→'위편장쾌')가 대화에 있으면 매칭(프론트 namedClients 와 같은 규칙).
+  const nameCandidates = new Set<string>();
+  for (const n of [...clientNames, ...entriesAll.map(e => e.clientName), ...handoverAll.map(d => d.clientName), ...aiPlansAll.map(p => p.clientName)]) {
+    const t = (n ?? '').trim();
+    if (t.length >= 2) nameCandidates.add(t);
+  }
+  const mentioned = [...nameCandidates].filter(n => ctxText.includes(n) || (n.length >= 4 && ctxText.includes(n.slice(0, 4))));
+  const isMentioned = (name?: string) => !!name && mentioned.some(n => name === n || name.includes(n) || n.includes(name));
+  const wantsAll = has(/전체|전부|모두|모든/);
+
+  // 일정: 기본은 "최근 45일 + 예정 60일"만. 과거·기간을 묻는 표현이 있으면 프론트가 보낸 전 범위(최근 약 180일)를 쓴다.
+  //  언급된 업체는 항상 전량. (예전의 slice(0, 400)은 가나다순 뒤쪽 업체를 조용히 잘라 "있는 일정을 없다"고 답하게 했다.)
+  const validToday = /^\d{4}-\d{2}-\d{2}$/.test(today);
+  //  단, 이번 메시지에서 특정 업체를 콕 집었으면 그 업체는 어차피 전량이므로 나머지 업체까지 넓히지 않는다(대상 업체에 집중).
+  const mentionedNow = mentioned.some(n => req.message!.includes(n) || (n.length >= 4 && req.message!.includes(n.slice(0, 4))));
+  const wantsHistory = !validToday || !mentionedNow && (wantsAll
+    || has(/지난|저번|작년|전달|이전|과거|예전|그동안|여태|지금까지|통계|누적|\d{1,2}\s*월|\d{1,2}\s*\/\s*\d{1,2}|\d{4}-\d{2}|개월|분기|올해|상반기|하반기|[주달일]\s*전/));
+  const shiftDay = (n: number) => { const d = new Date(`${today}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const winLo = validToday ? shiftDay(-45) : '', winHi = validToday ? shiftDay(60) : '';
+  const entryEnd = (e: CtxEntry) => (e.endDate && e.endDate !== 'null' && e.endDate > (e.date ?? '') ? e.endDate : (e.date ?? ''));
+  const entries = entriesAll
+    .filter(e => wantsHistory || isMentioned(e.clientName) || ((e.date ?? '') <= winHi && entryEnd(e) >= winLo))
+    .slice(0, 1500);
+  const rangeLabel = wantsHistory ? '최근 약 180일 + 예정 60일' : '최근 45일 + 예정 60일';
+
+  // 일정은 업체별 블록 + 한 줄 압축 표기(키 이름 반복 제거). URL 은 링크 질문일 때만 원문으로.
+  const showLinks = has(/링크|url|주소|link|http|나스|nas/i);
+  const TAB_LABEL: Record<string, string> = { integrated: '통합', blog: '블로그', cafe: '카페' };
+  const kstDate = (iso?: string) => {
+    const ms = Date.parse(iso ?? '');
+    return Number.isNaN(ms) ? '' : new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  };
+  const fmtRank = (e: CtxEntry) => {
+    if (e.rankByTab && typeof e.rankByTab === 'object') {
+      const parts = Object.entries(e.rankByTab).map(([tab, v]) => {
+        const at = kstDate(e.rankCheckedAt?.[tab]);
+        return `${TAB_LABEL[tab] ?? tab} ${v == null ? '미노출' : `${v}위`}${at ? `(수집 ${at})` : ''}`;
+      });
+      return parts.length ? `순위:${parts.join('·')}` : '순위:미수집';
+    }
+    return e.rank != null ? `순위:${e.rank}위` : '';
+  };
+  const entryBlocks = new Map<string, string[]>();
+  for (const e of entries) {
+    const end = entryEnd(e);
+    const line = [
+      `id=${e.id}`,
+      end > (e.date ?? '') ? `${e.date}~${end}` : (e.date ?? '?'),
+      e.category ?? '-',
+      e.keyword ?? '-',
+      `담당:${e.managerName || '-'}`,
+      e.status ?? '-',
+      e.link ? (showLinks ? `링크:${e.link}` : '링크있음') : '',
+      fmtRank(e),
+    ].filter(Boolean).join(' | ');
+    const key = e.clientName || '(업체 미지정)';
+    const block = entryBlocks.get(key);
+    if (block) block.push(line); else entryBlocks.set(key, [line]);
+  }
+  const entriesContext = [...entryBlocks].map(([name, lines]) => `▶ 업체: ${name} (${lines.length}건)\n${lines.join('\n')}`).join('\n');
+
+  // 업체 상세(연락처·예산·계약): 언급된 업체 + 업체 정보 질문일 때만. 그 외엔 "업체 목록"(이름)만으로 충분.
+  const detailClients = has(/업체|클라이언트|고객사|거래처|연락처|예산|계약|광고비|이메일|전화|담당자|보고\s*기준|정산|업종/)
+    ? clients : clients.filter(c => isMentioned(c.name));
+
+  // 인수인계: 언급된 업체 것만(1~2건이라 가벼움). 업체 언급 없이 가이드라인을 물으면 전체.
+  const wantGuide = has(/가이드|톤|매너|금지|주의|인수인계|특이사항|운영|규칙|하지\s*말|컨셉|방향/);
+  const wantPlan = has(/기획|캠페인|플랜|전략|방향|컨셉/);
+  const handoverDocs = mentioned.length && !(wantGuide && wantsAll)
+    ? handoverAll.filter(d => isMentioned(d.clientName))
+    : (wantGuide ? handoverAll : []);
+  // AI 기획 결과(건당 최대 2,000자)는 가이드라인/기획 질문일 때만, 언급 업체가 있으면 그 업체 것만.
+  const aiPlans = !(wantGuide || wantPlan) ? []
+    : (mentioned.length && !wantsAll ? aiPlansAll.filter(p => isMentioned(p.clientName)) : aiPlansAll);
 
   // 업체별 가이드라인 컨텍스트: 인수인계 문서의 운영 규칙·톤·금지사항 등을 정리
   const guidelineContext = handoverDocs
@@ -231,7 +321,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     .join('\n\n');
 
   // 외주사 컨텍스트: "○○ 작업 어디에 맡겨?" 류 질문의 근거
-  const vendors = (Array.isArray(req.vendors) ? req.vendors : []).slice(0, 80);
+  const vendorsAll = (Array.isArray(req.vendors) ? req.vendors : []).slice(0, 80);
+  const vendors = has(/외주|맡겨|맡길|맡기|협력사|하청|vendor/i) || vendorsAll.some(v => !!v.name && v.name.trim().length >= 2 && ctxText.includes(v.name.trim()))
+    ? vendorsAll : [];
   const vendorContext = vendors
     .map(v => {
       const parts = [
@@ -249,14 +341,17 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   // 아이디 목록 / 홈페이지 목록 (조회·수정·삭제 시 id 사용)
   // 비밀번호는 컨텍스트에 포함하지 않는다 — 조회는 id 로 식별만 하고 실제 값은 프론트가 표시한다.
-  const accounts = (Array.isArray(req.accounts) ? req.accounts : []).slice(0, 300);
+  const wantAccounts = has(/아이디|계정|비번|비밀번호|패스워드|로그인|등급|준최|최적|아이피|홈페이지|사이트|\bip\b|\bid\b|\bpw\b/i);
+  const accountsAll = (Array.isArray(req.accounts) ? req.accounts : []).slice(0, 300);
+  const accounts = wantAccounts ? accountsAll : [];
   const ownLabel = (o?: string) => o === 'client' ? '업체소유' : o === 'inhouse' ? '사내' : '';
   const accountContext = accounts
     .map(a => a.name || a.username
       ? `■ id=${a.id ?? '?'} | 이름:${a.name ?? '-'}${a.platform ? ` | 구분:${a.platform}` : ''}${a.grade ? ` | 등급:${a.grade}` : ''}${a.ownership ? ` | 소유:${ownLabel(a.ownership)}` : ''} | 아이디:${a.username ?? '-'}${a.category ? ` | 카테고리:${a.category}` : ''}${a.ip ? ` | IP:${a.ip}` : ''}`
       : '')
     .filter(Boolean).join('\n');
-  const sites = (Array.isArray(req.sites) ? req.sites : []).slice(0, 300);
+  const sitesAll = (Array.isArray(req.sites) ? req.sites : []).slice(0, 300);
+  const sites = wantAccounts ? sitesAll : [];
   const siteContext = sites
     .map(s => s.name
       ? `■ id=${s.id ?? '?'} | 홈페이지:${s.name}${s.url ? ` | 주소:${s.url}` : ''} | 아이디:${s.username ?? '-'}${s.description ? ` | 용도:${s.description}` : ''}`
@@ -283,38 +378,48 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
 
   // 영업관리(상담 로그) 컨텍스트 — 권한자(salesEnabled)에게만. 조회/수정 대상 식별 근거.
   const salesEnabled = req.salesEnabled === true;
-  const salesEntries = salesEnabled ? (Array.isArray(req.sales) ? req.sales : []).slice(0, 60) : [];
+  const salesAll = salesEnabled ? (Array.isArray(req.sales) ? req.sales : []).slice(0, 60) : [];
+  const salesEntries = has(/상담|문의|통화|응대|영업|가망|부재|번호|답글|리드/) ? salesAll : [];
   const salesContext = salesEntries
     .map(s => `■ id=${s.id ?? '?'} | ${s.consultedAt ?? '-'} | 응대:${s.handlerName ?? '-'} | 채널:${s.channel ?? '-'} | 전화:${s.phone ?? '-'} | 이메일:${s.email ?? '-'} | 고객:${s.customerName ?? '-'} | 척도:${s.sentiment ?? '-'} | 상태:${s.status ?? '-'}${s.followUpDate ? ` | 후속:${s.followUpDate}` : ''} | 내용:${(s.content ?? '').slice(0, 80)}${s.replyCount ? ` | 답글 ${s.replyCount}개(최근:${s.lastReply ?? ''})` : ''}`)
     .join('\n');
 
   // 순위 보장 컨텍스트 — 캠페인별 목표/달성/상태. "○○ 보장 현황", "△△ 종료/연장" 근거.
   const RANKG_STATUS_LABEL: Record<string, string> = { active: '진행중', due_soon: '임박', reached: '도달', closed: '종료' };
-  const rankGList = (Array.isArray(req.rankGuarantees) ? req.rankGuarantees : []).slice(0, 80);
+  const rankGAll = (Array.isArray(req.rankGuarantees) ? req.rankGuarantees : []).slice(0, 80);
+  const rankGList = has(/보장/) ? rankGAll : [];
   const rankGContext = rankGList
     .map(g => `■ id=${g.id ?? '?'} | ${g.clientName ?? '-'} · ${g.title ?? '-'} | 달성:${g.achievedCount ?? 0}/${g.guaranteedCount ?? '?'}건 | ${g.cycle ? `${g.cycle}회차 | ` : ''}상태:${RANKG_STATUS_LABEL[g.status ?? ''] ?? g.status ?? '-'}${g.closed ? '(종료)' : ''}`)
     .join('\n');
 
   // 월간 보고서 컨텍스트 — 기존 초안/발행 상태(발행·중복 판단)
-  const reportList = (Array.isArray(req.reports) ? req.reports : []).slice(0, 80);
+  const reportsAll = (Array.isArray(req.reports) ? req.reports : []).slice(0, 80);
+  const reportList = has(/보고서|리포트|레포트|발행|보고/) ? reportsAll : [];
   const reportContext = reportList
     .map(r => `■ id=${r.id ?? '?'} | ${r.clientName ?? '-'} · ${r.period ?? '-'} | ${r.periodStart ?? '?'}~${r.periodEnd ?? '?'} | 상태:${r.status === 'draft' ? '초안' : '발행됨'}`)
     .join('\n');
 
   // 요청함(업무 요청) 컨텍스트 — 받은/보낸 방향과 상태·날짜를 표기
   const REQ_STATUS_LABEL: Record<string, string> = { pending: '대기(미확인)', confirmed: '확인함(진행)', done: '완료', returned: '반려' };
-  const requestList = (Array.isArray(req.existingRequests) ? req.existingRequests : []).slice(0, 80);
+  const wantInbox = has(/요청|공지|부탁|회수|들어온|받은|보낸|전달/);
+  const requestsAll = (Array.isArray(req.existingRequests) ? req.existingRequests : []).slice(0, 80);
+  const requestList = wantInbox ? requestsAll : [];
   const requestContext = requestList
     .map(r => `■ id=${r.id ?? '?'} | ${r.date ?? '-'} | ${r.fromName ?? '?'}${r.fromMe ? '(나)' : ''} → ${r.toName ?? '?'}${r.toMe ? '(나)' : ''} | 상태:${REQ_STATUS_LABEL[r.status ?? ''] ?? r.status ?? '-'} | ${r.title ?? ''}${r.body ? ` — ${r.body.slice(0, 50)}` : ''}${r.doneNote ? ` | 완료메모:${r.doneNote.slice(0, 50)}` : ''}`)
     .join('\n');
 
   // 공지(팀/전체) 컨텍스트 — 대상·작성자·날짜를 표기
-  const noticeList = (Array.isArray(req.existingNotices) ? req.existingNotices : []).slice(0, 60);
+  const noticesAll = (Array.isArray(req.existingNotices) ? req.existingNotices : []).slice(0, 60);
+  const noticeList = wantInbox ? noticesAll : [];
   const noticeContext = noticeList
     .map(n => `■ id=${n.id ?? '?'} | ${n.date ?? '-'} | 대상:${n.audienceLabel ?? '?'} | 작성:${n.fromName ?? '?'}${n.fromMe ? '(나)' : ''} | ${n.title ?? ''}${n.body ? ` — ${n.body.slice(0, 60)}` : ''}`)
     .join('\n');
 
-  const developer = [
+  // ── 고정 규칙(스키마+판단 규칙) ──────────────────────────────────────────
+  // ★ 이 블록에는 날짜·사용자명·데이터 등 요청마다 달라지는 값을 절대 넣지 않는다(템플릿 보간 금지).
+  //   OpenAI 프롬프트 캐시는 '앞에서부터 동일한 구간'에만 적용되므로, 여기가 글자 하나까지 같아야
+  //   규칙 전체(약 1.5만 토큰)가 모든 사용자·요청에서 캐시 할인된다. 가변 값은 아래 dynamicCtx 로.
+  const rulesCore = [
     '너는 한국 마케팅 대행사의 일정 관리 AI 어시스턴트다. 항상 한국어로, 친절하고 간결하게 답한다.',
     '반드시 아래 JSON 객체로만 응답해(코드펜스·설명문 금지):',
     '{',
@@ -339,11 +444,11 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '}',
     '',
     '판단 규칙:',
-    `- 오늘 날짜는 ${today}. "오늘/내일/이번주/다음주 월요일/0월 0일" 등 상대·축약 표현은 이 날짜 기준 절대 날짜(YYYY-MM-DD)로 변환.`,
+    `- 오늘 날짜는 맨 아래 "[실행 정보]"의 "오늘 날짜"다. "오늘/내일/이번주/다음주 월요일/0월 0일" 등 상대·축약 표현은 이 날짜 기준 절대 날짜(YYYY-MM-DD)로 변환.`,
     '- 사용자가 새 일정을 말하면("오늘 스케줄은 ~~~ 있어" 등) 해당 일정을 entries 배열에 담는다. 한 문장에 여러 건이면 모두.',
-    `- ★ 반복 일정(recurrence): "매월 7일", "매주 화요일", "매주", "격주", "매일", "○일마다", "매달 말일" 처럼 주기적으로 되풀이되는 업무면, entries 를 여러 개 만들지 말고 한 개의 entry 에 recurrence 객체를 채운다(시스템이 그 규칙으로 실제 일정 여러 개를 자동 생성한다). 매핑: "매일"→{freq:"daily",interval:1}, "매주 X요일"→{freq:"weekly",interval:1,weekday:(일0~토6)}, "격주"→{freq:"weekly",interval:2}, "매월 N일"→{freq:"monthly",interval:1,day:N}, "격월"→{freq:"monthly",interval:2,day:N}. date 는 첫 시작일로 잡는다("매월 7일"이고 오늘이 ${today} 이후면 가장 가까운 7일을 date 로). 횟수/종료일 언급이 있으면 count 또는 until 에 넣고, 없으면 둘 다 생략한다(시스템 기본 12회). 예: "현대차 블로그관리 매월 7일로 잡아놔" → entries:[{date:"가장 가까운 7일", clientName:"현대차", category:"블로그관리", keyword:"블로그관리", recurrence:{freq:"monthly",interval:1,day:7}}]. 반복이 아니면 recurrence 를 절대 넣지 않는다.`,
+    `- ★ 반복 일정(recurrence): "매월 7일", "매주 화요일", "매주", "격주", "매일", "○일마다", "매달 말일" 처럼 주기적으로 되풀이되는 업무면, entries 를 여러 개 만들지 말고 한 개의 entry 에 recurrence 객체를 채운다(시스템이 그 규칙으로 실제 일정 여러 개를 자동 생성한다). 매핑: "매일"→{freq:"daily",interval:1}, "매주 X요일"→{freq:"weekly",interval:1,weekday:(일0~토6)}, "격주"→{freq:"weekly",interval:2}, "매월 N일"→{freq:"monthly",interval:1,day:N}, "격월"→{freq:"monthly",interval:2,day:N}. date 는 첫 시작일로 잡는다("매월 7일"이고 오늘 날짜 기준으로 가장 가까운(오늘 포함 이후) 7일을 date 로). 횟수/종료일 언급이 있으면 count 또는 until 에 넣고, 없으면 둘 다 생략한다(시스템 기본 12회). 예: "현대차 블로그관리 매월 7일로 잡아놔" → entries:[{date:"가장 가까운 7일", clientName:"현대차", category:"블로그관리", keyword:"블로그관리", recurrence:{freq:"monthly",interval:1,day:7}}]. 반복이 아니면 recurrence 를 절대 넣지 않는다.`,
     '- 단순 질문·조언("시간 분배 어떻게 효율적일까?" 등)이면 모든 액션 배열은 비우고 reply 에만 구체적이고 실용적으로 답한다. 현재 일정 목록을 근거로 답할 것.',
-    `- ★ 일정 조회("오늘/내일/이번주 일정 알려줘", "오늘 뭐 있어?", "오늘 스케줄"): 반드시 "현재 등록된 일정"(클라이언트 업무 entries)과 "현재 내부 일정"(internalEvents) "둘 다"를 훑어 해당 날짜에 걸치는 항목을 모두 모아 답한다(한쪽만 보지 말 것 — 작업일정을 빠뜨리고 "내부일정만" 답하거나, 작업일정이 있는데 "없다"고 하면 안 된다). 기간 일정(date~endDate)은 그 구간 전체가 그 날짜에 걸치면 포함한다. "내 일정만"이라고 하면 managerName/참여자가 본인(${currentUser || '본인'})인 것만 추리고, 그냥 "오늘 일정"이면 팀 전체를 보여준다. 작업일정과 내부일정을 구분해 정리하고, 정말 양쪽 다 없을 때만 "해당 날짜 일정이 없다"고 답한다. 이건 조회이므로 모든 액션 배열은 비운다.`,
+    `- ★ 일정 조회("오늘/내일/이번주 일정 알려줘", "오늘 뭐 있어?", "오늘 스케줄"): 반드시 "현재 등록된 일정"(클라이언트 업무 entries)과 "현재 내부 일정"(internalEvents) "둘 다"를 훑어 해당 날짜에 걸치는 항목을 모두 모아 답한다(한쪽만 보지 말 것 — 작업일정을 빠뜨리고 "내부일정만" 답하거나, 작업일정이 있는데 "없다"고 하면 안 된다). 기간 일정(date~endDate)은 그 구간 전체가 그 날짜에 걸치면 포함한다. "내 일정만"이라고 하면 managerName/참여자가 본인("[실행 정보]"의 로그인 본인)인 것만 추리고, 그냥 "오늘 일정"이면 팀 전체를 보여준다. 작업일정과 내부일정을 구분해 정리하고, 정말 양쪽 다 없을 때만 "해당 날짜 일정이 없다"고 답한다. 이건 조회이므로 모든 액션 배열은 비운다.`,
     '- ★ 클라이언트 업무 일정(entries) vs 사내 내부 일정(internalEvents) 구분: 사용자가 일정을 말하면 성격을 판단해 정확한 배열에 담는다.',
     '  · ★★ 최우선 규칙(명시 신호): 사용자가 "내부 일정"·"사내 일정"이라고 명시하면, 영상·디자인·블로그 같은 제작 단어나 업체명이 같이 있어도 무조건 internalEvents 로 만든다. 이때 업체명/담당자를 되묻지 말고 그대로 등록한다(제목에 업체·내용을 넣고, 참여자 미지정이면 로그인 본인). 반대로 "타임테이블"·"업체 일정"·"클라이언트 일정"이라 명시하면 entries 로 한다. 이 명시가 있으면 아래의 내용 기반 추론보다 항상 우선한다. 예: "내일 영상 전달 내부 일정 잡아줘" → internalEvents:[{op:"add", title:"영상 전달", category:"기타 또는 가까운 종류", date:내일}] (entries·업체 되묻기 금지).',
     '  · 내부 일정(internalEvents): 회의·미팅·면접·촬영·휴가·워크숍·회식·상담·방문·회의실 예약 등 "일정 자체"를 잡는 것이면 internalEvents 에 담는다. category 는 아래 "내부 일정 종류" 중 가장 가까운 것, 없으면 새 종류 이름을 만든다(예: "워크숍"). 날짜/시간(startTime·endTime "오후 3시"→"15:00")·장소·참여자(담당자 명단 매칭)를 채운다.',
@@ -351,7 +456,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  · 클라이언트 업무(entries): "특정 업체의 콘텐츠/마케팅 제작·관리 작업"(블로그·SNS·영상·디자인·여론 등 실제 산출물 작업)일 때만 entries 에 담는다(clientName 필수). 단순히 업체명이 나왔다고 entries 로 가지 말 것 — 위 미팅/회의류면 internalEvents.',
     '  · ★★ entries(클라이언트 업무 일정)는 업체(clientName)가 반드시 있어야 시스템에 저장된다(업체별 스케줄에 자리를 잡으므로). 업체 없는 entry 는 적용 시 통째로 버려져 "알겠다 해놓고 아무것도 안 됨"이 된다. 따라서 사용자가 업체를 안 밝힌 채 작업만 말하면(예: "디자인 제작 저번주 월요일 작업건으로 넣어줘", "블로그 글 내일 작업") clientName 을 빈 채로 entries 에 담지 말고, reply 에서 "어느 업체 작업인가요?"라고 업체를 되물은 뒤 액션 배열은 비운다. 단 그 작업이 특정 업체와 무관한 사내 작업이 분명하면(예: "사내 소개자료 디자인 제작") internalEvents 로 담는다(업체 불필요). 업체가 명시됐거나 직전 대화에서 특정된 경우에만 clientName 을 채워 entries 로 만든다.',
     '  · 판단 기준: "무엇을 제작/관리"하는 작업이면 entries, "언제 만나/모이/쉰다"는 일정이면 internalEvents. 정 모르면 reply 에서 되묻고 액션 배열은 비운다.',
-    `  · 참여자 미지정: 내부 일정에서 참여자를 안 밝히면 participantNames 를 빈 배열로 둔다 — 시스템이 로그인 본인(${currentUser || '본인'})을 기본 참여자로 넣는다. "나/내가/우리팀" 같은 1인칭도 빈 배열로 두면 본인이 들어간다(특정 팀원을 콕 집었을 때만 그 이름을 넣는다).`,
+    `  · 참여자 미지정: 내부 일정에서 참여자를 안 밝히면 participantNames 를 빈 배열로 둔다 — 시스템이 로그인 본인("[실행 정보]"의 로그인 본인)을 기본 참여자로 넣는다. "나/내가/우리팀" 같은 1인칭도 빈 배열로 두면 본인이 들어간다(특정 팀원을 콕 집었을 때만 그 이름을 넣는다).`,
     '  · 사전 알림(reminder): "1시간 전 알림"→"1h", "30분 전"→"30m", "10분 전"→"10m", "정각/시작할 때 알림"→"onTime", 언급 없거나 "알림 없이"→"off". 예: "오늘 영상 촬영 오후 6시 등록하고 1시간 전 알림해줘" → internalEvents:[{op:"add", title:"영상 촬영", category:"촬영", date:오늘, startTime:"18:00", reminder:"1h"}]. reminder 는 startTime 이 있을 때만 의미가 있으니 시간을 같이 채운다.',
     '  · ★ 수정 vs 신규: "이미 있는 일정"을 바꾸는 요청("그 회의에 ○○ 추가/빼줘", "참여자 A·B로 바꿔줘", "시간 4시로", "장소 회의실B로", "제목/종류/날짜/메모/알림 변경" 등)이면 새로 만들지 말고 op:"update" + 아래 "현재 내부 일정"에서 가장 맞는 일정의 id 를 넣는다(직전에 만든 일정이면 보통 가장 최근/제목 일치).',
     '  · 수정 규칙: 바꾸는 필드만 포함한다(안 바꾸는 필드는 생략 → 기존값 유지). 어떤 필드를 비우려면(예: 장소·메모 삭제, 알림 끔) 빈 문자열 "" 또는 reminder 는 "off" 로 보낸다. title/category/date/endDate/startTime/endTime/location/notes/reminder 모두 수정 가능.',
@@ -385,24 +490,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- 단가/가격/견적 질문("○○ 단가 얼마야?", "스토어 상위노출 가격", "10만원 이하 패키지 뭐 있어?", "리뷰 패키지 견적", "△△ 단일 상품 가격대" 등): 아래 "단가표(외부 수집)"를 근거로 답한다. 상품명·옵션명·가격(원)을 그대로 인용해 reply 에 정리하고, 패키지/단일을 구분해 보여준다. 예산 조건이 있으면 그 이하 옵션만 추린다. ★ 표에 없는 가격을 절대 지어내지 말 것 — 맞는 항목이 없으면 "단가표에 해당 항목이 없다(단가표 페이지에서 새로고침 필요할 수 있음)"고 안내한다. 단가표의 "최저가"는 그 상품 옵션 중 가장 싼 값이다. 이때 모든 액션 배열은 비운다(조회이므로).',
     '  · ★ 단가를 답할 때는 각 옵션의 "설명"(단가표의 └ 설명 항목)도 가격과 함께 반드시 같이 보여준다. 특히 "결제 전 (관리자) 문의", "상담 요망", "노출 보장 조건" 같은 주의·조건 문구가 있으면 절대 생략하지 말고 그대로 전달한다(가격만 알려주면 안 됨). 설명이 길면 핵심(구성 항목·보장 조건·문의 안내)을 간추리되 주의 문구는 빠뜨리지 않는다. 설명이 없는 옵션은 가격만 답한다. 패키지는 "패키지명 – 옵션명: 가격" 형태로 그대로 인용한다.',
     '  · 단가표에 옵션 없이 "상품명 (카테고리) — 최저가"만 있는 항목은, 질문이 광범위해 상세를 생략한 것이다. 이 경우 최저가 기준으로 추려 답하고(예: 예산 이하 상품), 정확한 옵션·설명이 필요하면 "어떤 상품인지 콕 집어 다시 물어봐 달라"고 안내한다(억지로 옵션을 지어내지 말 것).',
-    ...(salesEnabled ? [
-      '- ★ 영업관리(상담 기록): 사용자가 "상담/응대/문의/통화" 한 건을 말하면(예: "오늘 010-1234-5678 번호 상담했어 매우긍정이고 내용은 …", "문의폼으로 ○○ 문의 왔어") sales 배열에 담는다. ★★ 이때는 절대 entries(클라이언트 일정)·internalEvents 로 만들지 않는다 — 내용에 "블로그/마케팅/제작" 같은 단어가 있어도 그건 "상담 내용"일 뿐이다. "상담했어/응대했어/문의 왔어" + 척도(매우긍정~매우부정)·전화번호 신호가 있으면 무조건 sales 다.',
-      '  · content: 상담 내용을 그대로(예: "네이버 블로그 관리 문의"). channel: 전화번호/통화면 "phone", 문의폼/이메일이면 "inquiry", 소개/지인 소개로 들어온 건이면 "referral", 그 외 "etc".',
-      '  · phone: 사용자가 010 을 빼고 숫자만 말해도 그대로 숫자를 넣는다(시스템이 010 을 붙이고 하이픈을 포맷함). 이메일이 있으면 email 에.',
-      '  · sentiment 매핑: "매우긍정"→very_positive, "긍정"→positive, "보통/중립"→neutral, "부정"→negative, "매우부정"→very_negative. 언급 없으면 neutral.',
-      '  · nasLink: "나스 링크/자료 링크/첨부 …" 로 준 URL 은 sales.nasLink 에 넣는다(★ 절대 일정(entries.link)으로 보내지 말 것). consultedAt: 사용자가 시간을 말하면 "YYYY-MM-DD HH:mm"(예: 오후 2시→14:00)로 넣고, 시간 언급이 없으면 날짜만 넣거나 생략한다 — 시스템이 적용(등록) 시각으로 시·분을 자동 기록한다.',
-      '  · status: 보통 신규 상담이면 "new". "처리완료/해결"이라 하면 "done", "진행중"이면 "in_progress", "보류"면 "hold", "부재중/안 받음/연결 안 됨"이면 "absent", "계약 가망/가능성 있음/유망"이면 "prospect".',
-      '  · ★ 답글(스레드 이어 달기): 사용자가 "○○ 상담 내용 추가해줘"처럼 말할 때, 아래 "상담 목록(영업관리)"에 같은 고객사/전화의 기존 상담이 이미 있으면 새 상담(op:"add")을 만들지 말고 op:"reply" + 그 기존 상담의 id 를 넣어 답글로 단다. content 에 이번에 추가할 내용만 담는다(부모의 다른 필드는 보내지 않는다). 예: 어제 "웹투어" 상담이 있는데 "웹투어 오늘 다시 통화함, 견적 보냄" → sales:[{"op":"reply","id":"웹투어 상담의 id","content":"오늘 다시 통화함, 견적 보냄"}].',
-      '  · ★ 업체명을 안 밝히고 전화 뒷자리만 말하는 경우(예: "2077 번호 상담 내용 추가해줘", "뒷번호 2077 …")도, 목록에서 전화가 그 뒷자리로 끝나는 기존 상담을 찾아 op:"reply" + 그 id 로 답글을 단다. 맞는 기존 상담이 없을 때만 op:"add" 로 새로 만든다.',
-      '  · 상담 수정/조회: 기존 상담의 척도·상태·연락처 등 "필드 값"을 바꾸면 op:"update" + 맞는 id(답글이 아니라 기존 내용 자체를 고치는 경우). "오늘 상담 몇 건?", "부정 상담 보여줘", "가망/부재 상담 보여줘" 같은 조회는 sales 배열을 비우고 reply 로만 그 목록을 근거로 답한다(답글 내용도 근거에 포함).',
-      '  · 상담 삭제("○○ 상담 삭제해줘", "그 통화 기록 지워줘"): "상담 목록"에서 고객사/전화/내용으로 맞는 상담을 찾아 op:"delete" + 그 id 로 담는다. 삭제는 되돌리기 어려우니 reply 에 무엇을 지울지 적고 "적용"을 안내한다. 모호하면 지우지 말고 되묻는다.',
-      `  · ★★★ 반드시 "sales" 배열에 객체로 담아라. reply 에 "등록하겠습니다/적용해주세요" 라고 말만 하고 sales 를 비우면 사용자 화면에 적용 버튼이 안 떠서 아무것도 저장되지 않는다(가장 흔한 실수). 신규 상담이면 sales 에 op:"add" 객체가 반드시 1개 이상 있어야 한다.`,
-      `  · 예시) 입력: "오늘 23398893 번호 상담했어 매우긍정이고 내용은 네이버 블로그 관리 내용이었어 나스 링크 https://example.com 로 해줘" → 반드시 sales:[{"op":"add","consultedAt":"${today}","channel":"phone","phone":"23398893","content":"네이버 블로그 관리","sentiment":"very_positive","status":"new","nasLink":"https://example.com"}] 로 채우고, reply 는 "전화 상담(매우긍정) 기록을 준비했어요. 적용을 눌러주세요." 정도로 짧게.`,
-    ] : []),
     '- 순위 보장 캠페인(rankGuarantees): "○○ 자동완성 보장 20건으로 만들어줘/등록해줘"면 op:"add" + clientName·title·guaranteedCount(언급 없으면 20)·alertOffset(언급 없으면 2). "△△ 보장 목표 30건으로 바꿔줘", "알림 3건 전으로"면 op:"update" + 아래 "순위 보장" 목록의 그 캠페인 id + 바꿀 필드. "□□ 보장 종료해줘/마감"이면 op:"update" + id + closed:true(연장이면 closed:false). "○○ 보장 삭제해줘"면 op:"delete" + id. ★ 개별 항목·순위는 일정에 순위를 넣으면 자동 편입되므로 여기서 다루지 않는다(캠페인 자체의 생성/목표/종료/삭제만). 삭제·종료는 reply 에 무엇을 할지 적고 "적용"을 안내한다.',
     '- ★ 순위 보장 조회("○○ 보장 몇 건 찼어?", "임박한 보장 있어?", "△△ 순위보장 현황", "도달한 보장 보여줘"): 아래 "순위 보장" 목록(달성/목표·상태)을 근거로 reply 로만 답하고 rankGuarantees 배열은 비운다 — 새로 만들거나 바꾸지 않는다.',
     '- 키워드 조회수 질문("○○ 키워드 조회수 알려줘", "△△ 검색량 얼마야?", "□□ 모바일/PC 조회수"): 실제 수치는 네이버 키워드도구로 따로 조회하므로, 너는 절대 숫자를 지어내지 말고 조회할 키워드만 keywords 배열에 담는다(여러 개면 모두). reply 에는 "조회수를 조회해 아래에 표시할게요" 정도로 짧게 답하고 다른 액션 배열은 비운다.',
-    `- ★ 월간 보고서(reports): "○○ 7/1~7/31 보고서 만들어줘", "△△ 지난달 보고서 뽑아줘"처럼 기간과 업체를 주면 reports 에 op:"draft"(초안) + clientName + periodStart/periodEnd(YYYY-MM-DD)로 담는다. "○○ 보고서 발행해줘/보내줘/클라이언트한테 넘겨줘"면 op:"publish"(생성 후 클라이언트 페이지에 발행). 상대·축약 기간("지난달","이번달","저번 주")은 오늘(${today}) 기준 절대 날짜로 변환한다("지난달"=지난달 1일~말일). 업체가 불명확하거나 기간을 특정할 수 없으면 reports 를 비우고 reply 에서 되묻는다. 발행(publish)은 클라이언트에게 바로 노출되므로, reply 에 무엇을(어느 업체·기간) 초안/발행할지 요약하고 "적용"을 눌러야 반영된다고 안내한다. 초안(draft)은 담당자 검토용이라 클라이언트에 보이지 않는다. 단순히 "○○ 보고서 있어?/뭐 있어?" 같은 조회는 아래 "월간 보고서" 목록을 근거로 reply 로만 답하고 reports 배열은 비운다.`,
+    `- ★ 월간 보고서(reports): "○○ 7/1~7/31 보고서 만들어줘", "△△ 지난달 보고서 뽑아줘"처럼 기간과 업체를 주면 reports 에 op:"draft"(초안) + clientName + periodStart/periodEnd(YYYY-MM-DD)로 담는다. "○○ 보고서 발행해줘/보내줘/클라이언트한테 넘겨줘"면 op:"publish"(생성 후 클라이언트 페이지에 발행). 상대·축약 기간("지난달","이번달","저번 주")은 오늘 날짜 기준 절대 날짜로 변환한다("지난달"=지난달 1일~말일). 업체가 불명확하거나 기간을 특정할 수 없으면 reports 를 비우고 reply 에서 되묻는다. 발행(publish)은 클라이언트에게 바로 노출되므로, reply 에 무엇을(어느 업체·기간) 초안/발행할지 요약하고 "적용"을 눌러야 반영된다고 안내한다. 초안(draft)은 담당자 검토용이라 클라이언트에 보이지 않는다. 단순히 "○○ 보고서 있어?/뭐 있어?" 같은 조회는 아래 "월간 보고서" 목록을 근거로 reply 로만 답하고 reports 배열은 비운다.`,
     '- 아이디 목록 조회("○○ 아이디/비번 뭐야?", "△△ 계정 정보 알려줘"): 비밀번호는 컨텍스트에 없고 화면에서 직접 보여주므로, 매칭되는 항목의 id 를 accountLookups 에 담는다(여러 개면 모두). reply 에는 "아래에서 아이디·비번·아이피를 복사하세요" 정도로 짧게 답하고, 비번 값을 지어내지 말 것. 일치 항목이 없으면 빈 배열 + reply 에서 되묻기.',
     '- 홈페이지 목록 조회("문자발송 사이트 비번?", "○○ 홈페이지 계정"): 매칭 항목 id 를 siteLookups 에 담고 reply 는 짧게. 비번은 화면에서 보여준다.',
     '- 추가/수정/삭제 요청이면 accounts/sites 에 op(add/update/delete)로 담는다(수정·삭제는 id 사용). 조회만 할 때는 lookups 만 채우고 op 배열은 비운다.',
@@ -424,7 +515,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  · ★ 이건 조회이므로 모든 액션 배열(requests 포함)은 비운다 — 새 요청을 만들지 않는다.',
     '- 직책/직함/팀으로 사람 지목: 사용자가 이름 대신 "디자인팀장", "영상팀 PD/피디", "총괄팀 부장님", "마케팅 매니저", "대표님" 처럼 팀(department)·직책(position)·직함(title)으로 사람을 가리키면, 위 "담당자 명단"에서 팀·직책·직함이 맞는 사람을 찾아 그 사람의 "이름"을 managerName / 요청의 toName 에 넣는다(직책/직함 문자열이 아니라 반드시 이름). "PD" 와 "피디" 는 같은 직책이다. "팀장/대표/감독" 등은 팀과 함께 쓰면 그 팀의 해당 보직자를 가리킨다(예: "디자인팀장"=디자인팀 position 팀장). 조건에 맞는 사람이 명단에 없거나 두 명 이상이라 모호하면, 추측하지 말고 reply 에서 누구를 말하는지 되묻고 액션 배열은 비운다.',
     '- ★★ 팀명 ≠ 업무 종류(매우 중요 · 담당자 오배정 방지): "디자인 기획", "영상 기획", "영상 편집", "디자인 제작", "블로그", "콘텐츠 기획" 같은 말은 "업무 종류(category/keyword)"이지 팀 지목이 아니다. 여기 들어간 "디자인/영상"이라는 글자 때문에 디자인팀·영상팀 소속 사람을 담당자(managerName)로 넣으면 절대 안 된다. 예: "디자인 기획 오늘 스케줄 넣어줘"는 담당자 언급이 없는 것이므로 managerName 을 빈 문자열("")로 둬서 로그인 본인이 담당자가 되게 한다(디자인팀 사람을 고르지 말 것). 팀명을 "사람"으로 해석하는 건 오직 ① 직책(팀장/PD/매니저/부장/대표/감독 등)이 함께 붙거나, ② "~팀에게/~팀한테/~팀 담당으로"처럼 그 팀을 담당자로 콕 집는 표현이 있을 때뿐이다. 그 신호가 없으면 업무 종류로만 보고 managerName 은 비운다.',
-    `- managerName(담당자): 사용자가 담당자를 명시적으로 지정했을 때만(예: "철수한테", "영희 담당으로", "디자인팀장한테") "담당자 목록" 중 가장 가까운 값을 넣는다. 담당자 언급이 전혀 없으면 절대 임의로 고르지 말고 managerName 을 빈 문자열("")로 둔다 — 그러면 시스템이 로그인한 본인을 자동 담당자로 넣는다. "나/내가/나한테/제가/저한테" 같은 1인칭 표현은 로그인 본인(${currentUser || '본인'})을 가리키므로 이때도 managerName 은 빈 문자열로 둔다.`,
+    `- managerName(담당자): 사용자가 담당자를 명시적으로 지정했을 때만(예: "철수한테", "영희 담당으로", "디자인팀장한테") "담당자 목록" 중 가장 가까운 값을 넣는다. 담당자 언급이 전혀 없으면 절대 임의로 고르지 말고 managerName 을 빈 문자열("")로 둔다 — 그러면 시스템이 로그인한 본인을 자동 담당자로 넣는다. "나/내가/나한테/제가/저한테" 같은 1인칭 표현은 로그인 본인("[실행 정보]"의 로그인 본인)을 가리키므로 이때도 managerName 은 빈 문자열로 둔다.`,
     '- clientName 은 "업체 목록"(또는 이번에 새로 만들 clients 의 이름) 중 가장 가까운 값. category 는 "카테고리 목록" 중 하나(애매하면 "기타").',
     '- ★ 네이버 세부 카테고리 매핑(매우 중요): 네이버 업무는 가능한 한 세부 카테고리로 분류한다. 한국 현업 줄임말도 모두 인식한다: "블로그관리/블로그 관리/블관"→"블로그관리", "블로그 상위노출/블로그상위/블상/블상노"→"블로그 상위노출", "블로그 배포/블배"→"블로그 배포", "카페 상위노출/카페상위/카상/카상노"→"카페 상위노출", "카페 배포/카배"→"카페 배포", "클립/네이버클립"→"클립", "여론작업/여론"→"네이버 여론작업". ("상위노출/상노/상위/노출", "배포", "관리"만 단독이면 아래 모호성 규칙 적용.) category 값은 반드시 위 정식 명칭과 글자까지 똑같이 적는다(임의 변형 금지).',
     '- ★ 블로그/카페 등 모호성(접점 → 선택지 제시): 플랫폼이 명시되지 않은 단독어는 임의로 단정하지 말고 categoryOptions 에 후보를 담는다. "상위노출/상노"(불명) → ["블로그 상위노출","카페 상위노출"], "배포"(불명) → ["블로그 배포","카페 배포"], "관리"(불명: 블로그·홈페이지·카페 관리 모두 가능) → ["블로그관리","기타"]. category 에는 후보 중 첫 번째를 기본값으로 넣어 둔다(사용자가 카드에서 바꿀 수 있다). 블로그·카페가 명시돼 모호하지 않으면 categoryOptions 는 넣지 않는다.',
@@ -435,66 +526,94 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '- ★ 순위 조회/정리("어제 작업건 몇위야?", "○○ 지금 순위", "어제 미노출건/노출건 정리해줘", "안 잡힌 키워드 알려줘"): 아래 "현재 등록된 일정"의 rankByTab(탭별 순위)·rankCheckedAt(수집 시각)를 근거로 reply 로만 답한다(액션 배열 비움). 해석: 숫자=노출(그 순위) · null=미노출(수집했으나 못 찾음) · 키 없음=미수집(아직 안 돌림). "어제 작업/수집"은 rankCheckedAt 또는 일정 date 가 어제인 것으로 판단. 탭이 여러 개면 탭별로(통합 N위·블로그 M위) 정리하고, "노출/미노출 정리"면 노출된 건과 미노출 건을 나눠 목록으로 답한다.',
     '- 액션(entries/updates/clients/handovers)을 제안할 때 reply 에는 무엇을 제안하는지 요약하고, 사용자가 "적용" 버튼을 눌러야 실제 반영된다는 뉘앙스로 안내한다.',
     '- 확실하지 않은 정보를 지어내지 말 것. 모르면 reply 에서 추가 정보를 요청.',
+  ].join('\n');
+  // 영업 규칙은 권한자에게만 — 고정 규칙 맨 끝에 붙여, 그 앞까지는 모든 사용자가 같은 캐시 접두부를 공유한다.
+  const salesRules = salesEnabled ? [
+    '- ★ 영업관리(상담 기록): 사용자가 "상담/응대/문의/통화" 한 건을 말하면(예: "오늘 010-1234-5678 번호 상담했어 매우긍정이고 내용은 …", "문의폼으로 ○○ 문의 왔어") sales 배열에 담는다. ★★ 이때는 절대 entries(클라이언트 일정)·internalEvents 로 만들지 않는다 — 내용에 "블로그/마케팅/제작" 같은 단어가 있어도 그건 "상담 내용"일 뿐이다. "상담했어/응대했어/문의 왔어" + 척도(매우긍정~매우부정)·전화번호 신호가 있으면 무조건 sales 다.',
+    '  · content: 상담 내용을 그대로(예: "네이버 블로그 관리 문의"). channel: 전화번호/통화면 "phone", 문의폼/이메일이면 "inquiry", 소개/지인 소개로 들어온 건이면 "referral", 그 외 "etc".',
+    '  · phone: 사용자가 010 을 빼고 숫자만 말해도 그대로 숫자를 넣는다(시스템이 010 을 붙이고 하이픈을 포맷함). 이메일이 있으면 email 에.',
+    '  · sentiment 매핑: "매우긍정"→very_positive, "긍정"→positive, "보통/중립"→neutral, "부정"→negative, "매우부정"→very_negative. 언급 없으면 neutral.',
+    '  · nasLink: "나스 링크/자료 링크/첨부 …" 로 준 URL 은 sales.nasLink 에 넣는다(★ 절대 일정(entries.link)으로 보내지 말 것). consultedAt: 사용자가 시간을 말하면 "YYYY-MM-DD HH:mm"(예: 오후 2시→14:00)로 넣고, 시간 언급이 없으면 날짜만 넣거나 생략한다 — 시스템이 적용(등록) 시각으로 시·분을 자동 기록한다.',
+    '  · status: 보통 신규 상담이면 "new". "처리완료/해결"이라 하면 "done", "진행중"이면 "in_progress", "보류"면 "hold", "부재중/안 받음/연결 안 됨"이면 "absent", "계약 가망/가능성 있음/유망"이면 "prospect".',
+    '  · ★ 답글(스레드 이어 달기): 사용자가 "○○ 상담 내용 추가해줘"처럼 말할 때, 아래 "상담 목록(영업관리)"에 같은 고객사/전화의 기존 상담이 이미 있으면 새 상담(op:"add")을 만들지 말고 op:"reply" + 그 기존 상담의 id 를 넣어 답글로 단다. content 에 이번에 추가할 내용만 담는다(부모의 다른 필드는 보내지 않는다). 예: 어제 "웹투어" 상담이 있는데 "웹투어 오늘 다시 통화함, 견적 보냄" → sales:[{"op":"reply","id":"웹투어 상담의 id","content":"오늘 다시 통화함, 견적 보냄"}].',
+    '  · ★ 업체명을 안 밝히고 전화 뒷자리만 말하는 경우(예: "2077 번호 상담 내용 추가해줘", "뒷번호 2077 …")도, 목록에서 전화가 그 뒷자리로 끝나는 기존 상담을 찾아 op:"reply" + 그 id 로 답글을 단다. 맞는 기존 상담이 없을 때만 op:"add" 로 새로 만든다.',
+    '  · 상담 수정/조회: 기존 상담의 척도·상태·연락처 등 "필드 값"을 바꾸면 op:"update" + 맞는 id(답글이 아니라 기존 내용 자체를 고치는 경우). "오늘 상담 몇 건?", "부정 상담 보여줘", "가망/부재 상담 보여줘" 같은 조회는 sales 배열을 비우고 reply 로만 그 목록을 근거로 답한다(답글 내용도 근거에 포함).',
+    '  · 상담 삭제("○○ 상담 삭제해줘", "그 통화 기록 지워줘"): "상담 목록"에서 고객사/전화/내용으로 맞는 상담을 찾아 op:"delete" + 그 id 로 담는다. 삭제는 되돌리기 어려우니 reply 에 무엇을 지울지 적고 "적용"을 안내한다. 모호하면 지우지 말고 되묻는다.',
+    `  · ★★★ 반드시 "sales" 배열에 객체로 담아라. reply 에 "등록하겠습니다/적용해주세요" 라고 말만 하고 sales 를 비우면 사용자 화면에 적용 버튼이 안 떠서 아무것도 저장되지 않는다(가장 흔한 실수). 신규 상담이면 sales 에 op:"add" 객체가 반드시 1개 이상 있어야 한다.`,
+    `  · 예시) 입력: "오늘 23398893 번호 상담했어 매우긍정이고 내용은 네이버 블로그 관리 내용이었어 나스 링크 https://example.com 로 해줘" → 반드시 sales:[{"op":"add","consultedAt":"(오늘 날짜 YYYY-MM-DD)","channel":"phone","phone":"23398893","content":"네이버 블로그 관리","sentiment":"very_positive","status":"new","nasLink":"https://example.com"}] 로 채우고, reply 는 "전화 상담(매우긍정) 기록을 준비했어요. 적용을 눌러주세요." 정도로 짧게.`,
+  ].join('\n') : '';
+  const staticRules = salesRules ? `${rulesCore}\n${salesRules}` : rulesCore;
+
+  // ── 가변 컨텍스트(날짜·사용자·데이터) — 캐시가 깨지는 값은 전부 여기(고정 규칙 뒤)에 둔다 ──
+  const dynamicCtx = [
+    '[실행 정보]',
+    `오늘 날짜: ${today}`,
+    `로그인 본인(담당자 미지정 시 기본 담당자 · "나/내가"가 가리키는 사람): ${currentUser || '(알 수 없음)'}`,
+    '★ 아래 목록 중 "(생략"으로 표시된 것은 이번 질문과 무관해 보여 보내지 않은 것이다(데이터가 없다는 뜻이 아님). 생략된 목록의 정보가 필요한 조회·수정·삭제 요청이면 "없다"고 단정하거나 지어내지 말고, 해당 주제어(예: 아이디/외주사/보장/보고서/상담/요청/공지/업체 연락처/가이드라인)나 업체명을 넣어 다시 물어봐 달라고 안내한다. 단, 신규 등록(add)은 목록이 생략돼 있어도 그대로 액션에 담는다.',
     '',
-    `로그인한 본인(담당자 미지정 시 기본 담당자 · "나/내가"가 가리키는 사람): ${currentUser || '(알 수 없음)'}`,
     `담당자 목록(이름): ${managerNames.join(', ') || '(없음)'}`,
-    '담당자 명단(이름 · 팀 · 직함 · 직책) — 아래 "직책/직함/팀으로 사람 지목" 규칙의 근거:',
+    '담당자 명단(이름 · 팀 · 직함 · 직책) — "직책/직함/팀으로 사람 지목" 규칙의 근거:',
     rosterLines || '(등록된 담당자 없음)',
     `업체 목록: ${clientNames.join(', ') || '(없음)'}`,
-    '업체 상세(연락처·예산·계약 포함 · 수정/삭제 시 id 사용 · reportAnchorDate=월간 보고 기준 시작일):',
-    // 한 줄에 업체 하나(JSON Lines) — 전체를 한 줄로 직렬화하면 메시지 분할(아래 DEV_CHUNK_CHARS)이 불가능해진다.
-    clients.map(c => JSON.stringify({
-      id: c.id, name: c.name, industry: c.industry, categories: c.categories,
-      reportAnchorDate: c.reportAnchorDate ?? null, status: c.status,
-      contactPerson: c.contactPerson || null, phone: c.phone || null, email: c.email || null,
-      startDate: c.startDate || null, contractEnd: c.contractEnd || null, description: c.description || null,
-      monthlyBudget: c.monthlyBudget || null,
-      budgetItems: Array.isArray(c.budgetItems) ? c.budgetItems.map(b => ({ product: b.product, amount: b.amount, notes: b.notes })) : [],
-    })).join('\n'),
+    '업체 상세(연락처·예산·계약 포함 · 수정/삭제 시 id 사용 · reportAnchorDate=월간 보고 기준 시작일 · 없는 필드는 미등록):',
+    // 한 줄에 업체 하나(JSON Lines). 빈 필드는 빼서 보낸다.
+    detailClients.length
+      ? detailClients.map(c => JSON.stringify(compact({
+          id: c.id, name: c.name, industry: c.industry, categories: c.categories,
+          reportAnchorDate: c.reportAnchorDate, status: c.status,
+          contactPerson: c.contactPerson, phone: c.phone, email: c.email,
+          startDate: c.startDate, contractEnd: c.contractEnd, description: c.description,
+          monthlyBudget: c.monthlyBudget,
+          budgetItems: Array.isArray(c.budgetItems) ? c.budgetItems.map(b => compact({ product: b.product, amount: b.amount, notes: b.notes })) : [],
+        }))).join('\n')
+        + (detailClients.length < clients.length ? `\n(나머지 ${clients.length - detailClients.length}개 업체 상세는 생략 — 업체명을 언급하면 제공됨)` : '')
+      : omitted(clients.length),
     `카테고리 목록(클라이언트 업무 entries 용): ${categories.join(', ')}`,
     `내부 일정 종류(internalEvents 용 — 없으면 새로 만들어도 됨): ${internalCategories.join(', ') || '회의실, 미팅, 면접, 촬영, 휴가'}`,
     '',
-    '현재 등록된 일정(팀 전체 클라이언트 업무 일정 · JSON, id 포함 — updates 에 이 id 사용. "내 일정"은 managerName 이 본인인 것):',
-    '  · ★ 이 목록은 성능상 "최근 약 180일 + 예정 60일" 범위로 제한돼 있다(전체 이력이 아님). 다만 ★사용자가 이번 메시지에서 이름을 언급한 업체는 기간 제한 없이 "그 업체 전 일정"이 전량 포함되어 있다★ — 따라서 언급된 업체(예: "위편장쾌한의원 6/8~7/3")는 아래 목록만으로 그 기간 전부를 빠짐없이 답/처리할 수 있고, 반드시 그래야 한다. 언급 안 된 업체가 목록에 없으면 "이 범위에는 없다. 날짜를 알려달라"고 안내한다(없다고 단정 금지).',
-    '  · ★★ 이 목록은 "업체(clientName)별로 묶여 연속"되어 있고 업체 안에서는 최신순이다. 특정 업체의 일정을 "전부/모두/기간(예: 6/8~7/3)"으로 물으면(조회든 일괄수정이든), 그 업체 blockName 이 나오는 첫 줄부터 마지막 줄까지 "연속된 블록 전체"를 처음부터 끝까지 빠짐없이 훑어 해당 조건(기간 등)에 맞는 건을 모두 답/처리한다. 위쪽 최근 몇 건만 보고 멈추지 말 것 — 최근 것만 답하는 것은 오답이다. 여러 건이면 각각을 결과/updates 에 모두 담는다.',
-    '  · 순위추적(블로그/카페) 일정은 rankByTab(탭별 순위)·rankCheckedAt(탭별 수집시각)를 포함한다. rankByTab 값: 숫자=노출(순위), null=미노출, 키 없음=미수집. 탭: integrated(통합)/blog(블로그탭)/cafe(카페탭).',
-    // 한 줄에 일정 하나(JSON Lines) — 업체별 연속 블록 순서는 그대로 유지된다.
-    //  (전체 배열을 한 줄로 직렬화하면 11만 자를 넘는 한 줄이 생겨 OpenAI 가 그 메시지를 통째로 버렸다.)
-    entries.map(e => JSON.stringify(e)).join('\n'),
+    '현재 등록된 일정(팀 전체 클라이언트 업무 일정 — updates/deletes 에 이 id 사용. "내 일정"은 담당이 본인인 것):',
+    '  · 형식: "▶ 업체: 업체명 (N건)" 헤더 아래 그 업체 일정이 한 줄씩 — id=… | 날짜(기간이면 시작~종료) | 카테고리 | 키워드 | 담당:이름 | 상태 | 링크 | 순위. 헤더의 업체명이 그 아래 모든 줄의 clientName 이다.',
+    `  · ★ 이 목록은 성능상 "${rangeLabel}" 범위로 제한돼 있다(전체 이력이 아님). 다만 ★사용자가 이름을 언급한 업체는 기간 제한 없이 "그 업체 전 일정"이 전량 포함되어 있다★ — 따라서 언급된 업체(예: "위편장쾌한의원 6/8~7/3")는 아래 목록만으로 그 기간 전부를 빠짐없이 답/처리할 수 있고, 반드시 그래야 한다. 언급 안 된 업체·기간이 목록에 없으면 "이 범위에는 없다. 업체명이나 날짜(기간)를 알려달라"고 안내한다(없다고 단정 금지).`,
+    '  · ★★ 이 목록은 업체별로 묶여 있고 업체 안에서는 최신순이다. 특정 업체의 일정을 "전부/모두/기간(예: 6/8~7/3)"으로 물으면(조회든 일괄수정이든), 그 업체 헤더(▶ 업체: …) 바로 아래 첫 줄부터 다음 헤더 전 마지막 줄까지 "블록 전체"를 처음부터 끝까지 빠짐없이 훑어 해당 조건(기간 등)에 맞는 건을 모두 답/처리한다. 위쪽 최근 몇 건만 보고 멈추지 말 것 — 최근 것만 답하는 것은 오답이다. 여러 건이면 각각을 결과/updates 에 모두 담는다.',
+    '  · 순위추적(블로그/카페) 일정의 순위는 탭별(=rankByTab)로 "순위:통합 3위(수집 2026-11-23)·블로그 미노출" 처럼 적힌다. N위=노출, 미노출=수집했으나 못 찾음(null), "순위:미수집"=아직 수집 안 함(키 없음). 괄호의 수집 날짜=rankCheckedAt(한국시간).',
+    showLinks
+      ? '  · "링크:URL"은 그 일정에 등록된 링크다.'
+      : '  · "링크있음"은 링크가 등록돼 있다는 뜻이다(URL 은 생략됨). 링크 추가/수정/삭제는 그대로 처리하고, 사용자가 URL 자체를 알려 달라고 하면 "링크"라는 말을 넣어 다시 물어봐 달라고 안내한다.',
+    entriesContext || '(해당 범위에 등록된 일정 없음)',
     '',
     '현재 내부 일정(수정 시 op:"update" 에 이 id 사용):',
     internalEventsContext || '(등록된 내부 일정 없음)',
     '',
     '업체 가이드라인(인수인계 문서 — 가이드라인 질문의 1차 근거):',
-    guidelineContext || '(등록된 인수인계 가이드라인 없음)',
+    guidelineContext || (handoverAll.length ? `(내용 생략 — 인수인계 문서가 등록된 업체: ${handoverAll.map(d => d.clientName).filter(Boolean).join(', ')}. 업체명을 언급하면 내용이 제공됨)` : '(등록된 인수인계 가이드라인 없음)'),
     '',
     'AI 기획 결과 요약(업체별 캠페인 방향 — 가이드라인 보조 근거):',
-    aiPlanContext || '(등록된 AI 기획 결과 없음)',
+    aiPlanContext || omitted(aiPlansAll.length),
     '',
     '외주사 목록(서비스별 외주 추천의 근거):',
-    vendorContext || '(등록된 외주사 없음)',
+    vendorContext || omitted(vendorsAll.length),
     '',
     '단가표(외부 수집 — 단가/가격/견적 질문의 근거. 상품마다 최저가 + 옵션별 가격(원), [패키지] 표시):',
-    priceContext || '(수집된 단가표 없음 — 단가표 페이지에서 새로고침 필요)',
+    priceContext || '(이번 질문에는 단가표를 보내지 않음 — 단가/가격/견적 질문이면 제공됨. 그런 질문인데도 비어 있으면 단가표 페이지에서 새로고침 필요)',
     '',
     '아이디 목록(계정 — 조회/수정/삭제 시 위 id 사용):',
-    accountContext || '(등록된 아이디 없음)',
+    accountContext || omitted(accountsAll.length),
     '',
     '홈페이지 목록(사내 사용 사이트 — 조회/수정/삭제 시 위 id 사용):',
-    siteContext || '(등록된 홈페이지 없음)',
+    siteContext || omitted(sitesAll.length),
     '',
     '요청함(업무 요청 — "(나)"는 로그인 본인. 받은 요청=→(나), 보낸 요청=(나)→):',
-    requestContext || '(등록된 업무 요청 없음)',
+    requestContext || omitted(requestsAll.length),
     '공지(팀/전체 — 내 대상이거나 내가 올린 것. "(나)"는 내가 올린 공지):',
-    noticeContext || '(올라온 공지 없음)',
+    noticeContext || omitted(noticesAll.length),
     '순위 보장(캠페인별 달성/목표·상태 — 조회/수정/삭제 시 위 id 사용):',
-    rankGContext || '(등록된 순위 보장 없음)',
+    rankGContext || omitted(rankGAll.length),
     '월간 보고서(업체별 초안/발행 상태 — 발행·중복 판단 근거):',
-    reportContext || '(등록된 보고서 없음)',
+    reportContext || omitted(reportsAll.length),
     ...(salesEnabled ? [
       '',
       '상담 목록(영업관리 — 상담 수정/조회 시 위 id 사용):',
-      salesContext || '(등록된 상담 없음)',
+      salesContext || omitted(salesAll.length),
     ] : []),
   ].join('\n');
 
@@ -522,7 +641,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
         // 마지막 형식 재확인 메시지: 컨텍스트가 크면 모델이 맨 앞의 출력 스키마를 잊고
         // {"date":...,"schedules":[...]} 같은 임의 JSON 을 내는 사례가 실측됨 → 끝에서 한 번 더 못박는다.
         input: [
-          ...toInputMessages('developer', developer),
+          // 고정 규칙을 맨 앞 별도 메시지로 — 요청 간 동일한 접두부라 프롬프트 캐시(입력 할인)가 적용된다.
+          ...toInputMessages('developer', staticRules),
+          ...toInputMessages('developer', dynamicCtx),
           ...toInputMessages('user', transcript),
           { role: 'developer', content: [{ type: 'input_text', text: '출력 형식 최종 확인: 반드시 최상위 키가 "reply"(항상 포함, 사용자에게 보여줄 한국어 답변)와 "entries"/"updates" 등 액션 배열인 JSON 객체 한 개로만 응답한다. 일정 목록을 보여줄 때도 데이터를 임의 구조(schedules/date 등)로 내보내지 말고 reply 문자열 안에 정리해 담는다.' }] },
         ],
@@ -563,7 +684,23 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const data = await aiRes.json();
 
   // ★ 입력 소실 감지(_openai.ts): 그대로 두면 모델이 컨텍스트 없이 지어낸 답을 하므로 명확히 알린다.
-  if (inputWasDropped(data, developer.length + transcript.length)) {
+  // 토큰 사용량 로그(Cloudflare 실시간 로그/wrangler tail 에서 확인) — 어떤 질문이 얼마나 쓰는지, 캐시가 먹는지 실측용.
+  //  개인정보 없이 크기·건수만 남긴다.
+  {
+    const usage = (data as { usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } } })?.usage;
+    console.log('[ai-assistant usage]', JSON.stringify({
+      input: usage?.input_tokens, cached: usage?.input_tokens_details?.cached_tokens, output: usage?.output_tokens,
+      chars: { rules: staticRules.length, context: dynamicCtx.length, transcript: transcript.length },
+      sections: {
+        entries: `${entries.length}/${entriesAll.length}`, entriesChars: entriesContext.length, wantsHistory, mentioned: mentioned.length,
+        clientDetail: detailClients.length, handover: handoverDocs.length, aiPlans: aiPlans.length, vendors: vendors.length,
+        accounts: accounts.length, sites: sites.length, price: priceProducts.length, sales: salesEntries.length,
+        requests: requestList.length, notices: noticeList.length, rankG: rankGList.length, reports: reportList.length,
+      },
+    }));
+  }
+
+  if (inputWasDropped(data, staticRules.length + dynamicCtx.length + transcript.length)) {
     return json({ error: INPUT_DROPPED_MSG });
   }
 
