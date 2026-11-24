@@ -541,6 +541,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '  · 상담 삭제("○○ 상담 삭제해줘", "그 통화 기록 지워줘"): "상담 목록"에서 고객사/전화/내용으로 맞는 상담을 찾아 op:"delete" + 그 id 로 담는다. 삭제는 되돌리기 어려우니 reply 에 무엇을 지울지 적고 "적용"을 안내한다. 모호하면 지우지 말고 되묻는다.',
     `  · ★★★ 반드시 "sales" 배열에 객체로 담아라. reply 에 "등록하겠습니다/적용해주세요" 라고 말만 하고 sales 를 비우면 사용자 화면에 적용 버튼이 안 떠서 아무것도 저장되지 않는다(가장 흔한 실수). 신규 상담이면 sales 에 op:"add" 객체가 반드시 1개 이상 있어야 한다.`,
     `  · 예시) 입력: "오늘 23398893 번호 상담했어 매우긍정이고 내용은 네이버 블로그 관리 내용이었어 나스 링크 https://example.com 로 해줘" → 반드시 sales:[{"op":"add","consultedAt":"(오늘 날짜 YYYY-MM-DD)","channel":"phone","phone":"23398893","content":"네이버 블로그 관리","sentiment":"very_positive","status":"new","nasLink":"https://example.com"}] 로 채우고, reply 는 "전화 상담(매우긍정) 기록을 준비했어요. 적용을 눌러주세요." 정도로 짧게.`,
+    '  · ★★★ 최우선 규칙(명시 신호): 사용자가 "영업관리"·"상담 기록"·"상담 로그"·"상담으로 (추가/등록/넣어)"라고 명시하면, 업체명·제작 단어(유튜브/블로그/영상 등)·"추가/넣어" 같은 말이 같이 있어도 무조건 sales 에 op:"add"(기존 상담에 잇는 것이면 op:"reply")로 담고, entries·updates·internalEvents·clients 는 반드시 비운다. 전화번호·척도가 없어도 그대로 만든다(customerName 에 업체/고객명, content 에 나머지 내용, sentiment 는 neutral, status 는 new). 이 명시가 있으면 위의 다른 모든 일정 규칙보다 우선한다. 예: "아주세라믹스 유튜브 6편 롱폼 영업관리 상담으로 추가해줘" → sales:[{"op":"add","customerName":"아주세라믹스","content":"유튜브 6편 롱폼","sentiment":"neutral","status":"new"}], 그 외 배열은 전부 [].',
+    '  · ★★★ 정정 발화("일정이 아니라 영업관리 상담으로", "그거 일정 말고 상담으로 넣어줘", "스케줄 아니고 상담 기록이야"): 직전 대화에서 일정(entries/updates/internalEvents)으로 제안했던 바로 그 내용을 sales op:"add" 로 다시 담는다(직전 사용자 발화와 어시스턴트 발화 끝의 "[제안 …]" 요약에서 업체·내용을 가져온다). 이때 entries·updates·internalEvents·deletes 는 반드시 비운다 — 기존 일정을 건드리는 updates 를 만들면 오답이다. 옮길 내용을 알 수 없을 때만 reply 에서 상담 내용을 되묻는다.',
+    '  · ★ "추가/넣어 = 기존 일정 변경(updates)" 규칙은 일정의 링크·순위에만 해당한다. "상담 추가", "영업관리에 추가"의 "추가"는 updates 신호가 아니다 — 그 업체의 일정이 목록에 있어도 updates 로 만들지 않는다.',
+    '  · ★ 상담 "일정" vs 상담 "기록": 앞으로 만날 약속을 잡는 것("내일 3시 ○○ 상담 잡아줘", "상담 일정/예약")만 internalEvents 다. 이미 한 상담·들어온 문의를 남기는 것("상담했어", "문의 왔어", "상담으로 추가/기록")은 sales 다. 위 내부 일정 규칙의 "상담"은 전자(약속)만 뜻한다.',
   ].join('\n') : '';
   const staticRules = salesRules ? `${rulesCore}\n${salesRules}` : rulesCore;
 
@@ -549,6 +553,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     '[실행 정보]',
     `오늘 날짜: ${today}`,
     `로그인 본인(담당자 미지정 시 기본 담당자 · "나/내가"가 가리키는 사람): ${currentUser || '(알 수 없음)'}`,
+    ...(salesEnabled ? [] : [
+      '영업관리(상담 기록) 권한: 없음 — 사용자가 영업관리/상담 기록의 등록·조회·수정을 요청하면("영업관리에 추가", "상담 기록으로 넣어줘" 등) 하겠다고 답하지 말고, reply 에서 "영업관리 권한이 없어 처리할 수 없다(관리자에게 권한 요청)"고 안내하고 모든 액션 배열을 비운다. 일정(entries/updates)으로 대신 만들지도 않는다. 단, 앞으로의 상담 "약속/일정"을 잡는 것은 내부 일정(internalEvents)으로 정상 처리한다.',
+    ]),
     '★ 아래 목록 중 "(생략"으로 표시된 것은 이번 질문과 무관해 보여 보내지 않은 것이다(데이터가 없다는 뜻이 아님). 생략된 목록의 정보가 필요한 조회·수정·삭제 요청이면 "없다"고 단정하거나 지어내지 말고, 해당 주제어(예: 아이디/외주사/보장/보고서/상담/요청/공지/업체 연락처/가이드라인)나 업체명을 넣어 다시 물어봐 달라고 안내한다. 단, 신규 등록(add)은 목록이 생략돼 있어도 그대로 액션에 담는다.',
     '',
     `담당자 목록(이름): ${managerNames.join(', ') || '(없음)'}`,
@@ -627,9 +634,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   //   (프롬프트가 크면 OpenAI 응답이 느려져 502 가 났다 — ai-insight 와 동일한 가드.)
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000); // 25s 안에 못 받으면 중단
-  let aiRes: Response;
-  try {
-    aiRes = await openaiFetch(env, '/v1/responses', {
+  // 형식 재확인 문구 — 권한자에겐 sales 도 명시(예전엔 "entries"/"updates" 만 예시해 상담 요청이 일정 변경으로 새는 편향이 있었다).
+  const formatReminder = `출력 형식 최종 확인: 반드시 최상위 키가 "reply"(항상 포함, 사용자에게 보여줄 한국어 답변)와 "entries"/"updates"${salesEnabled ? '/"sales"' : ''} 등 액션 배열인 JSON 객체 한 개로만 응답한다. 일정 목록을 보여줄 때도 데이터를 임의 구조(schedules/date 등)로 내보내지 말고 reply 문자열 안에 정리해 담는다. ★ reply 에서 하겠다고 말한 것과 실제로 채운 배열은 반드시 일치해야 한다 — ${salesEnabled ? '"영업관리/상담으로 추가"라고 답했으면 sales 배열에 객체가 있어야 하고 updates·entries 로 대신하면 안 된다. ' : ''}바꿀 값이 하나도 없는 updates 객체(전부 null)는 만들지 않는다.`;
+  // hint 가 있으면 교정 재시도(직전 출력의 오류를 맨 끝에 덧붙여 다시 요청).
+  const callModel = (hint?: string): Promise<Response> => openaiFetch(env, '/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -645,7 +653,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
           ...toInputMessages('developer', staticRules),
           ...toInputMessages('developer', dynamicCtx),
           ...toInputMessages('user', transcript),
-          { role: 'developer', content: [{ type: 'input_text', text: '출력 형식 최종 확인: 반드시 최상위 키가 "reply"(항상 포함, 사용자에게 보여줄 한국어 답변)와 "entries"/"updates" 등 액션 배열인 JSON 객체 한 개로만 응답한다. 일정 목록을 보여줄 때도 데이터를 임의 구조(schedules/date 등)로 내보내지 말고 reply 문자열 안에 정리해 담는다.' }] },
+          { role: 'developer', content: [{ type: 'input_text', text: formatReminder }] },
+          ...(hint ? [{ role: 'developer', content: [{ type: 'input_text', text: hint }] }] : []),
         ],
         text: { format: { type: 'json_object' } },
         reasoning: { effort: 'low' },
@@ -653,6 +662,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       }),
       signal: controller.signal,
     });
+  let aiRes: Response;
+  try {
+    aiRes = await callModel();
   } catch (e) {
     clearTimeout(timer);
     const aborted = (e as Error)?.name === 'AbortError';
@@ -661,9 +673,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       ? 'AI 응답이 지연되어 중단됐어요(25초 초과). 잠시 후 다시 시도하거나, 특정 업체·기간을 콕 집어 물어보시면 빨라집니다.'
       : `OpenAI 요청 실패: ${e instanceof Error ? e.message : '네트워크 오류'}` });
   }
-  clearTimeout(timer);
+  // ※ 타이머는 여기서 끄지 않는다 — 아래 영업관리 교정 재시도도 같은 25초 예산 안에서 돈다.
 
   if (!aiRes.ok) {
+    clearTimeout(timer);
     const detail = await aiRes.text();
     // 429 는 원인이 둘이다 — 크레딧 소진(insufficient_quota) vs 분당 한도 초과(rate_limit).
     // 사용자가 바로 대처할 수 있게 구분해서 안내한다.
@@ -701,47 +714,94 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   }
 
   if (inputWasDropped(data, staticRules.length + dynamicCtx.length + transcript.length)) {
+    clearTimeout(timer);
     return json({ error: INPUT_DROPPED_MSG });
   }
 
-  const content = extractText(data);
-  let parsed: { reply?: string; entries?: unknown; updates?: unknown; clients?: unknown; handovers?: unknown; vendors?: unknown; keywords?: unknown; deletes?: unknown; accounts?: unknown; sites?: unknown; requests?: unknown; notices?: unknown; internalEvents?: unknown; sales?: unknown; rankGuarantees?: unknown; reports?: unknown; accountLookups?: unknown; siteLookups?: unknown };
-  try {
-    parsed = JSON.parse(content);
-  } catch {
+  type Parsed = Record<string, unknown>;
+  const parseOut = (d: unknown): Parsed | null => {
+    try {
+      const o = JSON.parse(extractText(d));
+      return o && typeof o === 'object' && !Array.isArray(o) ? o as Parsed : null;
+    } catch { return null; }
+  };
+  // ★ reply 폴백: 모델이 형식을 놓치면 "reply" 대신 message/answer/text 같은 임의 키에 답을 담는다.
+  //   빈 reply 로 "(응답이 비어 있습니다)"를 띄우느니, 문장형 값을 찾아 보여준다.
+  const replyOf = (o: Parsed) => [o.reply, o.message, o.answer, o.text]
+    .find(v => typeof v === 'string' && v.trim()) as string | undefined;
+  const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+  // ★ 바꿀 값이 하나도 없는 update(전부 null)는 버린다 — 화면에 "일정 변경 … →(빈칸)" + "적용하기(1건)"으로 떠
+  //   아무것도 안 바뀌는데 뭔가 되는 것처럼 보이던 문제(상담 요청이 일정 변경으로 샌 사례).
+  const meaningful = (v: unknown) => v != null && v !== '' && v !== 'null';
+  const isRealUpdate = (u: unknown) => {
+    if (!u || typeof u !== 'object') return false;
+    const o = u as Parsed;
+    return ['date', 'endDate', 'managerName', 'status', 'category', 'rank'].some(k => meaningful(o[k]))
+      || (typeof o.link === 'string' && o.link !== 'null') // ""(링크 삭제)도 실제 변경
+      || (!!o.rankByTab && typeof o.rankByTab === 'object' && Object.keys(o.rankByTab as object).length > 0);
+  };
+  const actionsOf = (o: Parsed) => ({
+    entries: arr(o.entries),
+    updates: arr(o.updates).filter(isRealUpdate),
+    clients: arr(o.clients),
+    handovers: arr(o.handovers),
+    vendors: arr(o.vendors),
+    accounts: arr(o.accounts),
+    sites: arr(o.sites),
+    requests: arr(o.requests),
+    notices: arr(o.notices),
+    internalEvents: arr(o.internalEvents),
+    rankGuarantees: arr(o.rankGuarantees),
+    reports: arr(o.reports),
+    sales: salesEnabled ? arr(o.sales).filter(x => !!x && typeof x === 'object') : [],
+    accountLookups: arr(o.accountLookups).filter(x => typeof x === 'string').slice(0, 30),
+    siteLookups: arr(o.siteLookups).filter(x => typeof x === 'string').slice(0, 30),
+    keywords: arr(o.keywords).filter(k => typeof k === 'string' && k.trim()).slice(0, 20),
+    deletes: arr(o.deletes).filter(d => typeof d === 'string' && d.trim()).slice(0, 50),
+  });
+
+  let parsed = parseOut(data);
+  if (!parsed) {
+    clearTimeout(timer);
     return json({ error: 'AI 응답을 JSON 으로 해석하지 못했습니다.' }); // 200 JSON (CF 5xx→HTML 방지)
   }
 
-  // ★ reply 폴백: 모델이 형식을 놓치면 "reply" 대신 message/answer/text 같은 임의 키에 답을 담는다.
-  //   빈 reply 로 "(응답이 비어 있습니다)"를 띄우느니, 문장형 값을 찾아 보여준다.
-  const loose = parsed as Record<string, unknown>;
-  const replyText = [loose.reply, loose.message, loose.answer, loose.text]
-    .find(v => typeof v === 'string' && v.trim()) as string | undefined;
+  // ★ 영업관리 불일치 가드: "상담으로 추가"를 요청받았거나 reply 에서 그렇게 하겠다고 해놓고 sales 가 비면
+  //   (일정 변경 updates 로 새거나 말만 하는 사례) 오류를 짚어 한 번만 다시 요청한다. 재시도도 같은 25초 예산 안에서.
+  const userMsg = req.message ?? '';
+  const userWantsSales = /영업\s*관리|상담\s*(기록|로그|으로)/.test(userMsg) && /추가|등록|넣어|기록해|남겨|옮겨|적어|바꿔/.test(userMsg);
+  const claimsSales = (t?: string) => !!t
+    && /(영업\s*관리|상담)[^.\n]{0,30}(추가|등록|기록|답글|수정|삭제)[^.\n]{0,15}(하겠|할게|해\s*드|했|준비|눌러|적용)/.test(t);
+  const salesMissing = (o: Parsed) => salesEnabled && actionsOf(o).sales.length === 0
+    && (userWantsSales || claimsSales(replyOf(o)));
+  let salesRetried = false;
+  if (salesMissing(parsed)) {
+    salesRetried = true;
+    try {
+      const res2 = await callModel('★ 직전 출력 오류 — 다시 출력하라: 사용자는 영업관리 상담 기록을 요청했는데 직전 출력은 sales 배열이 비어 있었다(일정 updates/entries 로 잘못 담았거나 말만 했다). 영업관리 규칙의 "최우선 규칙(명시 신호)"·"정정 발화"를 따라 그 내용을 sales 배열에 객체(op:"add" 또는 "reply")로 담고, entries·updates·internalEvents 는 비워라. 상담으로 남길 내용을 대화에서 전혀 알 수 없을 때만 sales 를 비우고 reply 에서 필요한 정보를 되묻되, 그때는 "추가하겠습니다"라고 말하지 않는다. 상담 조회 질문이었다면 액션 배열을 비우고 reply 로만 답한다.');
+      if (res2.ok) {
+        const p2 = parseOut(await res2.json());
+        if (p2 && (replyOf(p2) || Object.values(actionsOf(p2)).some(a => a.length > 0))) parsed = p2;
+      }
+    } catch { /* 재시도 실패(시간 초과 등) → 첫 응답으로 진행하고 아래에서 경고를 붙인다 */ }
+  }
+  clearTimeout(timer);
+
+  let replyText = replyOf(parsed);
+  const actions = actionsOf(parsed);
   // 그래도 답 문장이 없으면: 액션(제안)이라도 있으면 기본 안내문, 완전 형식 이탈이면 재시도 안내 오류.
-  const ACTION_KEYS = ['entries', 'updates', 'clients', 'handovers', 'vendors', 'accounts', 'sites', 'requests', 'notices', 'internalEvents', 'rankGuarantees', 'reports', 'sales', 'deletes', 'keywords', 'accountLookups', 'siteLookups'];
-  const hasActions = ACTION_KEYS.some(k => Array.isArray(loose[k]) && (loose[k] as unknown[]).length > 0);
+  const hasActions = Object.values(actions).some(a => a.length > 0);
   if (!replyText && !hasActions) {
     return json({ error: 'AI 가 응답 형식을 지키지 못했어요. 같은 내용으로 다시 한 번 시도해 주세요.' });
   }
+  // 재시도 후에도 "상담으로 추가하겠다"고만 하고 sales 가 비면, 조용히 넘기지 않고 사실대로 알린다.
+  if (salesEnabled && actions.sales.length === 0 && claimsSales(replyText)) {
+    replyText = `${replyText}\n\n⚠️ 상담 기록 제안이 만들어지지 않았어요. "○○ 업체, 내용 …, 영업관리 상담으로 추가해줘"처럼 상담 내용을 한 문장에 담아 다시 말씀해 주세요.`;
+  }
+  if (salesRetried) console.log('[ai-assistant sales-retry]', JSON.stringify({ sales: actions.sales.length, updates: actions.updates.length, entries: actions.entries.length }));
 
   return json({
     reply: replyText ?? '제안을 준비했어요. 내용 확인 후 "적용"을 눌러주세요.',
-    entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
-    updates: Array.isArray(parsed?.updates) ? parsed.updates : [],
-    clients: Array.isArray(parsed?.clients) ? parsed.clients : [],
-    handovers: Array.isArray(parsed?.handovers) ? parsed.handovers : [],
-    vendors: Array.isArray(parsed?.vendors) ? parsed.vendors : [],
-    accounts: Array.isArray(parsed?.accounts) ? parsed.accounts : [],
-    sites: Array.isArray(parsed?.sites) ? parsed.sites : [],
-    requests: Array.isArray(parsed?.requests) ? parsed.requests : [],
-    notices: Array.isArray(parsed?.notices) ? parsed.notices : [],
-    internalEvents: Array.isArray(parsed?.internalEvents) ? parsed.internalEvents : [],
-    rankGuarantees: Array.isArray(parsed?.rankGuarantees) ? parsed.rankGuarantees : [],
-    reports: Array.isArray(parsed?.reports) ? parsed.reports : [],
-    sales: salesEnabled && Array.isArray(parsed?.sales) ? parsed.sales : [],
-    accountLookups: Array.isArray(parsed?.accountLookups) ? parsed.accountLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
-    siteLookups: Array.isArray(parsed?.siteLookups) ? parsed.siteLookups.filter((x: unknown) => typeof x === 'string').slice(0, 30) : [],
-    keywords: Array.isArray(parsed?.keywords) ? parsed.keywords.filter((k: unknown) => typeof k === 'string' && k.trim()).slice(0, 20) : [],
-    deletes: Array.isArray(parsed?.deletes) ? parsed.deletes.filter((d: unknown) => typeof d === 'string' && d.trim()).slice(0, 50) : [],
+    ...actions,
   });
 };

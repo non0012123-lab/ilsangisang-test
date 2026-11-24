@@ -1319,7 +1319,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           lastReply: e.replies?.length ? (e.replies[e.replies.length - 1].content ?? '').slice(0, 60) : undefined,
         }))
       : [];
-    const history = (conversationsRef.current.find(c => c.id === convId)?.messages ?? []).map(m => ({ role: m.role, text: m.text }));
+    // ★ 어시스턴트 발화에는 "그때 무엇을 제안했는지" 요약을 붙여 보낸다.
+    //  text 만 보내면 모델이 직전 제안의 내용을 몰라, "일정이 아니라 영업관리 상담으로" 같은 정정 발화에서
+    //  옮길 대상을 못 찾고 말만 맞추거나 엉뚱한 액션(빈 일정 변경)을 냈다.
+    const proposalSummary = (m: AssistantMessage): string => {
+      if (m.role !== 'assistant') return '';
+      const cut = (s?: string | null, n = 40) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+      const list = (items: string[]) => items.slice(0, 5).join('; ') + (items.length > 5 ? ` 외 ${items.length - 5}건` : '');
+      const parts: string[] = [];
+      if (m.entries?.length) parts.push(`일정 추가(entries) ${m.entries.length}건: ${list(m.entries.map(e => [e.date, e.clientName, e.category, cut(e.keyword)].filter(Boolean).join(' ')))}`);
+      if (m.updates?.length) parts.push(`일정 변경(updates) ${m.updates.length}건: ${list(m.updates.map(x => [x.matchDate, x.clientName, cut(x.keyword)].filter(v => v && v !== 'null').join(' ')))}`);
+      if (m.deletes?.length) parts.push(`일정 삭제(deletes) ${m.deletes.length}건`);
+      if (m.internalEvents?.length) parts.push(`내부 일정(internalEvents) ${m.internalEvents.length}건: ${list(m.internalEvents.map(x => [x.op ?? 'add', x.date, x.startTime, cut(x.title)].filter(Boolean).join(' ')))}`);
+      if (salesEnabled && m.sales?.length) parts.push(`상담(sales) ${m.sales.length}건: ${list(m.sales.map(x => [x.op ?? 'add', cut(x.customerName, 20), cut(x.content)].filter(Boolean).join(' ')))}`);
+      const others = (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0)
+        + (m.requests?.length ?? 0) + (m.notices?.length ?? 0) + (m.rankGuarantees?.length ?? 0) + (m.reports?.length ?? 0);
+      if (others) parts.push(`기타 ${others}건`);
+      if (!parts.length) return '';
+      return `\n[제안 — ${m.applied != null ? (m.undone ? '적용 후 되돌림' : '적용됨') : '아직 미적용'}: ${parts.join(' / ')}]`;
+    };
+    const history = (conversationsRef.current.find(c => c.id === convId)?.messages ?? []).map(m => ({ role: m.role, text: m.text + proposalSummary(m) }));
     mutateMessages(convId, prev => [...prev, { role: 'user', text: message }]);
     setAssistantLoading(true);
     try {

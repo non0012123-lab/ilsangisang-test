@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Sparkles, Send, CalendarPlus, Check, Pencil, Building2, ClipboardList, Boxes, Search, Trash2, RotateCcw, KeyRound, Globe, Copy, Plus, X, MessageSquare, PanelLeftClose, PanelLeftOpen, CalendarClock, PhoneCall, CornerDownRight, Megaphone, Target, FileText } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import type { AssistantMessage, AssistantProposalEntry, Category } from '../types';
+import type { AssistantMessage, AssistantProposalEntry, AssistantProposalUpdate, Category } from '../types';
 import { toNasForOS } from '../utils/nasPath';
 import { CATEGORIES, catLabel } from '../data/categories';
 
@@ -36,6 +36,15 @@ const REMINDER_TEXT: Record<string, string> = { '1h': '1시간 전', '30m': '30�
 const SALES_SENT_LABEL: Record<string, string> = { very_positive: '매우긍정', positive: '긍정', neutral: '보통', negative: '부정', very_negative: '매우부정' };
 const SALES_CH_LABEL: Record<string, string> = { phone: '전화', inquiry: '이메일', referral: '소개', etc: '기타' };
 const WD_LABEL = ['일', '월', '화', '수', '목', '금', '토'];
+const RANK_TAB_LABEL: Record<string, string> = { integrated: '통합', blog: '블로그', cafe: '카페' };
+// 바꿀 값이 하나라도 있는 일정 변경인지 — 전부 null 인 빈 변경은 미리보기·건수에서 뺀다
+// (예전에 저장된 대화에 남아 있을 수 있다. 서버도 같은 기준으로 걸러 보낸다).
+const isRealUpdate = (u: AssistantProposalUpdate) => {
+  const has = (v: unknown) => v != null && v !== '' && v !== 'null';
+  return has(u.date) || has(u.endDate) || has(u.managerName) || has(u.status) || has(u.category) || has(u.rank)
+    || (typeof u.link === 'string' && u.link !== 'null')
+    || (!!u.rankByTab && Object.keys(u.rankByTab).length > 0);
+};
 // 반복 규칙 → 짧은 한국어 라벨(어시스턴트 미리보기용)
 const recurLabel = (r: { freq?: string; interval?: number; weekday?: number; day?: number; count?: number; until?: string }): string => {
   const n = r.count ? `${r.count}회` : r.until ? `~${r.until}` : '12회';
@@ -154,7 +163,7 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
   };
 
   const proposalCount = (m: AssistantMessage) =>
-    (m.entries?.length ?? 0) + (m.updates?.length ?? 0) + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0) + (m.notices?.length ?? 0) + (m.internalEvents?.length ?? 0) + (m.sales?.length ?? 0) + (m.rankGuarantees?.length ?? 0) + (m.reports?.length ?? 0);
+    (m.entries?.length ?? 0) + (m.updates ?? []).filter(isRealUpdate).length + (m.clients?.length ?? 0) + (m.handovers?.length ?? 0) + (m.vendors?.length ?? 0) + (m.deletes?.length ?? 0) + (m.accounts?.length ?? 0) + (m.sites?.length ?? 0) + (m.requests?.length ?? 0) + (m.notices?.length ?? 0) + (m.internalEvents?.length ?? 0) + (m.sales?.length ?? 0) + (m.rankGuarantees?.length ?? 0) + (m.reports?.length ?? 0);
 
   const opLabel = (op?: string) => op === 'delete' ? '삭제' : op === 'update' ? '수정' : '추가';
 
@@ -370,7 +379,7 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                       </div>
                       );
                     })}
-                    {(m.updates ?? []).map((u, i) => {
+                    {(m.updates ?? []).filter(isRealUpdate).map((u, i) => {
                       // id 가 틀려도 보조필드(업체·키워드·날짜)로 대상을 찾아 미리보기에 표시한다(적용 로직과 동일 기준).
                       const incl = (a?: string, b?: string) => !!a && !!b && (a.includes(b) || b.includes(a));
                       const cur = entries.find(en => en.id === u.id)
@@ -385,7 +394,7 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                           <span>
                             <strong>일정 변경</strong> {target}
                             {' → '}
-                            {[u.date && u.date !== 'null' ? `날짜 ${u.date}` : '', u.managerName && u.managerName !== 'null' ? `담당 ${u.managerName}` : '', u.status && u.status !== 'null' ? STATUS_LABEL[u.status] ?? u.status : '', u.link != null && u.link !== 'null' ? (u.link ? '🔗 링크 변경' : '🔗 링크 삭제') : '', Number.isFinite(rankN) && rankN > 0 ? `순위 ${rankN}위` : ''].filter(Boolean).join(', ')}
+                            {[u.date && u.date !== 'null' ? `날짜 ${u.date}` : '', u.managerName && u.managerName !== 'null' ? `담당 ${u.managerName}` : '', u.status && u.status !== 'null' ? STATUS_LABEL[u.status] ?? u.status : '', u.endDate && u.endDate !== 'null' ? `종료일 ${u.endDate}` : '', u.category && u.category !== 'null' ? `카테고리 ${u.category}` : '', ...Object.entries(u.rankByTab ?? {}).map(([t, v]) => `${RANK_TAB_LABEL[t] ?? t} ${v == null || v === 'null' ? '미노출' : `${String(v).replace(/[^0-9]/g, '')}위`}`), u.link != null && u.link !== 'null' ? (u.link ? '🔗 링크 변경' : '🔗 링크 삭제') : '', Number.isFinite(rankN) && rankN > 0 ? `순위 ${rankN}위` : ''].filter(Boolean).join(', ')}
                           </span>
                         </div>
                       );
