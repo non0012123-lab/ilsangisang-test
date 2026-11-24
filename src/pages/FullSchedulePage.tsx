@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { usePersistedState, usePersistedManagerFilter } from '../hooks/usePersisted';
+import { useTodayResetState, usePersistedManagerFilter } from '../hooks/usePersisted';
 import { Plus, Pencil, Trash2, Search, Filter, CalendarRange, User } from 'lucide-react';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
@@ -31,9 +31,9 @@ export default function FullSchedulePage() {
   const [filterCategory, setFilterCategory] = useState<Category | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<ScheduleStatus | 'all'>('all');
   const [filterTeam, setFilterTeam] = useState('all');
-  // 기간은 영속(새로고침/배포 후에도 보던 기간 유지)
-  const [dateFrom, setDateFrom] = usePersistedState('sched.full.from', '');
-  const [dateTo, setDateTo] = usePersistedState('sched.full.to', '');
+  // 기간: 새로고침/배포 리로드엔 보던 기간 유지, 앱을 새로 켜거나 날짜가 바뀌면 초기화(전체 기간)
+  const [dateFrom, setDateFrom] = useTodayResetState('sched.full.from', () => '');
+  const [dateTo, setDateTo] = useTodayResetState('sched.full.to', () => '');
 
   // 담당자 필터는 실제 가입·승인된 담당자(Supabase profiles)를 사용 (스케줄 등록 모달과 동일 소스)
   const managers = members;
