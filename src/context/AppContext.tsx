@@ -53,6 +53,7 @@ interface AppContextType {
   assistantMessages: AssistantMessage[];   // 활성 대화의 메시지
   assistantLoading: boolean;
   runAssistant: (text: string) => Promise<void>;
+  cancelAssistant: () => void; // 응답 대기 중단("생각 중…"이 안 끝날 때)
   applyAssistantProposal: (index: number) => void;
   // 모호한 카테고리(블로그/카페 등)를 사용자가 칩으로 골랐을 때 제안 entry 의 category 를 확정
   setProposalCategory: (messageIndex: number, entryIndex: number, category: string) => void;
@@ -1176,6 +1177,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [conversations, activeConversationId]);
 
   // ── 대시보드 AI 어시스턴트 (전역 실행 → 다른 메뉴로 이동해도 대화·진행 유지) ──
+  // 진행 중인 어시스턴트 요청의 중단 핸들 — 응답이 안 오면(네트워크 끊김·절전 복귀 등) "생각 중…"이 영원히 남아
+  //  새 입력까지 막히던 문제 방지. 제한 시간(45초) 초과 또는 사용자가 "중단"을 누르면 요청을 끊는다.
+  const assistantAbortRef = useRef<{ controller: AbortController; reason: 'user' | 'timeout' | null } | null>(null);
+  const cancelAssistant = useCallback(() => {
+    const h = assistantAbortRef.current;
+    if (h) { h.reason = 'user'; h.controller.abort(); }
+  }, []);
+
   const runAssistant = useCallback(async (text: string) => {
     const message = text.trim();
     if (!message || assistantLoadingRef.current) return;
@@ -1338,12 +1347,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!parts.length) return '';
       return `\n[제안 — ${m.applied != null ? (m.undone ? '적용 후 되돌림' : '적용됨') : '아직 미적용'}: ${parts.join(' / ')}]`;
     };
-    const history = (conversationsRef.current.find(c => c.id === convId)?.messages ?? []).map(m => ({ role: m.role, text: m.text + proposalSummary(m) }));
+    // ★ 이력은 "직전 한 번의 주고받기"(사용자 1 + 어시스턴트 1)만 보낸다 — 대화를 길게 이어 갈 필요는 없고
+    //   "아니 그거 말고 ○○ 업체 등록해줘" 같은 바로 앞 제안에 대한 정정만 알아들으면 된다(서버도 같은 기준으로 자른다).
+    const history = (conversationsRef.current.find(c => c.id === convId)?.messages ?? []).slice(-2)
+      .map(m => ({ role: m.role, text: (m.text + proposalSummary(m)).slice(0, 2000) }));
     mutateMessages(convId, prev => [...prev, { role: 'user', text: message }]);
     setAssistantLoading(true);
+    const abortHandle: { controller: AbortController; reason: 'user' | 'timeout' | null } = { controller: new AbortController(), reason: null };
+    assistantAbortRef.current = abortHandle;
+    const abortTimer = setTimeout(() => { abortHandle.reason = 'timeout'; abortHandle.controller.abort(); }, 45000); // 서버 자체 제한은 25초
     try {
       const reqInit: RequestInit = {
         method: 'POST',
+        signal: abortHandle.controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message, history, today: todayStr(),
@@ -1496,8 +1512,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch (e) {
-      mutateMessages(convId, prev => [...prev, { role: 'assistant', text: `⚠️ ${e instanceof Error ? e.message : '오류가 발생했습니다.'}` }]);
+      const text = abortHandle.reason === 'user' ? '요청을 중단했어요.'
+        : abortHandle.reason === 'timeout' ? '⚠️ 45초 안에 응답을 받지 못해 중단했어요. 네트워크 상태를 확인한 뒤 다시 시도해 주세요(한 번에 등록하는 건수를 줄이면 더 빨라집니다).'
+        : `⚠️ ${e instanceof Error ? e.message : '오류가 발생했습니다.'}`;
+      mutateMessages(convId, prev => [...prev, { role: 'assistant', text }]);
     } finally {
+      clearTimeout(abortTimer);
+      if (assistantAbortRef.current === abortHandle) assistantAbortRef.current = null;
       setAssistantLoading(false);
     }
   }, [createConversation, mutateMessages]);
@@ -1584,7 +1605,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (cr) return cr.id;
       const exact = clientsRef.current.find(x => x.name === name);
       if (exact) return exact.id;
-      return clientsRef.current.find(x => name.includes(x.name) || x.name.includes(name))?.id ?? '';
+      // 이름이 비었거나 한 글자인 업체는 부분일치 대상에서 뺀다(''.includes 는 항상 참이라 아무 일정이나 그 업체로 붙는다).
+      return clientsRef.current.find(x => (x.name ?? '').trim().length >= 2 && (name.includes(x.name) || x.name.includes(name)))?.id ?? '';
     };
     const clientNameOf = (id: string) => clientsRef.current.find(c => c.id === id)?.name ?? created.find(c => c.id === id)?.name ?? '';
     // 일정(entries)이 참조하는 업체를 보장한다: 기존/이번에 만든 업체에서 찾고, 없으면 자동 생성.
@@ -1902,7 +1924,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const mine = requestsRef.current.filter(x => x.fromUid === (u?.id ?? ''));
         const toId = r.toName ? matchManager(r.toName) : '';
         const cur = (r.id ? mine.find(x => x.id === r.id) : undefined)
-          ?? mine.find(x => (!r.title || includesEither(x.title, r.title!.trim())) && (!toId || x.toUid === toId));
+          // ★ 제목·받는사람 단서가 둘 다 없으면 찾지 않는다(조건이 전부 비면 "내가 보낸 첫 요청"이 회수되던 구멍).
+          ?? ((r.title?.trim() || toId) ? mine.find(x => (!r.title?.trim() || includesEither(x.title, r.title!.trim())) && (!toId || x.toUid === toId)) : undefined);
         if (!cur) return;
         undo.deletedRequests!.push({ ...cur });
         removeRequest(cur.id);
@@ -2708,7 +2731,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       entries, clients, handoverDocs, dataLoading, entriesLoaded, vendors, accounts, siteEntries, reports, members: orderedMembers, reloadMembers, aiHistory, saveAiPlan, removeAiPlan,
       aiPlanRunning, aiPlanError, startAiPlanJob, activeAiPlanId, clearActiveAiPlan,
       aiImageRunning, aiImageError, startAiImageJob,
-      assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, setProposalCategory, undoAssistantProposal,
+      assistantMessages, assistantLoading, runAssistant, cancelAssistant, applyAssistantProposal, setProposalCategory, undoAssistantProposal,
       conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
       saveEntry, saveEntries, patchEntry, removeEntry, removeSeries, refreshEntries, saveClient, removeClient, favoriteClientIds, toggleFavorite, saveHandover, removeHandover,
       saveVendor, removeVendor, saveAccount, removeAccount, saveSite, removeSite, saveReport, removeReport,

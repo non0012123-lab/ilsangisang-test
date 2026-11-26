@@ -79,7 +79,7 @@ const EXAMPLES = [
 export default function DashboardAssistant({ variant = 'full' }: { variant?: 'full' | 'widget' } = {}) {
   const isWidget = variant === 'widget';
   const {
-    entries, accounts, siteEntries, assistantMessages, assistantLoading, runAssistant, applyAssistantProposal, setProposalCategory, undoAssistantProposal,
+    entries, accounts, siteEntries, assistantMessages, assistantLoading, runAssistant, cancelAssistant, applyAssistantProposal, setProposalCategory, undoAssistantProposal,
     conversations, activeConversationId, newConversation, selectConversation, deleteConversation, deleteAssistantMessage,
   } = useApp();
   const { user } = useAuth();
@@ -382,11 +382,15 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
                     {(m.updates ?? []).filter(isRealUpdate).map((u, i) => {
                       // id 가 틀려도 보조필드(업체·키워드·날짜)로 대상을 찾아 미리보기에 표시한다(적용 로직과 동일 기준).
                       const incl = (a?: string, b?: string) => !!a && !!b && (a.includes(b) || b.includes(a));
-                      const cur = entries.find(en => en.id === u.id)
-                        ?? entries.find(en => (!u.clientName || en.clientName === u.clientName || incl(en.clientName, u.clientName))
+                      //  ★ 단서(업체·키워드·날짜)가 하나도 없으면 찾지 않는다 — 예전엔 조건이 전부 비어 "목록의 첫 일정"이
+                      //    대상으로 표시됐다(등록 요청인데 무관한 업체의 '일정 변경'으로 보이던 원인). 적용 로직도 이 경우 아무것도 안 바꾼다.
+                      const md = u.matchDate && u.matchDate !== 'null' ? u.matchDate : '';
+                      const hasClue = !!(u.clientName || u.keyword || md);
+                      const cur = entries.find(en => !!u.id && en.id === u.id)
+                        ?? (hasClue ? entries.find(en => (!u.clientName || en.clientName === u.clientName || incl(en.clientName, u.clientName))
                           && (!u.keyword || incl(en.keyword, u.keyword))
-                          && (!u.matchDate || u.matchDate === 'null' || en.date === u.matchDate));
-                      const target = cur ? `${cur.clientName} ${cur.category}${cur.keyword ? ` (${cur.keyword})` : ''}` : (u.clientName || u.id || '대상 미상');
+                          && (!md || en.date === md)) : undefined);
+                      const target = cur ? `${cur.clientName} ${cur.category}${cur.keyword ? ` (${cur.keyword})` : ''}` : `${u.clientName || '대상 미상'} (일치하는 일정을 찾지 못함 — 적용되지 않음)`;
                       const rankN = u.rank != null && u.rank !== 'null' ? parseInt(String(u.rank).replace(/[^0-9]/g, ''), 10) : NaN;
                       return (
                         <div key={`u${i}`} className="flex items-start gap-2 text-xs text-gray-700">
@@ -538,6 +542,9 @@ export default function DashboardAssistant({ variant = 'full' }: { variant?: 'fu
             <div className="bg-gray-100 rounded-2xl px-3.5 py-2.5 flex items-center gap-2 text-sm text-gray-500">
               <div className="w-3.5 h-3.5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
               생각 중...
+              <button onClick={cancelAssistant} className="ml-1 px-2 py-0.5 rounded-md text-xs font-medium text-gray-500 border border-gray-300 hover:bg-white hover:text-red-600 transition-colors">
+                중단
+              </button>
             </div>
           </div>
         )}

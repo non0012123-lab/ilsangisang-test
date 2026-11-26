@@ -53,9 +53,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   let req: SummaryRequest;
   try { req = await request.json(); } catch { return json({ error: '잘못된 요청 본문입니다.' }, 400); }
 
-  const pending = Array.isArray(req.pending) ? req.pending : [];
-  const inProgress = Array.isArray(req.inProgress) ? req.inProgress : [];
-  const completed = Array.isArray(req.completed) ? req.completed : [];
+  // 목록 상한 — 입력 총량 한도(_openai.ts MAX_INPUT_CHARS)를 넘기면 앞쪽 규칙부터 잘린다. 하루 요약엔 이 정도면 충분.
+  const pending = (Array.isArray(req.pending) ? req.pending : []).slice(0, 200);
+  const inProgress = (Array.isArray(req.inProgress) ? req.inProgress : []).slice(0, 200);
+  const completed = (Array.isArray(req.completed) ? req.completed : []).slice(0, 200);
 
   const developer = [
     '너는 마케팅 대행사의 일일 업무 보고 요약 도우미다. 담당자의 하루 업무를 관리자가 빠르게 파악하도록 한국어로 간결하게 요약한다.',

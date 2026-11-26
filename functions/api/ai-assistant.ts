@@ -151,7 +151,7 @@ function extractText(data: unknown): string {
   return parts.join('\n').trim();
 }
 
-import { openaiFetch, toInputMessages, inputWasDropped, INPUT_DROPPED_MSG } from './_openai';
+import { openaiFetch, toInputMessages, inputWasDropped, INPUT_DROPPED_MSG, MAX_INPUT_CHARS, clipLines } from './_openai';
 
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
@@ -167,6 +167,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     return json({ error: '잘못된 요청 본문입니다.' }, 400);
   }
   if (!req.message || !req.message.trim()) return json({ error: '입력 메시지가 비어 있습니다.' }, 400);
+  // 한 번에 붙여넣은 내용이 너무 길면 규칙·데이터가 들어갈 자리가 없어진다(입력 총량 한도 — _openai.ts 참고).
+  if (req.message.length > 20000) return json({ error: '한 번에 입력한 내용이 너무 깁니다(2만 자 초과). 여러 번에 나눠서 요청해 주세요.' });
 
   const today = req.today || new Date().toISOString().slice(0, 10);
   const currentUser = (req.currentUser || '').trim();
@@ -197,11 +199,11 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     .filter(Boolean).join('\n');
 
   // ── 질문별 컨텍스트 선별(토큰 절감) ─────────────────────────────────────
-  // 예전엔 질문과 무관하게 전 데이터를 매번 보내 요청당 수만 토큰이 들었다. 이제 "이번 질문 + 직전 사용자 발화 2개"
-  // (후속 질문 "그거 바꿔줘" 대응)에 주제어·업체명이 있을 때만 해당 목록을 싣고, 나머지는 "(생략 — N건)"으로 알린다.
+  // 예전엔 질문과 무관하게 전 데이터를 매번 보내 요청당 수만 토큰이 들었다. 이제 "이번 질문 + 직전 사용자 발화 1개"
+  // (후속 질문 "그거 바꿔줘", "아니 그거 말고 ○○ 등록해줘" 대응)에 주제어·업체명이 있을 때만 해당 목록을 싣고, 나머지는 "(생략 — N건)"으로 알린다.
   // 생략된 목록이 필요해 보이면 모델이 주제어를 넣어 다시 물어달라고 안내한다(dynamicCtx 의 안내문 참고).
   const ctxText = [
-    ...(Array.isArray(req.history) ? req.history : []).filter(m => m?.role === 'user').slice(-2).map(m => m.text || ''),
+    ...(Array.isArray(req.history) ? req.history : []).filter(m => m?.role === 'user').slice(-1).map(m => (m.text || '').slice(0, 2000)),
     req.message,
   ].join('\n');
   const has = (re: RegExp) => re.test(ctxText);
@@ -229,18 +231,21 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const validToday = /^\d{4}-\d{2}-\d{2}$/.test(today);
   //  단, 이번 메시지에서 특정 업체를 콕 집었으면 그 업체는 어차피 전량이므로 나머지 업체까지 넓히지 않는다(대상 업체에 집중).
   const mentionedNow = mentioned.some(n => req.message!.includes(n) || (n.length >= 4 && req.message!.includes(n.slice(0, 4))));
-  const wantsHistory = !validToday || !mentionedNow && (wantsAll
+  // ★ 등록 요청("11/25 … https://… 스케줄 등록해줘")의 날짜는 새 일정의 날짜일 뿐 과거 조회 신호가 아니다.
+  //   이걸 과거 조회로 오인해 180일치를 싣는 바람에 입력 총량 한도를 넘겨 규칙이 잘려 나갔다(업체? · 엉뚱한 일정 변경의 원인).
+  const isRegister = /등록/.test(req.message!) && !/조회|알려|보여|정리해|몇\s*(건|개|위)|있어\?|있나/.test(req.message!);
+  const wantsHistory = !validToday || !isRegister && !mentionedNow && (wantsAll
     || has(/지난|저번|작년|전달|이전|과거|예전|그동안|여태|지금까지|통계|누적|\d{1,2}\s*월|\d{1,2}\s*\/\s*\d{1,2}|\d{4}-\d{2}|개월|분기|올해|상반기|하반기|[주달일]\s*전/));
   const shiftDay = (n: number) => { const d = new Date(`${today}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
   const winLo = validToday ? shiftDay(-45) : '', winHi = validToday ? shiftDay(60) : '';
   const entryEnd = (e: CtxEntry) => (e.endDate && e.endDate !== 'null' && e.endDate > (e.date ?? '') ? e.endDate : (e.date ?? ''));
-  const entries = entriesAll
-    .filter(e => wantsHistory || isMentioned(e.clientName) || ((e.date ?? '') <= winHi && entryEnd(e) >= winLo))
-    .slice(0, 1500);
+  const entriesPool = entriesAll
+    .filter(e => wantsHistory || isMentioned(e.clientName) || ((e.date ?? '') <= winHi && entryEnd(e) >= winLo));
   const rangeLabel = wantsHistory ? '최근 약 180일 + 예정 60일' : '최근 45일 + 예정 60일';
 
   // 일정은 업체별 블록 + 한 줄 압축 표기(키 이름 반복 제거). URL 은 링크 질문일 때만 원문으로.
-  const showLinks = has(/링크|url|주소|link|http|나스|nas/i);
+  //  ★ 메시지에 URL 이 들어 있다는 것만으로는(등록할 링크) 기존 일정의 URL 원문이 필요하지 않다 — "링크 알려줘"류 조회일 때만.
+  const showLinks = has(/링크|url|주소|link|나스|nas/i) && has(/알려|뭐야|뭐였|뭐지|보여|찾아|확인|어디|조회|\?/);
   const TAB_LABEL: Record<string, string> = { integrated: '통합', blog: '블로그', cafe: '카페' };
   const kstDate = (iso?: string) => {
     const ms = Date.parse(iso ?? '');
@@ -256,10 +261,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     }
     return e.rank != null ? `순위:${e.rank}위` : '';
   };
-  const entryBlocks = new Map<string, string[]>();
-  for (const e of entries) {
+  const entryLine = (e: CtxEntry) => {
     const end = entryEnd(e);
-    const line = [
+    return [
       `id=${e.id}`,
       end > (e.date ?? '') ? `${e.date}~${end}` : (e.date ?? '?'),
       e.category ?? '-',
@@ -269,11 +273,61 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       e.link ? (showLinks ? `링크:${e.link}` : '링크있음') : '',
       fmtRank(e),
     ].filter(Boolean).join(' | ');
-    const key = e.clientName || '(업체 미지정)';
-    const block = entryBlocks.get(key);
-    if (block) block.push(line); else entryBlocks.set(key, [line]);
-  }
-  const entriesContext = [...entryBlocks].map(([name, lines]) => `▶ 업체: ${name} (${lines.length}건)\n${lines.join('\n')}`).join('\n');
+  };
+  // 일정 목록은 아래에서 "입력 총량 예산"에 맞춰 고른다(buildEntriesContext) — 다른 섹션 크기가 정해진 뒤.
+  let entries: CtxEntry[] = [];
+  let entriesContext = '';
+  const buildEntriesContext = (budgetChars: number) => {
+    // 우선순위: 이번 메시지에서 콕 집은 업체 → 직전 발화에서 언급된 업체 → 나머지. 같은 순위에선 오늘과 가까운 날짜부터.
+    const nowNames = mentioned.filter(n => req.message!.includes(n) || (n.length >= 4 && req.message!.includes(n.slice(0, 4))));
+    const isNow = (name?: string) => !!name && nowNames.some(n => name === n || name.includes(n) || n.includes(name));
+    const todayMs = Date.parse(`${validToday ? today : new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+    // 기준일: 보통은 오늘. 단 조회 질문이 특정 달/날짜를 가리키면("지난 9월", "6/5", "지난달") 그 날짜와 가까운 일정부터 싣는다
+    //  — 예산 때문에 오늘 근처만 남기면 "9월 전체 몇 건?" 같은 과거 질문에 답할 데이터가 통째로 빠진다.
+    const anchorMs = (() => {
+      if (isRegister) return todayMs;
+      const msg = req.message!;
+      const t = new Date(todayMs);
+      const mk = (mo: number, da: number) => {
+        if (!(mo >= 1 && mo <= 12 && da >= 1 && da <= 31)) return NaN;
+        let ms = Date.UTC(t.getUTCFullYear(), mo - 1, da);
+        if (ms > todayMs + 62 * 86400000) ms = Date.UTC(t.getUTCFullYear() - 1, mo - 1, da); // 먼 미래로 읽히면 작년
+        return ms;
+      };
+      const md = msg.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/) ?? msg.match(/(\d{1,2})\s*\/\s*(\d{1,2})/);
+      if (md) { const ms = mk(+md[1], +md[2]); if (!Number.isNaN(ms)) return ms; }
+      const mo = msg.match(/(\d{1,2})\s*월/);
+      if (mo) { const ms = mk(+mo[1], 15); if (!Number.isNaN(ms)) return ms; }
+      if (/지난\s*달|저번\s*달|전달/.test(msg)) return Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - 1, 15);
+      return todayMs;
+    })();
+    const dist = (e: CtxEntry) => { const ms = Date.parse(`${e.date ?? ''}T00:00:00Z`); return Number.isNaN(ms) ? 1e15 : Math.abs(ms - anchorMs); };
+    const ranked = entriesPool
+      .map(e => ({ e, p: isNow(e.clientName) ? 0 : isMentioned(e.clientName) ? 1 : 2, d: dist(e) }))
+      .sort((a, b) => a.p - b.p || a.d - b.d);
+    const picked: CtxEntry[] = [];
+    const seenClients = new Set<string>();
+    let used = 0;
+    for (const { e } of ranked) {
+      const key = e.clientName || '(업체 미지정)';
+      const cost = entryLine(e).length + 1 + (seenClients.has(key) ? 0 : key.length + 20);
+      if (used + cost > budgetChars || picked.length >= 1500) break;
+      used += cost; seenClients.add(key); picked.push(e);
+    }
+    // 업체별 블록(가나다) + 업체 안 최신순 — 프론트가 보내던 순서와 같은 모양으로 다시 묶는다.
+    picked.sort((a, b) => (a.clientName ?? '') < (b.clientName ?? '') ? -1 : (a.clientName ?? '') > (b.clientName ?? '') ? 1
+      : ((a.date ?? '') < (b.date ?? '') ? 1 : (a.date ?? '') > (b.date ?? '') ? -1 : 0));
+    const blocks = new Map<string, string[]>();
+    for (const e of picked) {
+      const key = e.clientName || '(업체 미지정)';
+      const block = blocks.get(key);
+      if (block) block.push(entryLine(e)); else blocks.set(key, [entryLine(e)]);
+    }
+    entries = picked;
+    const omittedN = entriesPool.length - picked.length;
+    entriesContext = [...blocks].map(([name, lines]) => `▶ 업체: ${name} (${lines.length}건)\n${lines.join('\n')}`).join('\n')
+      + (omittedN > 0 ? `\n(★ 분량 제한으로 기준 날짜에서 먼 일정 ${omittedN}건은 싣지 못했다 — 여기에 없는 일정을 "없다"고 단정하지 말고, 업체명·날짜(기간)를 좁혀 다시 물어봐 달라고 안내한다. 신규 등록은 그대로 진행한다.)` : '');
+  };
 
   // 업체 상세(연락처·예산·계약): 언급된 업체 + 업체 정보 질문일 때만. 그 외엔 "업체 목록"(이름)만으로 충분.
   const detailClients = has(/업체|클라이언트|고객사|거래처|연락처|예산|계약|광고비|이메일|전화|담당자|보고\s*기준|정산|업종/)
@@ -549,7 +603,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const staticRules = salesRules ? `${rulesCore}\n${salesRules}` : rulesCore;
 
   // ── 가변 컨텍스트(날짜·사용자·데이터) — 캐시가 깨지는 값은 전부 여기(고정 규칙 뒤)에 둔다 ──
-  const dynamicCtx = [
+  // 섹션 텍스트 보관소 — buildCtx 를 여러 번 불러도 같은 값을 쓰고, 총량이 넘치면 가장 큰 섹션부터 줄인다.
+  const sec: Record<string, string> = {};
+  const S = (key: string, text: string) => sec[key] ?? (sec[key] = text);
+  const buildCtx = (entriesText: string) => [
     '[실행 정보]',
     `오늘 날짜: ${today}`,
     `로그인 본인(담당자 미지정 시 기본 담당자 · "나/내가"가 가리키는 사람): ${currentUser || '(알 수 없음)'}`,
@@ -564,7 +621,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     `업체 목록: ${clientNames.join(', ') || '(없음)'}`,
     '업체 상세(연락처·예산·계약 포함 · 수정/삭제 시 id 사용 · reportAnchorDate=월간 보고 기준 시작일 · 없는 필드는 미등록):',
     // 한 줄에 업체 하나(JSON Lines). 빈 필드는 빼서 보낸다.
-    detailClients.length
+    S('clients', detailClients.length
       ? detailClients.map(c => JSON.stringify(compact({
           id: c.id, name: c.name, industry: c.industry, categories: c.categories,
           reportAnchorDate: c.reportAnchorDate, status: c.status,
@@ -574,7 +631,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
           budgetItems: Array.isArray(c.budgetItems) ? c.budgetItems.map(b => compact({ product: b.product, amount: b.amount, notes: b.notes })) : [],
         }))).join('\n')
         + (detailClients.length < clients.length ? `\n(나머지 ${clients.length - detailClients.length}개 업체 상세는 생략 — 업체명을 언급하면 제공됨)` : '')
-      : omitted(clients.length),
+      : omitted(clients.length)),
     `카테고리 목록(클라이언트 업무 entries 용): ${categories.join(', ')}`,
     `내부 일정 종류(internalEvents 용 — 없으면 새로 만들어도 됨): ${internalCategories.join(', ') || '회의실, 미팅, 면접, 촬영, 휴가'}`,
     '',
@@ -586,47 +643,50 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     showLinks
       ? '  · "링크:URL"은 그 일정에 등록된 링크다.'
       : '  · "링크있음"은 링크가 등록돼 있다는 뜻이다(URL 은 생략됨). 링크 추가/수정/삭제는 그대로 처리하고, 사용자가 URL 자체를 알려 달라고 하면 "링크"라는 말을 넣어 다시 물어봐 달라고 안내한다.',
-    entriesContext || '(해당 범위에 등록된 일정 없음)',
+    entriesText || '(해당 범위에 등록된 일정 없음)',
     '',
     '현재 내부 일정(수정 시 op:"update" 에 이 id 사용):',
-    internalEventsContext || '(등록된 내부 일정 없음)',
+    S('internal', internalEventsContext || '(등록된 내부 일정 없음)'),
     '',
     '업체 가이드라인(인수인계 문서 — 가이드라인 질문의 1차 근거):',
-    guidelineContext || (handoverAll.length ? `(내용 생략 — 인수인계 문서가 등록된 업체: ${handoverAll.map(d => d.clientName).filter(Boolean).join(', ')}. 업체명을 언급하면 내용이 제공됨)` : '(등록된 인수인계 가이드라인 없음)'),
+    S('guide', guidelineContext || (handoverAll.length ? `(내용 생략 — 인수인계 문서가 등록된 업체: ${handoverAll.map(d => d.clientName).filter(Boolean).join(', ')}. 업체명을 언급하면 내용이 제공됨)` : '(등록된 인수인계 가이드라인 없음)')),
     '',
     'AI 기획 결과 요약(업체별 캠페인 방향 — 가이드라인 보조 근거):',
-    aiPlanContext || omitted(aiPlansAll.length),
+    S('plan', aiPlanContext || omitted(aiPlansAll.length)),
     '',
     '외주사 목록(서비스별 외주 추천의 근거):',
-    vendorContext || omitted(vendorsAll.length),
+    S('vendor', vendorContext || omitted(vendorsAll.length)),
     '',
     '단가표(외부 수집 — 단가/가격/견적 질문의 근거. 상품마다 최저가 + 옵션별 가격(원), [패키지] 표시):',
-    priceContext || '(이번 질문에는 단가표를 보내지 않음 — 단가/가격/견적 질문이면 제공됨. 그런 질문인데도 비어 있으면 단가표 페이지에서 새로고침 필요)',
+    S('price', priceContext || '(이번 질문에는 단가표를 보내지 않음 — 단가/가격/견적 질문이면 제공됨. 그런 질문인데도 비어 있으면 단가표 페이지에서 새로고침 필요)'),
     '',
     '아이디 목록(계정 — 조회/수정/삭제 시 위 id 사용):',
-    accountContext || omitted(accountsAll.length),
+    S('account', accountContext || omitted(accountsAll.length)),
     '',
     '홈페이지 목록(사내 사용 사이트 — 조회/수정/삭제 시 위 id 사용):',
-    siteContext || omitted(sitesAll.length),
+    S('site', siteContext || omitted(sitesAll.length)),
     '',
     '요청함(업무 요청 — "(나)"는 로그인 본인. 받은 요청=→(나), 보낸 요청=(나)→):',
-    requestContext || omitted(requestsAll.length),
+    S('request', requestContext || omitted(requestsAll.length)),
     '공지(팀/전체 — 내 대상이거나 내가 올린 것. "(나)"는 내가 올린 공지):',
-    noticeContext || omitted(noticesAll.length),
+    S('notice', noticeContext || omitted(noticesAll.length)),
     '순위 보장(캠페인별 달성/목표·상태 — 조회/수정/삭제 시 위 id 사용):',
-    rankGContext || omitted(rankGAll.length),
+    S('rankG', rankGContext || omitted(rankGAll.length)),
     '월간 보고서(업체별 초안/발행 상태 — 발행·중복 판단 근거):',
-    reportContext || omitted(reportsAll.length),
+    S('report', reportContext || omitted(reportsAll.length)),
     ...(salesEnabled ? [
       '',
       '상담 목록(영업관리 — 상담 수정/조회 시 위 id 사용):',
-      salesContext || omitted(salesAll.length),
+      S('sales', salesContext || omitted(salesAll.length)),
     ] : []),
   ].join('\n');
 
-  // 대화 맥락을 하나의 사용자 메시지(트랜스크립트)로 합쳐 전달
+  // 대화 맥락을 하나의 사용자 메시지(트랜스크립트)로 합쳐 전달.
+  //  ★ 이력은 "직전 한 번의 주고받기"(사용자 1 + 어시스턴트 1)만 싣는다 — 대화를 길게 이어 갈 필요는 없고,
+  //    "아니 그거 말고 ○○ 업체 등록해줘" 같은 바로 앞 제안에 대한 정정만 알아들으면 된다.
+  //    (오래된 턴을 계속 실으면 무관한 과거 제안에 끌려가고 입력만 커진다.)
   const transcript = [
-    ...(Array.isArray(req.history) ? req.history : []).slice(-8).map(m => `${m.role === 'user' ? '사용자' : '어시스턴트'}: ${m.text}`),
+    ...(Array.isArray(req.history) ? req.history : []).slice(-2).map(m => `${m.role === 'user' ? '사용자(직전)' : '어시스턴트(직전)'}: ${(m.text || '').slice(0, 2000)}`),
     `사용자: ${req.message}`,
   ].join('\n');
 
@@ -635,7 +695,22 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000); // 25s 안에 못 받으면 중단
   // 형식 재확인 문구 — 권한자에겐 sales 도 명시(예전엔 "entries"/"updates" 만 예시해 상담 요청이 일정 변경으로 새는 편향이 있었다).
-  const formatReminder = `출력 형식 최종 확인: 반드시 최상위 키가 "reply"(항상 포함, 사용자에게 보여줄 한국어 답변)와 "entries"/"updates"${salesEnabled ? '/"sales"' : ''} 등 액션 배열인 JSON 객체 한 개로만 응답한다. 일정 목록을 보여줄 때도 데이터를 임의 구조(schedules/date 등)로 내보내지 말고 reply 문자열 안에 정리해 담는다. ★ reply 에서 하겠다고 말한 것과 실제로 채운 배열은 반드시 일치해야 한다 — ${salesEnabled ? '"영업관리/상담으로 추가"라고 답했으면 sales 배열에 객체가 있어야 하고 updates·entries 로 대신하면 안 된다. ' : ''}바꿀 값이 하나도 없는 updates 객체(전부 null)는 만들지 않는다.`;
+  const formatReminder = `출력 형식 최종 확인: 반드시 최상위 키가 "reply"(항상 포함, 사용자에게 보여줄 한국어 답변)와 "entries"/"updates"${salesEnabled ? '/"sales"' : ''} 등 액션 배열인 JSON 객체 한 개로만 응답한다. 일정 목록을 보여줄 때도 데이터를 임의 구조(schedules/date 등)로 내보내지 말고 reply 문자열 안에 정리해 담는다. ★ reply 에서 하겠다고 말한 것과 실제로 채운 배열은 반드시 일치해야 한다 — ${salesEnabled ? '"영업관리/상담으로 추가"라고 답했으면 sales 배열에 객체가 있어야 하고 updates·entries 로 대신하면 안 된다. ' : ''}바꿀 값이 하나도 없는 updates 객체(전부 null)는 만들지 않는다. 필드 이름은 규칙의 스키마 그대로 쓴다 — entries 는 date·managerName·clientName·category·keyword·status(pending|in-progress|completed)·link, updates 는 id·clientName·keyword·matchDate + 바꿀 필드. company/client/assignee/manager/service/task 나 한글 키(업체·담당·상태 등)로 바꿔 쓰지 않는다.`;
+
+  // ── 입력 총량 예산(★ _openai.ts MAX_INPUT_CHARS) ───────────────────────────
+  // OpenAI 는 input 합계가 약 6.3만 토큰을 넘으면 오류 없이 "앞쪽부터" 버린다. 규칙이 맨 앞이라 제일 먼저 사라지고,
+  // 모델은 끝의 형식 재확인 문구만 보고 키를 지어낸다(업체? 신규 일정 · 엉뚱한 일정 변경의 원인, 2026-11-26 실측).
+  // → ① 일정 외 섹션이 너무 크면 가장 큰 것부터 줄이고 ② 남는 예산만큼만 일정을 싣는다(오늘과 가까운 날짜·언급 업체 우선).
+  const MIN_ENTRY_CHARS = 8000;
+  const overheadChars = staticRules.length + transcript.length + formatReminder.length + 2500; // 2500 = 교정 재시도 hint 여유
+  for (let i = 0; i < 12 && overheadChars + buildCtx('').length > MAX_INPUT_CHARS - MIN_ENTRY_CHARS; i++) {
+    const [bigKey, bigText] = Object.entries(sec).sort((a, b) => b[1].length - a[1].length)[0] ?? [];
+    if (!bigKey || !bigText || bigText.length < 1500) break;
+    sec[bigKey] = clipLines(bigText, Math.floor(bigText.length * 0.6));
+  }
+  buildEntriesContext(Math.max(MIN_ENTRY_CHARS, MAX_INPUT_CHARS - overheadChars - buildCtx('').length));
+  const dynamicCtx = buildCtx(entriesContext);
+  const sentChars = staticRules.length + dynamicCtx.length + transcript.length + formatReminder.length;
   // hint 가 있으면 교정 재시도(직전 출력의 오류를 맨 끝에 덧붙여 다시 요청).
   const callModel = (hint?: string): Promise<Response> => openaiFetch(env, '/v1/responses', {
       method: 'POST',
@@ -703,9 +778,9 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     const usage = (data as { usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } } })?.usage;
     console.log('[ai-assistant usage]', JSON.stringify({
       input: usage?.input_tokens, cached: usage?.input_tokens_details?.cached_tokens, output: usage?.output_tokens,
-      chars: { rules: staticRules.length, context: dynamicCtx.length, transcript: transcript.length },
+      chars: { rules: staticRules.length, context: dynamicCtx.length, transcript: transcript.length, total: sentChars, budget: MAX_INPUT_CHARS },
       sections: {
-        entries: `${entries.length}/${entriesAll.length}`, entriesChars: entriesContext.length, wantsHistory, mentioned: mentioned.length,
+        entries: `${entries.length}/${entriesPool.length}/${entriesAll.length}`, entriesChars: entriesContext.length, wantsHistory, isRegister, mentioned: mentioned.length,
         clientDetail: detailClients.length, handover: handoverDocs.length, aiPlans: aiPlans.length, vendors: vendors.length,
         accounts: accounts.length, sites: sites.length, price: priceProducts.length, sales: salesEntries.length,
         requests: requestList.length, notices: noticeList.length, rankG: rankGList.length, reports: reportList.length,
@@ -713,7 +788,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     }));
   }
 
-  if (inputWasDropped(data, staticRules.length + dynamicCtx.length + transcript.length)) {
+  if (inputWasDropped(data, sentChars)) {
     clearTimeout(timer);
     return json({ error: INPUT_DROPPED_MSG });
   }
@@ -740,9 +815,46 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       || (typeof o.link === 'string' && o.link !== 'null') // ""(링크 삭제)도 실제 변경
       || (!!o.rankByTab && typeof o.rankByTab === 'object' && Object.keys(o.rankByTab as object).length > 0);
   };
+  // ── 출력 검증(규칙을 못 본 모델이 지어낸 구조를 화면까지 내보내지 않는다) ──
+  //  실제 사례: 입력이 잘려 규칙이 사라지자 entries 를 {company, assignee, service, 상태:"작업완료"} 같은 임의 키로 냈고,
+  //  화면엔 "업체?" 신규 일정 18건(적용 0건) / 대상 없는 "일정 변경"(미리보기가 엉뚱한 첫 일정을 표시)으로 떴다.
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const STATUS_ALIAS: Record<string, string> = {
+    pending: 'pending', 'in-progress': 'in-progress', completed: 'completed',
+    대기: 'pending', 대기중: 'pending', 예정: 'pending', 진행: 'in-progress', 진행중: 'in-progress', 작업중: 'in-progress',
+    완료: 'completed', 작업완료: 'completed', 완료됨: 'completed', done: 'completed', complete: 'completed',
+  };
+  const normStatus = (v: unknown) => STATUS_ALIAS[str(v).replace(/\s+/g, '').toLowerCase()];
+  const knownEntryIds = new Set(entriesAll.map(e => e.id));
+  const clientOfId = new Map(entriesAll.map(e => [e.id, e.clientName ?? '']));
+  const looseSame = (a: string, b: string) => !!a && !!b && (a === b || a.includes(b) || b.includes(a));
+  const dropped = { entriesNoClient: 0, entriesNoDate: 0, updatesNoTarget: 0 };
+  const cleanEntries = (list: unknown[]) => list.flatMap(x => {
+    if (!x || typeof x !== 'object') return [];
+    const e = { ...(x as Parsed) };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(str(e.date))) { dropped.entriesNoDate++; return []; }
+    if (!str(e.clientName)) { dropped.entriesNoClient++; return []; } // 업체 없는 일정은 적용 단계에서 어차피 버려진다
+    const st = normStatus(e.status);
+    if (st) e.status = st; else delete e.status;                      // 모르는 상태값은 기본(pending)으로
+    return [e];
+  });
+  const cleanUpdates = (list: unknown[]) => list.flatMap(x => {
+    if (!x || typeof x !== 'object') return [];
+    const u = { ...(x as Parsed) };
+    if (u.status != null && u.status !== 'null') { const st = normStatus(u.status); if (st) u.status = st; else u.status = null; }
+    if (!isRealUpdate(u)) return [];
+    const id = str(u.id), cname = str(u.clientName), kw = str(u.keyword);
+    const md = /^\d{4}-\d{2}-\d{2}$/.test(str(u.matchDate)) ? str(u.matchDate) : '';
+    let idOk = !!id && knownEntryIds.has(id);
+    // id 가 가리키는 일정의 업체와 모델이 적은 업체가 전혀 다르면(id 를 잘못 베낌) id 를 버리고 보조 필드로 찾게 한다.
+    if (idOk && cname && !looseSame(clientOfId.get(id) ?? '', cname)) { u.id = ''; idOk = false; }
+    // 대상을 가리키는 단서가 하나도 없으면 무엇을 바꿀지 알 수 없다 → 버린다.
+    if (!idOk && !cname && !kw && !md) { dropped.updatesNoTarget++; return []; }
+    return [u];
+  });
   const actionsOf = (o: Parsed) => ({
-    entries: arr(o.entries),
-    updates: arr(o.updates).filter(isRealUpdate),
+    entries: cleanEntries(arr(o.entries)),
+    updates: cleanUpdates(arr(o.updates)),
     clients: arr(o.clients),
     handovers: arr(o.handovers),
     vendors: arr(o.vendors),
@@ -757,7 +869,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     accountLookups: arr(o.accountLookups).filter(x => typeof x === 'string').slice(0, 30),
     siteLookups: arr(o.siteLookups).filter(x => typeof x === 'string').slice(0, 30),
     keywords: arr(o.keywords).filter(k => typeof k === 'string' && k.trim()).slice(0, 20),
-    deletes: arr(o.deletes).filter(d => typeof d === 'string' && d.trim()).slice(0, 50),
+    // 삭제는 이번에 받은 일정 목록에 실제로 있는 id 만(지어낸 id 로 "이미 없는 일정" 삭제 제안이 뜨지 않게).
+    deletes: arr(o.deletes).filter(d => typeof d === 'string' && knownEntryIds.has(d)).slice(0, 50),
   });
 
   let parsed = parseOut(data);
@@ -788,7 +901,21 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
   clearTimeout(timer);
 
   let replyText = replyOf(parsed);
+  dropped.entriesNoClient = dropped.entriesNoDate = dropped.updatesNoTarget = 0; // 위 검사용 호출분은 버리고 최종 결과만 센다
   const actions = actionsOf(parsed);
+  const droppedTotal = dropped.entriesNoClient + dropped.entriesNoDate + dropped.updatesNoTarget;
+  if (droppedTotal > 0) {
+    console.log('[ai-assistant dropped-actions]', JSON.stringify(dropped));
+    const why = [
+      dropped.entriesNoClient ? `업체명을 확인하지 못한 일정 ${dropped.entriesNoClient}건` : '',
+      dropped.entriesNoDate ? `날짜를 확인하지 못한 일정 ${dropped.entriesNoDate}건` : '',
+      dropped.updatesNoTarget ? `어느 일정을 바꿀지 특정하지 못한 변경 ${dropped.updatesNoTarget}건` : '',
+    ].filter(Boolean).join(', ');
+    const warn = `⚠️ ${why}은 제안에서 제외했어요. 업체명·날짜를 포함해 "○○ 업체 … 등록해줘"처럼 다시 말씀해 주세요.`;
+    // 제안이 전부 걸러졌으면 "등록하겠습니다" 같은 원래 답은 사실이 아니므로 안내문으로 바꾼다.
+    const anyLeft = Object.values(actions).some(a => a.length > 0);
+    replyText = anyLeft && replyText ? `${replyText}\n\n${warn}` : warn;
+  }
   // 그래도 답 문장이 없으면: 액션(제안)이라도 있으면 기본 안내문, 완전 형식 이탈이면 재시도 안내 오류.
   const hasActions = Object.values(actions).some(a => a.length > 0);
   if (!replyText && !hasActions) {

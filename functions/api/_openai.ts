@@ -40,11 +40,37 @@ export function toInputMessages(role: 'developer' | 'user', text: string): { rol
   return chunkText(text).map(t => ({ role, content: [{ type: 'input_text', text: t }] }));
 }
 
-// 입력 소실 감지: 응답 usage.input_tokens 가 보낸 문자수 대비 터무니없이 작으면(한국어 ≈ 0.5~0.6
-// 토큰/자, chars/20 은 정상에선 절대 안 걸리는 보수 기준) 메시지가 버려진 것이다.
+// ★★ 총량 한도(2026-11-26 실측으로 정정): 위 "메시지 1개 한도"는 오진이었다. 실제로는 input **합계**가
+//   약 6.3만 토큰을 넘으면 OpenAI 가 오류 없이 **앞쪽 메시지부터** 버리고 마지막 약 6.3만 토큰만 모델에 준다
+//   (6만 자×2=62.7K 전부 전달, ×3=62.7K 에서 멈추고 첫 메시지 소실, 3만 자×8=앞 4개 소실).
+//   메시지를 쪼개는 것으로는 막을 수 없고, 맨 앞에 둔 규칙·스키마가 제일 먼저 사라져 모델이 키를 지어낸다.
+//   → 각 함수는 "규칙+컨텍스트+대화" 합계를 MAX_INPUT_CHARS 아래로 스스로 줄여서 보내야 한다.
+//   이 프로젝트 데이터(한국어+id+URL+순위)는 실측 0.5~0.6 토큰/자 → 7.5만 자 ≈ 3.8만~4.5만 토큰(한도 대비 30% 안팎 여유).
+export const MAX_INPUT_CHARS = 75000;
+
+// 줄 경계로 maxChars 이하가 되게 자르고, 잘렸으면 몇 줄이 빠졌는지 끝에 적는다(모델이 "없다"고 단정하지 않게).
+export function clipLines(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const lines = text.split('\n');
+  const kept: string[] = [];
+  let len = 0;
+  for (const l of lines) {
+    if (len + l.length + 1 > maxChars) break;
+    kept.push(l); len += l.length + 1;
+  }
+  if (kept.length === 0) return `${text.slice(0, Math.max(0, maxChars))}\n(이하 생략 — 분량 제한)`;
+  return `${kept.join('\n')}\n(이하 ${lines.length - kept.length}줄 생략 — 분량 제한. 필요하면 범위를 좁혀 다시 요청)`;
+}
+
+// 입력 소실 감지(사후 안전망 — 1차 방어는 보내기 전 MAX_INPUT_CHARS 예산 관리).
+//  ① 통째 소실: input_tokens 가 보낸 문자수 대비 터무니없이 작다(chars/20 미만).
+//  ② 앞부분 잘림: 보낸 분량이 한도를 넘는데(약 0.5 토큰/자 기준) input_tokens 가 한도 근처에서 멈췄다.
+//     잘린 뒤 토큰은 5.5만~6.3만으로 "그럴듯한" 값이라 ①만으로는 절대 안 잡힌다.
 export function inputWasDropped(data: unknown, sentChars: number): boolean {
   const tokens = (data as { usage?: { input_tokens?: number } })?.usage?.input_tokens;
-  return typeof tokens === 'number' && tokens < sentChars / 20;
+  if (typeof tokens !== 'number') return false;
+  if (tokens < sentChars / 20) return true;
+  return sentChars > 110000 && tokens < 66000 && tokens < sentChars * 0.42;
 }
 
 // 소실 시 사용자에게 돌려줄 공통 안내문.

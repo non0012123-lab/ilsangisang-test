@@ -56,6 +56,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     return json({ error: '잘못된 요청 본문입니다.' }, 400);
   }
   if (!req.text || !req.text.trim()) return json({ error: '입력 문장이 비어 있습니다.' }, 400);
+  // 입력 총량 한도(_openai.ts MAX_INPUT_CHARS) — 너무 긴 붙여넣기는 규칙이 잘려 나가 엉뚱한 결과가 된다.
+  if (req.text.length > 20000) return json({ error: '입력이 너무 깁니다(2만 자 초과). 나눠서 입력해 주세요.' }, 400);
 
   const today = req.today || new Date().toISOString().slice(0, 10);
   const managers = req.managers ?? [];
